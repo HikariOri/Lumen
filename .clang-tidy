@@ -1,0 +1,34 @@
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  cppcoreguidelines-*,
+  readability-*,
+  performance-for-range-copy,
+  -modernize-use-trailing-return-type,
+  -bugprone-exception-escape,
+  -readability-identifier-length,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers
+
+CheckOptions:
+  # 允许参数名最短为 1 个字符
+  - key: readability-identifier-length.ParameterThreshold
+    value: '1'
+  - key: readability-identifier-length.ParameterMinimumLength
+    value: '1'
+
+  # 可选：局部变量最小长度限制（你也可以设置为 0）
+  - key: readability-identifier-length.VariableThreshold
+    value: '2'
+  - key: readability-identifier-length.VariableMinimumLength
+    value: '2'
+
+  # 启用 clang-format 样式一致性
+  - key: FormatStyle
+    value: file
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+User: ''

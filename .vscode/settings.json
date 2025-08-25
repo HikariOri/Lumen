@@ -1,0 +1,16 @@
+{
+    "clangd.arguments": [
+        "--clang-tidy",
+        "--completion-style=detailed",
+        "--header-insertion=iwyu",
+        "--pch-storage=memory"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "git.ignoreLimitWarning": true,
+    "cmake.generator": "Ninja",
+    "cmake.configureSettings": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+    },
+    "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}/${buildType}",
+    "cmake.copyCompileCommands": "${workspaceFolder}/build/compile_commands.json",
+}

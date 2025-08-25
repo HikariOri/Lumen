@@ -1,0 +1,7 @@
+add_executable(003_physical_device_selection ./src/main.cpp)
+target_include_directories(003_physical_device_selection PUBLIC include)
+target_link_libraries(003_physical_device_selection PRIVATE glfw)
+target_link_libraries(003_physical_device_selection PRIVATE glm::glm)
+target_link_libraries(003_physical_device_selection PRIVATE Vulkan::Vulkan)
+
+

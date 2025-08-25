@@ -1,0 +1,6 @@
+add_subdirectory(000_base_code)
+add_subdirectory(001_instance_creation)
+add_subdirectory(002_validation_layers)
+add_subdirectory(003_physical_device_selection)
+add_subdirectory(004_logical_device)
+add_subdirectory(005_window_surface)
