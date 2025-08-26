@@ -1,7 +1,6 @@
-add_executable(003_physical_device_selection ./src/main.cpp)
-target_include_directories(003_physical_device_selection PUBLIC include)
-target_link_libraries(003_physical_device_selection PRIVATE glfw)
-target_link_libraries(003_physical_device_selection PRIVATE glm::glm)
-target_link_libraries(003_physical_device_selection PRIVATE Vulkan::Vulkan)
-
-
+set(cur_target 003_physical_device_selection)
+add_executable(${cur_target} ./src/main.cpp)
+target_include_directories(${cur_target} PUBLIC include)
+target_link_libraries(${cur_target} PRIVATE glfw)
+target_link_libraries(${cur_target} PRIVATE glm::glm)
+target_link_libraries(${cur_target} PRIVATE Vulkan::Vulkan)

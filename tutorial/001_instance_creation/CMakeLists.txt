@@ -1,7 +1,6 @@
-add_executable(001_instance_creation ./src/main.cpp)
-target_include_directories(001_instance_creation PUBLIC include)
-target_link_libraries(001_instance_creation PRIVATE glfw)
-target_link_libraries(001_instance_creation PRIVATE glm::glm)
-target_link_libraries(001_instance_creation PRIVATE Vulkan::Vulkan)
-
-
+set(cur_target 001_instance_creation)
+add_executable(${cur_target} ./src/main.cpp)
+target_include_directories(${cur_target} PUBLIC include)
+target_link_libraries(${cur_target} PRIVATE glfw)
+target_link_libraries(${cur_target} PRIVATE glm::glm)
+target_link_libraries(${cur_target} PRIVATE Vulkan::Vulkan)

@@ -1,4 +1,4 @@
-set(cur_target 002_validation_layers)
+set(cur_target 006_swap_chain_creation)
 add_executable(${cur_target} ./src/main.cpp)
 target_include_directories(${cur_target} PUBLIC include)
 target_link_libraries(${cur_target} PRIVATE glfw)

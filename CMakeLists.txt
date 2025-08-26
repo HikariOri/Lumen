@@ -28,8 +28,7 @@ else ()
     add_compile_options(-Wall -Wextra -Werror=return-type)
 endif ()
 
-# find_program(GLSLC_PROGRAM glslc REQUIRED)
-# execute_process(COMMAND ${GLSLC_PROGRAM} ${CMAKE_SOURCE_DIR}/shader/shader)
+find_program(SLANG_COMPILER slangc REQUIRED)
 
 include(CTest)
 enable_testing()
@@ -40,3 +39,4 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(tutorial)
+add_subdirectory(shaders)

@@ -1,7 +1,6 @@
-add_executable(000_base_code ./src/main.cpp)
-target_include_directories(000_base_code PUBLIC include)
-target_link_libraries(000_base_code PRIVATE glfw)
-target_link_libraries(000_base_code PRIVATE glm::glm)
-target_link_libraries(000_base_code PRIVATE Vulkan::Vulkan)
-
-
+set(cur_target 000_base_code)
+add_executable(${cur_target} ./src/main.cpp)
+target_include_directories(${cur_target} PUBLIC include)
+target_link_libraries(${cur_target} PRIVATE glfw)
+target_link_libraries(${cur_target} PRIVATE glm::glm)
+target_link_libraries(${cur_target} PRIVATE Vulkan::Vulkan)

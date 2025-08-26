@@ -11,6 +11,15 @@
     {
       "name": "glm",
       "version>=": "1.0.1#3"
+    },
+    {
+      "name": "imgui",
+      "version>=": "1.91.9",
+      "features": ["docking-experimental", "vulkan-binding", "glfw-binding"]
+    },
+    {
+      "name": "imguizmo",
+      "version>=": "2024-05-29#1"
     }
   ]
 }

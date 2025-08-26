@@ -1,7 +1,6 @@
-add_executable(004_logical_device ./src/main.cpp)
-target_include_directories(004_logical_device PUBLIC include)
-target_link_libraries(004_logical_device PRIVATE glfw)
-target_link_libraries(004_logical_device PRIVATE glm::glm)
-target_link_libraries(004_logical_device PRIVATE Vulkan::Vulkan)
-
-
+set(cur_target 004_logical_device)
+add_executable(${cur_target} ./src/main.cpp)
+target_include_directories(${cur_target} PUBLIC include)
+target_link_libraries(${cur_target} PRIVATE glfw)
+target_link_libraries(${cur_target} PRIVATE glm::glm)
+target_link_libraries(${cur_target} PRIVATE Vulkan::Vulkan)

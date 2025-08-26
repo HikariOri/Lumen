@@ -16,7 +16,7 @@ struct VertexOutput {
 };
 
 [shader("vertex")]
-VertexOutput vertMain(uint vid : SV_VertexID) {
+VertexOutput vertMain(uint vid: SV_VertexID) {
     VertexOutput output;
     output.sv_position = float4(positions[vid], 0.0, 1.0);
     output.color = colors[vid];
@@ -25,7 +25,6 @@ VertexOutput vertMain(uint vid : SV_VertexID) {
 
 [shader("fragment")]
 float4 fragMain(VertexOutput inVert) : SV_Target {
-    float3 color = inVert.color;
-    return float4(color, 1.0);
+    return float4(inVert.color, 1.0);
 }
 

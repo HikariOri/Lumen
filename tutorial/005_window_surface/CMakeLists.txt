@@ -1,7 +1,6 @@
-add_executable(005_window_surface ./src/main.cpp)
-target_include_directories(005_window_surface PUBLIC include)
-target_link_libraries(005_window_surface PRIVATE glfw)
-target_link_libraries(005_window_surface PRIVATE glm::glm)
-target_link_libraries(005_window_surface PRIVATE Vulkan::Vulkan)
-
-
+set(cur_target 005_window_surface)
+add_executable(${cur_target} ./src/main.cpp)
+target_include_directories(${cur_target} PUBLIC include)
+target_link_libraries(${cur_target} PRIVATE glfw)
+target_link_libraries(${cur_target} PRIVATE glm::glm)
+target_link_libraries(${cur_target} PRIVATE Vulkan::Vulkan)

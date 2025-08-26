@@ -7,7 +7,7 @@
 #include <vector>
 
 // #define VULKAN_HPP_NO_EXCEPTIONS
-#define VULKAN_HPP_NO_CONSTRUCTORS
+// #define VULKAN_HPP_NO_CONSTRUCTORS
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
@@ -46,57 +46,109 @@ private:
     void initVulkan() {
         createInstance();
         setupDebugMessenger();
+        createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
     }
 
+    void createSurface() {
+        VkSurfaceKHR _surface;
+        if (glfwCreateWindowSurface(*instance, window, nullptr, &_surface)) {
+            throw std::runtime_error { "failed to create window surface!" };
+        }
+        surface = vk::raii::SurfaceKHR(instance, _surface);
+    };
+
     void createLogicalDevice() {
+        // find the index of the first queue family that supports graphics
+        // 找到第一个支持图形的 queue
         std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
             physicalDevice.getQueueFamilyProperties();
 
         // get the first index into queueFamilyProperties which supports
         // graphics
+        // 获取第一个支持图像的 queueFamilyProperties 的 index
         auto graphicsQueueFamilyProperty =
             std::ranges::find_if(queueFamilyProperties, [](auto const &qfp) {
                 return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) !=
                        static_cast<vk::QueueFlags>(0);
             });
-        assert(graphicsQueueFamilyProperty != queueFamilyProperties.end() &&
-               "No graphics queue family found!");
 
+        // 计算索引
         auto graphicsIndex = static_cast<uint32_t>(std::distance(
             queueFamilyProperties.begin(), graphicsQueueFamilyProperty));
 
-        // query for Vulkan 1.3 features
-        vk::StructureChain<vk::PhysicalDeviceFeatures2,
-                           vk::PhysicalDeviceVulkan13Features,
-                           vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>
-            featureChain = {
-                {}, // vk::PhysicalDeviceFeatures2
-                { .dynamicRendering =
-                      true }, // vk::PhysicalDeviceVulkan13Features
-                { .extendedDynamicState =
-                      true } // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            };
+        // determine a queueFamilyIndex that supports present
+        // first check if the graphicsIndex is good enough
+        // 挑一个支持 present 的 queueFamilyIndex，先判断 graphicsIndex 支不支持
+        auto presentIndex =
+            physicalDevice.getSurfaceSupportKHR(graphicsIndex, *surface)
+                ? graphicsIndex
+                : static_cast<uint32_t>(queueFamilyProperties.size());
+        // 如果 graphicsIndex 不支持
+        if (presentIndex == queueFamilyProperties.size()) {
+            // the graphicsIndex doesn't support present -> look for another
+            // family index that supports both graphics and present
+            // 找一个同时支持图像和 prsent 的队列蔟
+            for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+                if ((queueFamilyProperties[i].queueFlags &
+                     vk::QueueFlagBits::eGraphics) &&
+                    physicalDevice.getSurfaceSupportKHR(
+                        static_cast<uint32_t>(i), *surface)) {
+                    graphicsIndex = static_cast<uint32_t>(i);
+                    presentIndex = graphicsIndex;
+                    break;
+                }
+            }
+            if (presentIndex == queueFamilyProperties.size()) {
+                // there's nothing like a single family index that supports both
+                // graphics and present -> look for another family index that
+                // supports present
+                // 没找到（同时支持图像和 perset 的）
+                /// 找一个只支持 preset 的
+                for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+                    if (physicalDevice.getSurfaceSupportKHR(
+                            static_cast<uint32_t>(i), *surface)) {
+                        presentIndex = static_cast<uint32_t>(i);
+                        break;
+                    }
+                }
+            }
+        }
+        // 如果没有找到支持图形或者 preset 的队列族，直接 throw
+        if ((graphicsIndex == queueFamilyProperties.size()) ||
+            (presentIndex == queueFamilyProperties.size())) {
+            throw std::runtime_error { "Could not find a queue for graphics or "
+                                       "present -> terminating" };
+        }
 
+        // query for Vulkan 1.3 features
+        // 查询 Vulkan 1.3 的特性
+        auto features = physicalDevice.getFeatures2();
+        vk::PhysicalDeviceVulkan13Features vulkan13Features;
+        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            extendedDynamicStateFeatures;
+        vulkan13Features.setDynamicRendering(vk::True);
+        extendedDynamicStateFeatures.setExtendedDynamicState(vk::True);
+        vulkan13Features.setPNext(&extendedDynamicStateFeatures);
+        features.setPNext(&vulkan13Features);
         // create a Device
+        // 创建逻辑设备
         float queuePriority = 0.0F;
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo { .queueFamilyIndex =
-                                                              graphicsIndex,
-                                                          .queueCount = 1,
-                                                          .pQueuePriorities =
-                                                              &queuePriority };
-        vk::DeviceCreateInfo deviceCreateInfo {
-            .pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
-            .queueCreateInfoCount = 1,
-            .pQueueCreateInfos = &deviceQueueCreateInfo,
-            .enabledExtensionCount =
-                static_cast<uint32_t>(requiredDeviceExtension.size()),
-            .ppEnabledExtensionNames = requiredDeviceExtension.data()
-        };
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo;
+        deviceQueueCreateInfo.setQueueFamilyIndex(graphicsIndex)
+            .setQueueCount(1)
+            .setPQueuePriorities(&queuePriority);
+        vk::DeviceCreateInfo deviceCreateInfo;
+        deviceCreateInfo.setPNext(&features)
+            .setQueueCreateInfoCount(1)
+            .setPQueueCreateInfos(&deviceQueueCreateInfo)
+            .setEnabledExtensionCount(requiredDeviceExtension.size())
+            .setPpEnabledExtensionNames(requiredDeviceExtension.data());
 
         device = vk::raii::Device(physicalDevice, deviceCreateInfo);
         graphicsQueue = vk::raii::Queue(device, graphicsIndex, 0);
+        presentQueue = vk::raii::Queue(device, presentIndex, 0);
     }
 
     void pickPhysicalDevice() {
@@ -168,11 +220,10 @@ private:
             vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
             vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation);
 
-        vk::DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT {
-            .messageSeverity = severityFlags,
-            .messageType = messageTypeFlags,
-            .pfnUserCallback = &debugCallback,
-        };
+        vk::DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT;
+        debugUtilsMessengerCreateInfoEXT.setMessageSeverity(severityFlags)
+            .setMessageType(messageTypeFlags)
+            .setPfnUserCallback(&debugCallback);
 
         debugMessenger = instance.createDebugUtilsMessengerEXT(
             debugUtilsMessengerCreateInfoEXT);
@@ -284,6 +335,9 @@ private:
     vk::raii::Device device = nullptr;
 
     vk::raii::Queue graphicsQueue = nullptr;
+    vk::raii::Queue presentQueue = nullptr;
+
+    vk::raii::SurfaceKHR surface = nullptr;
 
     std::vector<const char *> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName, vk::KHRSpirv14ExtensionName,
