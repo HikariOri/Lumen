@@ -59,6 +59,10 @@ private:
     vk::raii::CommandPool commandPool = nullptr;
     vk::raii::CommandBuffer commandBuffer = nullptr;
 
+    vk::raii::Semaphore presentCompleteSemaphore = nullptr;
+    vk::raii::Semaphore renderFinishedSemaphore = nullptr;
+    vk::raii::Fence drawFence = nullptr;
+
     std::vector<const char *> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName, vk::KHRSpirv14ExtensionName,
         vk::KHRSynchronization2ExtensionName,
@@ -85,11 +89,57 @@ private:
         createGraphicsPipeline();
         createCommandPool();
         createCommandBuffer();
+        createSyncObjects();
     }
 
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            drawFrame();
+        }
+        device.waitIdle();
+    }
+
+    void drawFrame() {
+        queue.waitIdle();
+
+        auto [result, imageIndex] = swapChain.acquireNextImage(
+            UINT64_MAX, *presentCompleteSemaphore, nullptr);
+        recordCommandBuffer(imageIndex);
+
+        device.resetFences(*drawFence);
+
+        vk::PipelineStageFlags waitDestinationStageMask(
+            vk::PipelineStageFlagBits::eColorAttachmentOutput);
+        vk::SubmitInfo submitInfo;
+        submitInfo.setWaitSemaphoreCount(1)
+            .setPWaitSemaphores(&*presentCompleteSemaphore)
+            .setPWaitDstStageMask(&waitDestinationStageMask)
+            .setCommandBufferCount(1)
+            .setPCommandBuffers(&*commandBuffer)
+            .setSignalSemaphoreCount(1)
+            .setPSignalSemaphores(&*renderFinishedSemaphore);
+
+        queue.submit(submitInfo, *drawFence);
+        while (vk::Result::eTimeout ==
+               device.waitForFences(*drawFence, vk::True, UINT64_MAX)) {
+        }
+
+        vk::PresentInfoKHR presentInfoKHR;
+        presentInfoKHR.setWaitSemaphoreCount(1)
+            .setPWaitSemaphores(&*renderFinishedSemaphore)
+            .setSwapchainCount(1)
+            .setPSwapchains(&*swapChain)
+            .setPImageIndices(&imageIndex);
+
+        result = queue.presentKHR(presentInfoKHR);
+        switch (result) {
+        case vk::Result::eSuccess: break;
+        case vk::Result::eSuboptimalKHR:
+            std::cout << "vk::Queue::presentKHR returned "
+                         "vk::Result::eSuboptimalKHR !\n";
+            break;
+        default: break; // an unexpected result is returned!
         }
     }
 
@@ -448,6 +498,17 @@ private:
             std::move(vk::raii::CommandBuffers(device, allocInfo).front());
     }
 
+    void createSyncObjects() {
+        presentCompleteSemaphore =
+            vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
+        renderFinishedSemaphore =
+            vk::raii::Semaphore(device, vk::SemaphoreCreateInfo());
+
+        vk::FenceCreateInfo fenceCreateInfo;
+        fenceCreateInfo.setFlags(vk::FenceCreateFlagBits::eSignaled);
+        drawFence = vk::raii::Fence(device, fenceCreateInfo);
+    }
+
     void recordCommandBuffer(uint32_t imageIndex) {
         commandBuffer.begin({});
         // Before starting rendering, transition the swapchain image to
@@ -462,7 +523,7 @@ private:
             vk::PipelineStageFlagBits2::eColorAttachmentOutput // dstStage
         );
 
-        vk::ClearValue clearColor = vk::ClearColorValue(1.0F, 0.0F, 0.0F, 1.0F);
+        vk::ClearValue clearColor = vk::ClearColorValue(0.0F, 0.0F, 0.0F, 1.0F);
         vk::RenderingAttachmentInfo attachmentInfo;
         attachmentInfo.setImageView(swapChainImageViews[imageIndex])
             .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
