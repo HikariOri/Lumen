@@ -12,6 +12,7 @@ include(cmake/FindVlukan.cmake)
 include(cmake/FindSpdlog.cmake)
 include(cmake/FindGLFW.cmake)
 include(cmake/FindGLM.cmake) 
+include(cmake/FindSTB.cmake) 
 include(cmake/utils.cmake) 
 
 # set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-p=${CMAKE_BINARY_DIR};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
