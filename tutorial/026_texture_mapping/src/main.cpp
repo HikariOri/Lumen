@@ -157,7 +157,6 @@ private:
         createDescriptorSetLayout();
         createGraphicsPipeline();
         createCommandPool();
-        createTextureImage();
         createVertexBuffer();
         createIndexBuffer();
         createUniformBuffers();
@@ -558,7 +557,7 @@ private:
         int texWidth {};
         int texHeight {};
         int texChannels {};
-        stbi_uc *pixels = stbi_load("./assets/textures/texture.jpg", &texWidth,
+        stbi_uc *pixels = stbi_load("textures/texture.jpg", &texWidth,
                                     &texHeight, &texChannels, STBI_rgb_alpha);
 
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
