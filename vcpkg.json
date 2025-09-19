@@ -24,6 +24,24 @@
     {
       "name": "stb",
       "version>=": "2024-07-29#1"
+    },
+    {
+      "name": "shader-slang",
+      "version>=": "2025.14.3"
+    },
+    {
+      "name": "sdl3",
+      "version>=": "3.2.22",
+      "features": ["vulkan"]
+    },
+    {
+      "name": "sdl3-image",
+      "version>=": "3.2.4",
+      "features": ["jpeg", "png", "tiff", "webp"]
+    },
+    {
+      "name": "flecs",
+      "version>=": "4.1.1"
     }
   ]
 }

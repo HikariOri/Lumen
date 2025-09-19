@@ -19,9 +19,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #define STB_IMAGE_IMPLEMENTATION
-#include <slang-com-helper.h>
-#include <slang-com-ptr.h>
-#include <slang.h>
 #include <stb_image.h>
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>

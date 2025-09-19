@@ -1,10 +1,9 @@
-set(CUR_TARGET 024_texture_image)
+set(CUR_TARGET 025_sampler)
 add_executable(${CUR_TARGET} ./src/main.cpp)
 target_include_directories(${CUR_TARGET} PUBLIC include)
 target_link_libraries(${CUR_TARGET} PRIVATE glfw)
 target_link_libraries(${CUR_TARGET} PRIVATE glm::glm)
 target_link_libraries(${CUR_TARGET} PRIVATE Vulkan::Vulkan)
-target_link_libraries(${CUR_TARGET} PRIVATE slang::slang)
 target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
 
 add_custom_command(

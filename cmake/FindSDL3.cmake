@@ -1,0 +1,1 @@
+find_package(SDL3 CONFIG REQUIRED)

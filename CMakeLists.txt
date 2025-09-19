@@ -7,12 +7,15 @@ project(
     DESCRIPTION "Learn Vulkan"
 )
 
-# include(cmake/FindSDL2.cmake)
 include(cmake/FindVlukan.cmake)
 include(cmake/FindSpdlog.cmake)
 include(cmake/FindGLFW.cmake)
 include(cmake/FindGLM.cmake) 
 include(cmake/FindSTB.cmake) 
+include(cmake/FindSDL3.cmake) 
+include(cmake/FindSDL3Image.cmake) 
+include(cmake/FindSlang.cmake) 
+include(cmake/FindFlecs.cmake) 
 include(cmake/utils.cmake) 
 
 # set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-p=${CMAKE_BINARY_DIR};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
@@ -41,3 +44,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(tutorial)
 add_subdirectory(shaders)
+add_subdirectory(engine)
