@@ -66,7 +66,7 @@ struct Material {
     // 计算 shader 用的 F0（在金属 vs 非金属情况不同）
     glm::vec3 getF0() const {
         // 通常非金属的 F0 是一个常数，比如 0.04（≈ 4% 反射率）
-        const glm::vec3 dielectricF0 = glm::vec3(0.04f);
+        const glm::vec3 dielectricF0 = glm::vec3(0.04F);
         if (metallic >= 1.0f) {
             // 如果完全是金属，那么 baseColor 就代表反射色
             return glm::vec3(baseColor);
