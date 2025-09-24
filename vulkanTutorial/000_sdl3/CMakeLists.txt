@@ -1,0 +1,8 @@
+set(CUR_TARGET 000_sdl3)
+add_executable(${CUR_TARGET} ./src/main.cpp)
+target_include_directories(${CUR_TARGET} PUBLIC include)
+target_link_libraries(${CUR_TARGET} PRIVATE SDL3::SDL3)
+target_link_libraries(${CUR_TARGET} PRIVATE glm::glm)
+target_link_libraries(${CUR_TARGET} PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(${CUR_TARGET} PRIVATE slang::slang)
+target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
