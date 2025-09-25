@@ -1,15 +1,22 @@
-// main.cpp (概念性示例)
+#include <iostream>
+#include <vector>
+
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_vulkan.h"
+#include "imgui_internal.h"
+
+#include "ImGuizmo.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-#include <iostream>
-#include <vector>
-#include <vulkan/vulkan.hpp>      // Vulkan-Hpp types
-#include <vulkan/vulkan_raii.hpp> // Vulkan-Hpp RAII
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 
 int main() {
     // 1) SDL init + window（确保使用 SDL_WINDOW_VULKAN 创建窗口）
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
         return -1;
     }

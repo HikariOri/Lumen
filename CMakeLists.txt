@@ -20,7 +20,6 @@ include(cmake/FindFlecs.cmake)
 include(cmake/FindVKBootstrap.cmake) 
 include(cmake/FindFlecsTinygltf.cmake) 
 include(cmake/FindFlecsTinyobjloader.cmake) 
-include(cmake/FindImguizmo.cmake) 
 include(cmake/FindImgui.cmake) 
 include(cmake/utils.cmake) 
 

@@ -1,3 +1,2 @@
-add_subdirectory(clear)
-add_subdirectory(primitives)
+add_subdirectory(000_sdl3)
 
