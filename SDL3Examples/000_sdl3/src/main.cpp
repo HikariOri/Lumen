@@ -8,6 +8,8 @@
 
 #include "ImGuizmo.h"
 
+#include "imgui-node-editor/imgui_node_editor.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 

@@ -27,6 +27,10 @@
       "version>=": "2024-05-29#1"
     },
     {
+      "name": "imgui-node-editor",
+      "version>=": "0.9.3#2"
+    },
+    {
       "name": "stb",
       "version>=": "2024-07-29#1"
     },
