@@ -11,6 +11,8 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include <SDL3_image/SDL_image.h>
+
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
@@ -22,6 +24,13 @@ int main() {
     }
     SDL_Window *window =
         SDL_CreateWindow("SDL3 Vulkan RAII", 800, 600, SDL_WINDOW_VULKAN);
+
+    // 加载 bmp 作为图标
+    SDL_Surface *icon = IMG_Load("./assets/icons/PK.png");
+    if (icon) {
+        SDL_SetWindowIcon(window, icon);
+        SDL_DestroySurface(icon);
+    }
 
     // 2) 获取 SDL 要求的 Instance 扩展名
     Uint32 extCount = 0;
