@@ -9,6 +9,8 @@ target_link_libraries(${CUR_TARGET} PRIVATE slang::slang)
 target_link_libraries(${CUR_TARGET} PRIVATE imgui::imgui)
 target_link_libraries(${CUR_TARGET} PRIVATE imguizmo::imguizmo)
 target_link_libraries(${CUR_TARGET}  PRIVATE unofficial::imgui-node-editor::imgui-node-editor)
+target_link_libraries(${CUR_TARGET} PRIVATE ${BULLET_LIBRARIES})
+target_link_libraries(${CUR_TARGET} PRIVATE BulletSoftBody)
 target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
 
 # Copy assets files after build.

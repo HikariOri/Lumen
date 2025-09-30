@@ -1,3 +1,4 @@
+#include <BulletDynamics/Dynamics/btRigidBody.h>
 #include <iostream>
 #include <vector>
 
@@ -17,6 +18,9 @@
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
+
+#include <btBulletCollisionCommon.h>
+#include <btBulletDynamicsCommon.h>
 
 int main() {
     // 1) SDL init + window（确保使用 SDL_WINDOW_VULKAN 创建窗口）

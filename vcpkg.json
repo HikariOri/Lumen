@@ -78,6 +78,16 @@
     {
       "name": "vulkan-memory-allocator",
       "version>=": "3.3.0"
+    },
+    {
+      "name": "bullet3",
+      "version>=": "3.25#3",
+      "features": [
+        "double-precision",
+        "extras",
+        "multithreading",
+        "opencl"
+      ]
     }
   ]
 }

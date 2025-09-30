@@ -20,6 +20,7 @@ include(cmake/FindVKBootstrap.cmake)
 include(cmake/FindFlecsTinygltf.cmake) 
 include(cmake/FindTinyobjloader.cmake) 
 include(cmake/FindImgui.cmake) 
+include(cmake/FindBullet3.cmake) 
 include(cmake/utils.cmake) 
 
 # set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-p=${CMAKE_BINARY_DIR};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
