@@ -82,12 +82,11 @@
     {
       "name": "bullet3",
       "version>=": "3.25#3",
-      "features": [
-        "double-precision",
-        "extras",
-        "multithreading",
-        "opencl"
-      ]
+      "features": ["double-precision", "extras", "multithreading", "opencl"]
+    },
+    {
+      "name": "quill",
+      "version>=": "10.1.0"
     }
   ]
 }
