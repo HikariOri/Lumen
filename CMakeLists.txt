@@ -48,6 +48,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(vulkanTutorial)
+add_subdirectory(VulkanGuide)
 add_subdirectory(SDL3Examples)
 add_subdirectory(shaders)
 add_subdirectory(engine)
