@@ -454,7 +454,7 @@ private:
     }
     void createGraphicsPipeline() {
         vk::raii::ShaderModule shaderModule = createShaderModule(
-            readFile("shaders/slang/022_descriptor_layout.spv"));
+            readFile("shaders/slang/026_shader_textures.spv"));
 
         vk::PipelineShaderStageCreateInfo vertShaderStageInfo;
         vertShaderStageInfo.setStage(vk::ShaderStageFlagBits::eVertex)
