@@ -11,7 +11,6 @@ add_library(${ENGINE_TARGET} STATIC ${ENGINE_SOURCES})
 target_include_directories(${ENGINE_TARGET} PUBLIC include)
 
 target_link_libraries(${ENGINE_TARGET} PUBLIC Vulkan::Vulkan)
-target_link_libraries(${ENGINE_TARGET} PUBLIC vk-bootstrap::vk-bootstrap vk-bootstrap::vk-bootstrap-compiler-warnings)
 target_link_libraries(${ENGINE_TARGET} PUBLIC SDL3::SDL3)
 target_link_libraries(${ENGINE_TARGET} PUBLIC $<IF:$<TARGET_EXISTS:SDL3_image::SDL3_image-shared>,SDL3_image::SDL3_image-shared,SDL3_image::SDL3_image-static>)
 target_link_libraries(${ENGINE_TARGET} PUBLIC SDL3_ttf::SDL3_ttf)

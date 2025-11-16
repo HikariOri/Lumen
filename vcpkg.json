@@ -58,10 +58,6 @@
       "version>=": "4.1.1"
     },
     {
-      "name": "vk-bootstrap",
-      "version>=": "1.4.312"
-    },
-    {
       "name": "glslang",
       "version>=": "15.1.0",
       "features": ["opt", "rtti", "tools"]
@@ -80,6 +76,10 @@
       "version>=": "3.3.0"
     },
     {
+      "name": "volk",
+      "version>=": "1.4.309.0"
+    },
+    {
       "name": "bullet3",
       "version>=": "3.25#3",
       "features": ["double-precision", "extras", "multithreading", "opencl"]
@@ -87,6 +87,10 @@
     {
       "name": "quill",
       "version>=": "10.1.0"
+    },
+    {
+      "name": "tabulate",
+      "version>=": "1.5"
     }
   ]
 }

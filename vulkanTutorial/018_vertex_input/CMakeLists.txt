@@ -3,8 +3,9 @@ add_executable(${CUR_TARGET} ./src/main.cpp)
 target_include_directories(${CUR_TARGET} PUBLIC include)
 target_link_libraries(${CUR_TARGET} PRIVATE glfw)
 target_link_libraries(${CUR_TARGET} PRIVATE glm::glm)
-target_link_libraries(${CUR_TARGET} PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(${CUR_TARGET} PRIVATE Vulkan::Vulkan)
 target_link_libraries(${CUR_TARGET} PRIVATE slang::slang)
+target_link_libraries(${CUR_TARGET} PRIVATE tabulate::tabulate)
 target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
 
 add_custom_command(
