@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <optional>
 #include <print>
 #include <set>
@@ -70,6 +71,11 @@ private:
     VkQueue presentQueue;
 
     VkSurfaceKHR surface;
+    VkSwapchainKHR swapChain;
+    // 这些图像是由交换链创建，一旦交换链被销毁，它们将自动被清理，不需要手动清理
+    std::vector<VkImage> swapChainImages;
+    VkFormat swapChainImageFormat;
+    VkExtent2D swapChainExtent;
 
     // 所有的 queue family 都使用 index 表示
     struct QueueFamilyIndices {
@@ -115,6 +121,7 @@ private:
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
+        createSwapChain();
     }
 
     void createSurface() {
@@ -234,6 +241,91 @@ private:
                          &presentQueue);
     }
 
+    void createSwapChain() {
+        SwapChainSupportDetails swapChainSupport =
+            querySwapChainSupport(physicalDevice);
+
+        VkSurfaceFormatKHR surfaceFormat =
+            chooseSwapSurfaceFormat(swapChainSupport.formats);
+        VkPresentModeKHR presentMode =
+            chooseSwapPresentMode(swapChainSupport.presentModes);
+        VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+        // 仅仅遵守这个最低要求意味着我们有时可能需要等待驱动程序完成内部操作，然后才能获取另一个用于渲染的图像，因此建议请求至少比最低数量多一个图像
+        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+        // 当然也要保证不能让 swapchain 里的图片数量超过最大值
+        // 0 是一个特殊值，表示没有最大数量限制
+        if (swapChainSupport.capabilities.maxImageCount > 0 &&
+            imageCount > swapChainSupport.capabilities.maxImageCount) {
+            imageCount = swapChainSupport.capabilities.maxImageCount;
+        }
+
+        VkSwapchainCreateInfoKHR createInfo {};
+        createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        createInfo.surface = surface;
+
+        // 设置最少需要的 image 的数量
+        createInfo.minImageCount = imageCount;
+        // 设置图像格式
+        createInfo.imageFormat = surfaceFormat.format;
+        // 设置 color space
+        createInfo.imageColorSpace = surfaceFormat.colorSpace;
+        // 设置图像大小
+        createInfo.imageExtent = extent;
+        // imageArrayLayers 指定了每个图像包含的层数。这始终是 1，除非你正在开发立体 3D 应用程序。
+        createInfo.imageArrayLayers = 1;
+        // 因为颜色附件使用
+        // TODO: 难道说 depth map 需要创建新的 swapchain?
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+        QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+        uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(),
+                                          indices.presentFamily.value() };
+
+        if (indices.graphicsFamily != indices.presentFamily) {
+            //  图像可以在多个队列家族之间使用，而无需明确地转移所有权
+            // 即自动处理图像在多个队列里的所有权转移
+            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        } else {
+            // 一张图像在任何时候只能属于一个队列家族，在使用它之前必须明确地转移所有权到另一个队列家族。这个选项提供最佳性能
+            // 都是一个队列了，就没有转移了
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;     // Optional
+            createInfo.pQueueFamilyIndices = nullptr; // Optional
+        }
+
+        // 如果支持，可以指定对交换链中的图像应用某种变换，例如 90 度顺时针旋转或水平翻转
+        // 如果不希望有任何变换，只需指定当前变换即可
+        createInfo.preTransform =
+            swapChainSupport.capabilities.currentTransform;
+        // compositeAlpha 字段指定是否应使用 alpha 通道与其他窗口系统中的其他窗口进行混。
+        // 几乎总是希望简单地忽略 alpha 通道，因此设置为 VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        createInfo.presentMode = presentMode;
+        // 是否裁剪，如果希望一直得到完整的图像应该设置为 VK_FALSE;
+        createInfo.clipped = VK_TRUE;
+        createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+        if (vkCreateSwapchainKHR(device, &createInfo, nullptr, &swapChain) !=
+            VK_SUCCESS) {
+            throw std::runtime_error { "failed to create swap chain!" };
+        }
+
+        // 获取 swapchain 中的 images
+        // 注意，之前只在交换链中指定了最小的 image count
+        // 实际创建的 image 数量可能大于那个数量，所以要查询数量
+        vkGetSwapchainImagesKHR(device, swapChain, &imageCount, nullptr);
+        swapChainImages.resize(imageCount);
+        vkGetSwapchainImagesKHR(device, swapChain, &imageCount,
+                                swapChainImages.data());
+
+        // 将交换链图像的格式和大小储存起来
+        swapChainImageFormat = surfaceFormat.format;
+        swapChainExtent = extent;
+    }
+
     bool isDeviceSuitable(VkPhysicalDevice device) {
         QueueFamilyIndices indices = findQueueFamilies(device);
 
@@ -248,6 +340,89 @@ private:
         }
 
         return indices.isComplete() && extensionsSupported && swapChainAdequate;
+    }
+
+    VkSurfaceFormatKHR chooseSwapSurfaceFormat(
+        const std::vector<VkSurfaceFormatKHR> &availableFormats) {
+        // 每个 VkSurfaceFormatKHR 条目包含一个 format 和一个 colorSpace 成员
+        // format 成员指定颜色通道和类型。例如，VK_FORMAT_B8G8R8A8_SRGB, 表示按顺序存储 B、G、R 和 A
+        // 使用 8 位无符号整数，每个像素总共 32 位
+        // colorSpace  成员使用 VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+
+        // 查找满足条件的 VkSurfaceFormatKHR
+        for (const auto &availableFormat : availableFormats) {
+            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
+                availableFormat.colorSpace ==
+                    VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return availableFormat;
+            }
+        }
+
+        // 查找失败使用第一个
+        // 当然也可以排序以选取最优的
+        return availableFormats[0];
+    }
+
+    VkPresentModeKHR chooseSwapPresentMode(
+        const std::vector<VkPresentModeKHR> &availablePresentModes) {
+        /*
+显示模式可以说是交换链最重要的设置，因为它代表了向屏幕显示图像的实际条件。Vulkan 中有四种可能的模式可用：
+    VK_PRESENT_MODE_IMMEDIATE_KHR: 
+        （立即模式）你的应用程序提交的图像会立即传输到屏幕上，这可能导致撕裂。
+    VK_PRESENT_MODE_FIFO_KHR:
+        （FIFO）交换链是一个队列，显示器在刷新时从前端队列中获取图像，而程序在队列后端插入渲染的图像。
+        如果队列已满，程序就必须等待。
+        这最类似于现代游戏中常见的垂直同步。
+        显示器刷新的时刻被称为"垂直空白"。
+        此模式一定会被支持。
+    VK_PRESENT_MODE_FIFO_RELAXED_KHR: 
+        这种模式只有在应用程序延迟且在最后一个垂直空白时队列为空的情况下才与之前的不同。
+        在这种情况下，图像在最终到达时立即传输，而不是等待下一个垂直空白。
+        这可能导致可见的撕裂。
+    VK_PRESENT_MODE_MAILBOX_KHR: 
+        这是第二种模式的另一种变体。
+        当队列满时，它不会阻塞应用程序，而是将已入队的图像简单地用较新的图像替换。
+        这种模式可以在避免撕裂的同时尽可能快地渲染帧，从而比标准垂直同步产生更少的延迟问题。
+        这通常被称为"三重缓冲"，尽管仅存在三个缓冲区并不一定意味着帧率被解锁。
+            */
+
+        // 一般使用 VK_PRESENT_MODE_MAILBOX_KHR就好
+        // 对于资源有限的移动端可以考虑是使用 VK_PRESENT_MODE_FIFO_KHR
+
+        for (const auto &availablePresentMode : availablePresentModes) {
+            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                return availablePresentMode;
+            }
+        }
+
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
+        if (capabilities.currentExtent.width !=
+            std::numeric_limits<uint32_t>::max()) {
+            // 如果窗口管理系统没有将宽度和高度设置为最大的话，说明 currentExtent 是可用的
+            return capabilities.currentExtent;
+        } else {
+            int width {}, height {};
+            // 考虑到高 DPI 显示器可能会导致分辨率大于屏幕坐标，使用最好使用 glfwGetFramebufferSize 查询窗口分辨率（像素）
+            glfwGetFramebufferSize(window, &width, &height);
+
+            VkExtent2D actualExtent {
+                static_cast<uint32_t>(width),
+                static_cast<uint32_t>(height),
+            };
+
+            // 将 actualExtent 的宽高都限制一下
+            actualExtent.width = std::clamp(actualExtent.width,
+                                            capabilities.minImageExtent.width,
+                                            capabilities.maxImageExtent.width);
+            actualExtent.height = std::clamp(
+                actualExtent.height, capabilities.minImageExtent.height,
+                capabilities.maxImageExtent.height);
+
+            return actualExtent;
+        }
     }
 
     bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
@@ -349,6 +524,7 @@ private:
     }
 
     void cleanup() {
+        vkDestroySwapchainKHR(device, swapChain, nullptr);
         vkDestroyDevice(device, nullptr);
 
         if constexpr (enableValidationLayers) {
@@ -590,7 +766,7 @@ private:
         pMessage: 作为空终止字符串的调试消息
         pObjects: 与消息相关的 Vulkan 对象句柄数组
         objectCount: 数组中的对象数量
-    pUserData 参数包含在回调设置期间指定的指针，允许您将其自己的数据传递给它。
+    pUserData 参数包含在回调设置期间指定的指针，允许你将其自己的数据传递给它。
     */
     static VKAPI_ATTR VkBool32 VKAPI_CALL
     debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
