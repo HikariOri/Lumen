@@ -21,6 +21,7 @@ include(cmake/FindTinyobjloader.cmake)
 include(cmake/FindImgui.cmake) 
 include(cmake/FindBullet3.cmake) 
 include(cmake/FindTabulate.cmake) 
+include(cmake/FindQuill.cmake) 
 include(cmake/utils.cmake) 
 
 # set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-p=${CMAKE_BINARY_DIR};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
@@ -37,7 +38,8 @@ else ()
     add_compile_options(-Wall -Wextra -Werror=return-type)
 endif ()
 
-find_program(SLANG_COMPILER slangc REQUIRED)
+find_program(SLANGC_COMPILER slangc REQUIRED)
+find_program(GLSLC_COMPILER glslc REQUIRED)
 
 include(CTest)
 enable_testing()
@@ -49,5 +51,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(VulkanTutorial)
 add_subdirectory(SDL3Examples)
-add_subdirectory(shaders)
 add_subdirectory(engine)

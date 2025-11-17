@@ -1,4 +1,4 @@
-set(CUR_TARGET 012_graphics_pipeline_complete)
+set(CUR_TARGET 011_render_passes)
 add_executable(${CUR_TARGET} ./src/main.cpp)
 target_include_directories(${CUR_TARGET} PUBLIC include)
 target_link_libraries(${CUR_TARGET} PRIVATE glfw)
@@ -32,6 +32,5 @@ add_custom_command(
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
-
 
 

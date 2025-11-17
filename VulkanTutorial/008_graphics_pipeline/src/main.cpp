@@ -124,6 +124,7 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createGraphicsPipeline();
     }
 
     void createImageViews() {
@@ -161,6 +162,8 @@ private:
             }
         }
     }
+
+    void createGraphicsPipeline() {}
 
     void createSurface() {
         // 创建 surface
