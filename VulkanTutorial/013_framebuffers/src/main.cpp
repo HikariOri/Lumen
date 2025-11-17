@@ -86,6 +86,9 @@ private:
 
     VkRenderPass renderPass;
     VkPipelineLayout pipelineLayout;
+    VkPipeline graphicsPipeline;
+
+    std::vector<VkFramebuffer> swapChainFramebuffers;
 
     // 所有的 queue family 都使用 index 表示
     struct QueueFamilyIndices {
@@ -135,6 +138,7 @@ private:
         createImageViews();
         createRenderPass();
         createGraphicsPipeline();
+        createFramebuffers();
     }
 
     void createImageViews() {
@@ -319,6 +323,7 @@ private:
             VK_POLYGON_MODE_POINT : 将多边形顶点绘制为点
         */
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0F;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
@@ -417,8 +422,70 @@ private:
             throw std::runtime_error("failed to create pipeline layout!");
         }
 
+        VkGraphicsPipelineCreateInfo pipelineInfo {};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr; // Optional
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+
+        pipelineInfo.layout = pipelineLayout;
+
+        pipelineInfo.renderPass = renderPass;
+        pipelineInfo.subpass = 0;
+
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+        pipelineInfo.basePipelineIndex = -1;              // Optional
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                      nullptr,
+                                      &graphicsPipeline) != VK_SUCCESS) {
+            throw std::runtime_error { "failed to create graphics pipeline!" };
+        }
+
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
+    }
+
+    void createFramebuffers() {
+        // 为 swapChainFramebuffers 分配与 swapChainImageViews 同样数量的元素
+        // 每一个 swapchain image 都对应一个 framebuffer
+        swapChainFramebuffers.resize(swapChainImageViews.size());
+
+        // 遍历所有 swap chain 的 image view，为每一个创建一个 framebuffer
+        for (size_t i = 0; i < swapChainImageViews.size(); ++i) {
+            // 定义 framebuffer 的 attachments，这里只有一个 attachment，就是当前的 swapChainImageView
+            VkImageView attachments[] = { swapChainImageViews[i] };
+
+            // 准备 VkFramebufferCreateInfo 结构，描述 framebuffer 的参数
+            VkFramebufferCreateInfo framebufferInfo {};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            // renderPass 是之前创建好的 render pass，framebuffer 必须和这个 render pass 兼容
+            framebufferInfo.renderPass = renderPass;
+            // 附件数量，这里是 1（只有 color attachment）
+            framebufferInfo.attachmentCount = 1;
+            // 附件数组指针
+            framebufferInfo.pAttachments = attachments;
+            // framebuffer 的宽度、高度，设置为 swap chain 的 extent（分辨率）
+            framebufferInfo.width = swapChainExtent.width;
+            framebufferInfo.height = swapChainExtent.height;
+            // 图像层数 (layers)，这里是单层 (1)，因为 swapchain image 通常是单层 2D 图像
+            framebufferInfo.layers = 1;
+
+            // 调用 Vulkan API 创建 framebuffer
+            if (vkCreateFramebuffer(device, &framebufferInfo, nullptr,
+                                    &swapChainFramebuffers[i]) != VK_SUCCESS) {
+                // 如果创建失败，就抛出异常
+                throw std::runtime_error { "failed to create framebuffer!" };
+            }
+        }
     }
 
     // 着色器代码必须通过 VkShaderModule 包装才能传递给管线
@@ -837,6 +904,11 @@ private:
     }
 
     void cleanup() {
+        for (auto framebuffer : swapChainFramebuffers) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyRenderPass(device, renderPass, nullptr);
 

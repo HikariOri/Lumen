@@ -17,7 +17,7 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.vert"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/vert.spv"
-COMMAND ${GLSLC_COMPILER}
+  COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.frag"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
