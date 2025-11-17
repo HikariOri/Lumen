@@ -1,4 +1,4 @@
-set(CUR_TARGET 012_graphics_pipeline_complete)
+set(CUR_TARGET 013_framebuffers)
 add_executable(${CUR_TARGET} ./src/main.cpp)
 target_include_directories(${CUR_TARGET} PUBLIC include)
 target_link_libraries(${CUR_TARGET} PRIVATE glfw)
@@ -17,9 +17,21 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.vert"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/vert.spv"
-COMMAND ${GLSLC_COMPILER}
+  COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
+  VERBATIM
+)
+
+add_custom_command(
+  TARGET ${CUR_TARGET}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl"
+  COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.frag"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
+
+
+
