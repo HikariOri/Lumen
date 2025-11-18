@@ -23,6 +23,12 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
+#include <quill/Backend.h>
+#include <quill/Frontend.h>
+#include <quill/LogMacros.h>
+#include <quill/Logger.h>
+#include <quill/sinks/ConsoleSink.h>
+
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
@@ -48,6 +54,8 @@ constexpr bool enableValidationLayers = true;
 #endif
 
 // #define DEBUG_USER
+
+quill::Logger *logger = nullptr;
 
 class HelloTriangleApplication {
 public:
@@ -1182,7 +1190,20 @@ private:
                   VkDebugUtilsMessageTypeFlagsEXT messageType,
                   const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                   void *pUserData) {
-        std::println(stderr, "validation layer: {}", pCallbackData->pMessage);
+        // std::println(stderr, "validation layer: {}", pCallbackData->pMessage);
+        if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
+            LOG_DEBUG(logger, "validation layer: {}", pCallbackData->pMessage);
+        } else if (messageSeverity &
+                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+            LOG_INFO(logger, "validation layer: {}", pCallbackData->pMessage);
+        } else if (messageSeverity &
+                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+            LOG_WARNING(logger, "validation layer: {}",
+                        pCallbackData->pMessage);
+        } else if (messageSeverity &
+                   VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+            LOG_ERROR(logger, "validation layer: {}", pCallbackData->pMessage);
+        }
 
         return VK_FALSE;
     }
@@ -1190,12 +1211,20 @@ private:
 
 int main() {
 
+    quill::Backend::start();
+
+    logger = quill::Frontend::create_or_get_logger(
+        "vulkan",
+        quill::Frontend::create_or_get_sink<quill::ConsoleSink>("sink_id_1"));
+
+    logger->set_log_level(quill::LogLevel::TraceL3);
+
     HelloTriangleApplication app;
 
     try {
         app.run();
     } catch (const std::exception &e) {
-        std::println(stderr, "{}", e.what());
+        LOG_ERROR(logger, "{}", e.what());
         return EXIT_FAILURE;
     }
 
