@@ -6,8 +6,8 @@ int main() {
     // Configure first progress bar
     ProgressBar bar1 { option::BarWidth { 50 },
                        option::Start { "[" },
-                       option::Fill { "" },
-                       option::Lead { "" },
+                       option::Fill { "-" },
+                       option::Lead { "-" },
                        option::Remainder { " " },
                        option::End { " ]" },
                        option::ForegroundColor { Color::yellow },

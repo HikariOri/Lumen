@@ -1,28 +1,58 @@
+# ============================================================================
+# 物理引擎和ECS
+# ============================================================================
 find_package(Bullet CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
-find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
+
+# ============================================================================
+# 图形和窗口库
+# ============================================================================
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+
+# ============================================================================
+# 着色器相关
+# ============================================================================
 find_package(glslang CONFIG REQUIRED)
 find_package(slang CONFIG REQUIRED)
 
+# ============================================================================
+# 3D模型加载
+# ============================================================================
+find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
+find_package(tinyobjloader CONFIG REQUIRED)
+
+# ============================================================================
+# UI库
+# ============================================================================
 find_package(imgui CONFIG REQUIRED)
 find_package(imguizmo CONFIG REQUIRED)
 find_package(unofficial-imgui-node-editor CONFIG REQUIRED)
 
+# ============================================================================
+# 日志库
+# ============================================================================
 find_package(quill CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
+# ============================================================================
+# 媒体库 (SDL)
+# ============================================================================
 find_package(SDL3 CONFIG REQUIRED)
 find_package(SDL3_image CONFIG REQUIRED)
 find_package(SDL3_ttf CONFIG REQUIRED)
 
-find_package(spdlog CONFIG REQUIRED)
-find_package(Stb REQUIRED)
-find_package(tabulate CONFIG REQUIRED)
-find_package(tinyobjloader CONFIG REQUIRED)
-
+# ============================================================================
+# Vulkan相关
+# ============================================================================
 find_package(Vulkan REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(volk CONFIG REQUIRED)
-find_package(indicators CONFIG REQUIRED)
 
+# ============================================================================
+# 工具库
+# ============================================================================
+find_package(Stb REQUIRED)
+find_package(tabulate CONFIG REQUIRED)
+find_package(indicators CONFIG REQUIRED)
+find_package(CLI11 CONFIG REQUIRED)

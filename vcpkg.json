@@ -95,6 +95,10 @@
     {
       "name": "indicators",
       "version>=": "2.3"
+    },
+    {
+      "name": "cli11",
+      "version>=": "2.6.1"
     }
   ]
 }

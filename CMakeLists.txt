@@ -5,7 +5,7 @@ project(
     VERSION 0.1.0
     LANGUAGES C CXX
     DESCRIPTION "Learn Vulkan"
-)
+) 
 
 include(cmake/FindExternal.cmake)
 include(cmake/utils.cmake) 
