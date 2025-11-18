@@ -7,21 +7,7 @@ project(
     DESCRIPTION "Learn Vulkan"
 )
 
-include(cmake/FindVlukan.cmake)
-include(cmake/FindSpdlog.cmake)
-include(cmake/FindGLFW.cmake)
-include(cmake/FindGLM.cmake) 
-include(cmake/FindSTB.cmake) 
-include(cmake/FindSDL3.cmake)
-include(cmake/FindSlang.cmake) 
-include(cmake/FindGlslang.cmake) 
-include(cmake/FindFlecs.cmake) 
-include(cmake/FindFlecsTinygltf.cmake) 
-include(cmake/FindTinyobjloader.cmake) 
-include(cmake/FindImgui.cmake) 
-include(cmake/FindBullet3.cmake) 
-include(cmake/FindTabulate.cmake) 
-include(cmake/FindQuill.cmake) 
+include(cmake/FindExternal.cmake)
 include(cmake/utils.cmake) 
 
 # set(CMAKE_CXX_CLANG_TIDY "clang-tidy;-p=${CMAKE_BINARY_DIR};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")

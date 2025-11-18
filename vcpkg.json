@@ -91,6 +91,10 @@
     {
       "name": "tabulate",
       "version>=": "1.5"
+    },
+    {
+      "name": "indicators",
+      "version>=": "2.3"
     }
   ]
 }
