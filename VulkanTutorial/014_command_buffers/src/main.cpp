@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <sys/stat.h>
 #include <vector>
 
 #include <tabulate/table.hpp>
@@ -95,6 +96,10 @@ private:
     VkPipeline graphicsPipeline;
 
     std::vector<VkFramebuffer> swapChainFramebuffers;
+    // 命令池管理用于存储缓冲区的内存，命令缓冲区从中分配。
+    VkCommandPool commandPool;
+    // commandBuffer 会在其所在的 commandPool 销毁时自动释放
+    VkCommandBuffer commandBuffer;
 
     // 所有的 queue family 都使用 index 表示
     struct QueueFamilyIndices {
@@ -145,6 +150,8 @@ private:
         createRenderPass();
         createGraphicsPipeline();
         createFramebuffers();
+        createCommandPool();
+        createCommandBuffer();
     }
 
     void createImageViews() {
@@ -491,6 +498,120 @@ private:
                 // 如果创建失败，就抛出异常
                 throw std::runtime_error { "failed to create framebuffer!" };
             }
+        }
+    }
+
+    void createCommandPool() {
+        QueueFamilyIndices queueFamilyIndices =
+            findQueueFamilies(physicalDevice);
+
+        VkCommandPoolCreateInfo poolInfo {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        /*
+        命令池有两种可能的标志：
+            VK_COMMAND_POOL_CREATE_TRANSIENT_BIT：提示命令缓冲区会频繁地用新命令重新记录（可能会改变内存分配行为）。
+            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT：允许单独重新记录命令缓冲区；如果没有此标志，则所有命令缓冲区必须一起重置。
+        */
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+        if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) !=
+            VK_SUCCESS) {
+            throw std::runtime_error { "failed to create command pool!" };
+        }
+    }
+
+    void createCommandBuffer() {
+        VkCommandBufferAllocateInfo allocInfo {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        /*
+        level 参数指定分配的命令缓冲区是主命令缓冲区还是辅助命令缓冲区。
+            VK_COMMAND_BUFFER_LEVEL_PRIMARY: 可以提交到队列中执行，但不能从其他命令缓冲区调用。
+            VK_COMMAND_BUFFER_LEVEL_SECONDARY：不能直接提交，但可以从主命令缓冲区调用。
+        */
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) !=
+            VK_SUCCESS) {
+            throw std::runtime_error { "failed to allocate command buffers!" };
+        }
+    }
+
+    void recordCommandBuffer(VkCommandBuffer commandBuffer,
+                             uint32_t imageIndex) {
+        VkCommandBufferBeginInfo beginInfo {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        /*
+        flags 参数指定我们如何使用命令缓冲区。以下是可用的值：
+            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: 命令缓冲区将在执行一次后立即重新记录。
+            VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: 这是一个辅助命令缓冲区，它将完全包含在单个渲染过程中。
+            VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：即使命令缓冲区已处于待执行状态，也可以重新提交该命令缓冲区。
+        */
+        beginInfo.flags = 0; // Optional
+        // pInheritanceInfo 参数仅与辅助命令缓冲区相关。它指定要从调用的主命令缓冲区继承哪个状态。
+        beginInfo.pInheritanceInfo = nullptr; // Optional
+
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "failed to begin recording command buffer!");
+        }
+
+        VkRenderPassBeginInfo renderPassInfo {};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = renderPass;
+        renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
+        renderPassInfo.renderArea.offset = { 0, 0 };
+        renderPassInfo.renderArea.extent = swapChainExtent;
+
+        // The last two parameters define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR,
+        // which we used as load operation for the color attachment.
+        VkClearValue clearColor = { { 0.0F, 0.0F, 0.0F, 1.0F } };
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearColor;
+
+        /*
+        每个命令的第一个参数始终是用于记录命令的命令缓冲区。第二个参数指定我们刚刚提供的渲染通道的详细信息。最后一个参数控制渲染通道中绘图命令的提供方式。它可以取以下两个值之一：
+            VK_SUBPASS_CONTENTS_INLINE：渲染通道命令将嵌入到主命令缓冲区本身中，不会执行任何辅助命令缓冲区。
+            VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: 渲染通道命令将从辅助命令缓冲区执行。
+        */
+
+        // 接下来开始 draw
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          graphicsPipeline);
+
+        // 我们在设置管线的时候将 viewport 阶段和 scissor 阶段设置为了动态的
+        // 所以需要在发出绘制命令之前在命令缓冲区中设置它们
+        VkViewport viewport {};
+        viewport.x = 0.0F;
+        viewport.y = 0.0F;
+        viewport.width = static_cast<float>(swapChainExtent.width);
+        viewport.height = static_cast<float>(swapChainExtent.height);
+        viewport.minDepth = 0.0F;
+        viewport.maxDepth = 1.0F;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        VkRect2D scissor {};
+        scissor.offset = { 0, 0 };
+        scissor.extent = swapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        // draw call
+        /*
+        vkCmdDraw 函数本身可能有点平淡无奇，但它之所以如此简单，是因为我们预先指定了所有信息。除了命令缓冲区之外，它还有以下参数：
+            vertexCount：即使我们没有顶点缓冲区，但从技术上讲，我们仍然有 3 个顶点要绘制。
+            instanceCount：用于实例化渲染，如果不进行实例化渲染，则使用 1 。
+            firstVertex：用作顶点缓冲区中的偏移量，定义 gl_VertexIndex 的最小值。
+            firstInstance：用作实例化渲染的偏移量，定义 gl_InstanceIndex 的最小值。
+        */
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(commandBuffer);
+
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to record command buffer!");
         }
     }
 
@@ -910,6 +1031,8 @@ private:
     }
 
     void cleanup() {
+        vkDestroyCommandPool(device, commandPool, nullptr);
+
         for (auto framebuffer : swapChainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
