@@ -7,11 +7,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <format>
 #include <fstream>
 #include <limits>
 #include <optional>
-#include <print>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -274,9 +272,9 @@ private:
         };
 
         /*
-    VkPipelineVertexInputStateCreateInfo 结构描述了将要传递给顶点着色器的顶点数据的格式。它大致以两种方式来描述：
-        Bindings: 数据之间的间隔以及数据是按顶点还是按实例
-        Attribute descriptions: 传递给顶点着色器的属性类型，从哪个绑定加载它们以及它们在哪个偏移量
+        VkPipelineVertexInputStateCreateInfo 结构描述了将要传递给顶点着色器的顶点数据的格式。它大致以两种方式来描述：
+            Bindings: 数据之间的间隔以及数据是按顶点还是按实例
+            Attribute descriptions: 传递给顶点着色器的属性类型，从哪个绑定加载它们以及它们在哪个偏移量
         */
         // 顶点输入阶段
         // 暂时没有顶点输入
@@ -536,7 +534,7 @@ private:
 
 #ifdef DEBUG_USER
         tabulate::Table physicalDevicesTable;
-        std::println("\nGPUs:");
+        LOG_DEBUG(logger, "{}", "GPUs:");
         physicalDevicesTable.add_row({ "Device Name", "Api Version",
                                        "Driver Version", "Vendor ID",
                                        "Device ID", "Device Type" });
@@ -553,7 +551,7 @@ private:
                                            std::to_string(props.vendorID),
                                            std::to_string(props.deviceID) });
         }
-        std::println("{}", physicalDevicesTable.str());
+        LOG_DEBUG(logger, "{}", physicalDevicesTable.str());
 #endif
 
         // check 所有的 Physical Device，有一个满足要求即可
@@ -825,7 +823,7 @@ private:
 
 #ifdef DEBUG_USER
         tabulate::Table availableExtensionsTable;
-        std::println("\n所支持的设备拓展:");
+        LOG_DEBUG(logger, "{}", "所支持的设备拓展:");
         availableExtensionsTable.add_row({ "Extension Name", "Spec Version" });
 
         for (auto &extension : availableExtensions) {
@@ -834,7 +832,7 @@ private:
                 { extension.extensionName,
                   std::to_string(extension.specVersion) });
         }
-        std::println("{}", availableExtensionsTable.str());
+        LOG_DEBUG(logger, "{}", availableExtensionsTable.str());
 #endif
 
         std::set<std::string> requiredExtensions(deviceExtensions.begin(),
@@ -863,7 +861,7 @@ private:
 
 #ifdef DEBUG_USER
         tabulate::Table queueFamiliesTable;
-        std::println("\n当前设备支持的 queue family:");
+        LOG_DEBUG(logger, "{}", "当前设备支持的 queue family:");
         queueFamiliesTable.add_row({ "Queue Flags", "Queue Count",
                                      "Timestamp Valid Bits",
                                      "Min Image Transfer Granularity" });
@@ -877,7 +875,7 @@ private:
                               queueFamily.minImageTransferGranularity.height,
                               queueFamily.minImageTransferGranularity.depth) });
         }
-        std::println("{}", queueFamiliesTable.str());
+        LOG_DEBUG(logger, "{}", queueFamiliesTable.str());
 #endif
 
         // 查找支持图形的 queuec family
@@ -974,12 +972,12 @@ private:
 
 #ifdef DEBUG_USER
         tabulate::Table requiredInstanceExtensionsTable;
-        std::println("\n需要的扩展（glfw + 校验层）:");
+        LOG_DEBUG(logger, "{}", "需要的扩展（glfw + 校验层）:");
         requiredInstanceExtensionsTable.add_row({ "Name" });
         for (const auto &extension : extensions) {
             requiredInstanceExtensionsTable.add_row({ extension });
         }
-        std::println("{}", requiredInstanceExtensionsTable.str());
+        LOG_DEBUG(logger, "{}", requiredInstanceExtensionsTable.str());
 #endif
 
         // 设置要使用的扩展
@@ -998,14 +996,14 @@ private:
             nullptr, &availableExtensionsCount, availableExtensions.data());
 
         tabulate::Table availableExtensionsTable;
-        std::println("\n支持的拓展:");
+        LOG_DEBUG(logger, "{}", "支持的拓展:");
         availableExtensionsTable.add_row({ "Name", "Verison" });
         for (const auto &extension : availableExtensions) {
             availableExtensionsTable.add_row(
                 { extension.extensionName,
                   std::to_string(extension.specVersion) });
         }
-        std::println("{}", availableExtensionsTable.str());
+        LOG_DEBUG(logger, "{}", availableExtensionsTable.str());
 #endif
 
         // 创建并设置 VkDebugUtilsMessengerCreateInfoEXT，这样才能正确地报告错误
@@ -1089,7 +1087,7 @@ private:
 
 #ifdef DEBUG_USER
         tabulate::Table availableLayersTable;
-        std::println("\n支持的层:");
+        LOG_DEBUG(logger, "{}", "支持的层:");
         availableLayersTable.add_row(
             { "Name", "Verison", "Description", "Implementation Version" });
         for (const auto &layer : availableLayers) {
@@ -1098,7 +1096,7 @@ private:
                   layer.description,
                   std::to_string(layer.implementationVersion) });
         }
-        std::println("{}", availableLayersTable.str());
+        LOG_DEBUG(logger, "{}", availableLayersTable.str());
 #endif
 
         // check 是不是所有的 validationLayers 都在 availableLayers 中
@@ -1190,7 +1188,6 @@ private:
                   VkDebugUtilsMessageTypeFlagsEXT messageType,
                   const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
                   void *pUserData) {
-        // std::println(stderr, "validation layer: {}", pCallbackData->pMessage);
         if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) {
             LOG_DEBUG(logger, "validation layer: {}", pCallbackData->pMessage);
         } else if (messageSeverity &
@@ -1209,15 +1206,32 @@ private:
     }
 };
 
-int main() {
+void initLogger() {
+    quill::BackendOptions backend_options;
+    // 这样就禁用了默认的 “只允许 ASCII” 校验
+    backend_options.check_printable_char = {};
+    quill::Backend::start(backend_options);
 
-    quill::Backend::start();
+    auto console_sink =
+        quill::Frontend::create_or_get_sink<quill::ConsoleSink>("console");
 
-    logger = quill::Frontend::create_or_get_logger(
-        "vulkan",
-        quill::Frontend::create_or_get_sink<quill::ConsoleSink>("sink_id_1"));
+    quill::PatternFormatterOptions fmt_options;
+    fmt_options.format_pattern =
+        "%(time) [%(thread_id)] %(short_source_location:<20) %(log_level) "
+        "%(message)";
+    fmt_options.timestamp_pattern = "%Y-%m-%d %H:%M:%S.%Qms";
+    fmt_options.timestamp_timezone = quill::Timezone::LocalTime;
+    fmt_options.add_metadata_to_multi_line_logs = true;
+
+    logger = quill::Frontend::create_or_get_logger("vulkan", console_sink,
+                                                   fmt_options);
 
     logger->set_log_level(quill::LogLevel::TraceL3);
+}
+
+int main() {
+
+    initLogger();
 
     HelloTriangleApplication app;
 

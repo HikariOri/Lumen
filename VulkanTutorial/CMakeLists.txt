@@ -26,4 +26,3 @@ add_subdirectory(024_texture_image)
 add_subdirectory(025_sampler)
 add_subdirectory(026_texture_mapping)
 
-add_subdirectory(indicators_demos)

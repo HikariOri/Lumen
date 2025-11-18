@@ -13,15 +13,14 @@ add_custom_command(
   TARGET ${CUR_TARGET}
   POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
-          "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/slang"
-  COMMAND ${SLANG_COMPILER}
-          "${PROJECT_SOURCE_DIR}/shaders/slang/018_shader_vertexbuffer.slang"
-          -target spirv -profile spirv_1_4
-          -emit-spirv-directly -fvk-use-entrypoint-name
-          -entry vertMain -entry fragMain
-          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/slang/018_shader_vertexbuffer.spv"
-  COMMENT "Ensuring shader output directory exists and compiling Slang shader"
+          "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.vert"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.frag"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/frag.spv"
+  COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
-
 
