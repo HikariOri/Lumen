@@ -2,6 +2,7 @@
 1. 所有的查询基本上都在物理设备上
 */
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -13,6 +14,8 @@
 #include <set>
 #include <stdexcept>
 #include <vector>
+
+#include <glm/glm.hpp>
 
 #include <tabulate/table.hpp>
 
@@ -52,6 +55,88 @@ constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif
+
+// 所有的 queue family 都使用 index 表示
+struct QueueFamilyIndices {
+    // 支持图像的 queue family 的 index（支持绘制的 queue family）
+    std::optional<uint32_t> graphicsFamily;
+    // 支持呈现的 queue family
+    std::optional<uint32_t> presentFamily;
+
+    [[nodiscard]] bool isComplete() const {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+
+    operator bool() const {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+};
+
+struct SwapChainSupportDetails {
+    // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 / 最大的宽度和高度
+    VkSurfaceCapabilitiesKHR capabilities;
+    // surface 的格式，例如像素格式、色彩空间
+    std::vector<VkSurfaceFormatKHR> formats;
+    // 可用的呈现模式
+    std::vector<VkPresentModeKHR> presentModes;
+};
+
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+
+    static VkVertexInputBindingDescription getBindingDescription() {
+        VkVertexInputBindingDescription bindingDescription {};
+
+        /*
+        我们所有的顶点数据都打包在一个数组中，因此我们只需要一个绑定。
+        binding 指定绑定在绑定数组中的索引。
+        stride 指定从一个条目到下一个条目的字节数， 
+        inputRate 参数可以具有以下值之一：
+            VK_VERTEX_INPUT_RATE_VERTEX：在每个顶点之后移动到下一个数据条目
+            VK_VERTEX_INPUT_RATE_INSTANCE：每个实例后移动到下一个数据条目
+        */
+        bindingDescription.binding = 0;
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        return bindingDescription;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 2>
+    getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2>
+            attributeDescriptions {};
+
+        /*
+        binding 参数告诉 Vulkan 每个顶点的数据来自哪个绑定。 
+        location 参数引用顶点着色器中输入的 location 指令。
+        顶点着色器中位置为 0 输入是位置信息，它包含两个 32 位浮点分量。
+        format 参数描述属性的数据类型。需要注意的是，格式的指定使用了与颜色格式相同的枚举。以下着色器类型和格式通常一起使用：
+        float: VK_FORMAT_R32_SFLOAT
+        vec2: VK_FORMAT_R32G32_SFLOAT
+        vec3: VK_FORMAT_R32G32B32_SFLOAT
+        vec4: VK_FORMAT_R32G32B32A32_SFLOAT
+        */
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
+
+const std::vector<Vertex> vertices = {
+    { .pos = { 0.0F, -0.5F }, .color = { 1.0F, 0.0F, 0.0F } },
+    { .pos = { 0.5F, 0.5F }, .color = { 0.0F, 1.0F, 0.0F } },
+    { .pos = { -0.5F, 0.5F }, .color = { 0.0F, 0.0F, 1.0F } }
+};
 
 // #define DEBUG_USER
 
@@ -113,31 +198,6 @@ private:
     添加一个新的成员变量，用于标记是否发生了调整大小
     */
     bool framebufferResized = false;
-
-    // 所有的 queue family 都使用 index 表示
-    struct QueueFamilyIndices {
-        // 支持图像的 queue family 的 index（支持绘制的 queue family）
-        std::optional<uint32_t> graphicsFamily;
-        // 支持呈现的 queue family
-        std::optional<uint32_t> presentFamily;
-
-        [[nodiscard]] bool isComplete() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-
-        operator bool() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-    };
-
-    struct SwapChainSupportDetails {
-        // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 / 最大的宽度和高度
-        VkSurfaceCapabilitiesKHR capabilities;
-        // surface 的格式，例如像素格式、色彩空间
-        std::vector<VkSurfaceFormatKHR> formats;
-        // 可用的呈现模式
-        std::vector<VkPresentModeKHR> presentModes;
-    };
 
 private:
     void initWindow() {
@@ -319,15 +379,21 @@ private:
             Attribute descriptions: 传递给顶点着色器的属性类型，从哪个绑定加载它们以及它们在哪个偏移量
         */
         // 顶点输入阶段
-        // 暂时没有顶点输入
         VkPipelineVertexInputStateCreateInfo vertexInputInfo {};
         vertexInputInfo.sType =
             VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
         // pVertexBindingDescriptions 和 pVertexAttributeDescriptions 成员各自指向一个结构体数组，该数组描述了上述用于加载顶点数据的详细信息。
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
+        // 这里只是告诉程序如何解析顶点数据，但实际的数据还未传递到 GPU
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.vertexAttributeDescriptionCount =
+            static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputInfo.pVertexAttributeDescriptions =
+            attributeDescriptions.data();
 
         /*
         VkPipelineInputAssemblyStateCreateInfo 结构体描述了两件事：1. 将从顶点绘制何种几何图形（拓扑） 2. 是否启用原始图形重启动。

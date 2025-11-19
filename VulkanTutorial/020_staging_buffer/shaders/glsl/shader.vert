@@ -1,22 +1,14 @@
 #version 450
 
-// Vertex shader 里输出变量名不必和 Fragment shader 里的一致
-// 只需保证他们的 location（索引）对上即可
+// 这里的 location 是顶点属性的 index
+layout(location = 0) in vec2 inPosition;
+layout(location = 1) in vec3 inColor;
+
+// vertex shader 和 fragment shader 中的变量名不一定要一样
+// 只需让 location 对上即可
 layout(location = 0) out vec3 fragColor;
 
-vec2 positions[3] = vec2[](
-    vec2(0.0, -0.5),
-    vec2(0.5, 0.5),
-    vec2(-0.5, 0.5)
-);
-
-vec3 colors[3] = vec3[](
-    vec3(1.0, 0.0, 0.0),
-    vec3(0.0, 1.0, 0.0),
-    vec3(0.0, 0.0, 1.0)
-);
-
 void main() {
-    gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-    fragColor = colors[gl_VertexIndex];
+    gl_Position = vec4(inPosition, 0.0, 1.0);
+    fragColor = inColor;
 }
