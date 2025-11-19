@@ -242,7 +242,9 @@ private:
         subpass.pColorAttachments = &colorAttachmentRef;
 
         VkSubpassDependency dependency {};
+        // 特殊值 VK_SUBPASS_EXTERNAL 指的是在渲染阶段之前或之后的隐式子渲染阶段，具体取决于它是否在 srcSubpass 或 dstSubpass 中指定。
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        // 索引 0 指的是我们的子渲染阶段，它是第一个且唯一的。
         dependency.dstSubpass = 0;
         dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         dependency.srcAccessMask = 0;
