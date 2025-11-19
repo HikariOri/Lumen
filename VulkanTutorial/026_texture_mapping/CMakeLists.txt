@@ -7,6 +7,8 @@ target_link_libraries(${CUR_TARGET} PRIVATE Vulkan::Vulkan)
 target_link_libraries(${CUR_TARGET} PRIVATE volk::volk volk::volk_headers)
 target_link_libraries(${CUR_TARGET} PRIVATE slang::slang)
 target_link_libraries(${CUR_TARGET} PRIVATE tabulate::tabulate)
+target_link_libraries(${CUR_TARGET} PRIVATE imgui::imgui)
+target_link_libraries(${CUR_TARGET} PRIVATE quill::quill)
 target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
 
 add_custom_command(
