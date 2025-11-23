@@ -36,6 +36,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(VulkanTutorial)
-add_subdirectory(SDL3Examples)
+add_subdirectory(sdl_cpp_VulkanTutorial)
 add_subdirectory(engine)
 add_subdirectory(test)
