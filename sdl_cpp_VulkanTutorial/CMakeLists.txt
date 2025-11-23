@@ -29,7 +29,5 @@ add_subdirectory(sdl_cpp_026_texture_mapping)
 add_subdirectory(sdl_cpp_027_depth_buffering)
 add_subdirectory(sdl_cpp_028_model_loading)
 add_subdirectory(sdl_cpp_029_mipmapping)
-add_subdirectory(sdl_cpp_029_mipmapping_pre_gen)
 add_subdirectory(sdl_cpp_030_multisampling)
-add_subdirectory(sdl_cpp_031_compute_shader)
 

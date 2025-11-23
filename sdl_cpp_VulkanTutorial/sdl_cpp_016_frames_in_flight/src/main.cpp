@@ -2,24 +2,19 @@
 1. 所有的查询基本上都在物理设备上
 */
 
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <fstream>
-#include <limits>
-#include <optional>
 #include <set>
 #include <stdexcept>
-#include <vector>
-
-#include <tabulate/table.hpp>
 
 #define VOLK_IMPLEMENTATION
 #include <volk.h>
 #include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
+#include <SDL3_image/SDL_image.h>
+
+#include <tabulate/table.hpp>
 
 #include <quill/Backend.h>
 #include <quill/Frontend.h>
@@ -27,15 +22,10 @@
 #include <quill/Logger.h>
 #include <quill/sinks/ConsoleSink.h>
 
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_vulkan.h>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
+
+constexpr const char *const ICON_PATH = "./assets/icons/哈士奇.png";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -57,6 +47,31 @@ constexpr bool enableValidationLayers = true;
 
 quill::Logger *logger = nullptr;
 
+// 所有的 queue family 都使用 index 表示
+struct QueueFamilyIndices {
+    // 支持图像的 queue family 的 index（支持绘制的 queue family）
+    std::optional<uint32_t> graphicsFamily;
+    // 支持呈现的 queue family
+    std::optional<uint32_t> presentFamily;
+
+    [[nodiscard]] bool isComplete() const {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+
+    operator bool() const {
+        return graphicsFamily.has_value() && presentFamily.has_value();
+    }
+};
+
+struct SwapChainSupportDetails {
+    // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 / 最大的宽度和高度
+    VkSurfaceCapabilitiesKHR capabilities;
+    // surface 的格式，例如像素格式、色彩空间
+    std::vector<VkSurfaceFormatKHR> formats;
+    // 可用的呈现模式
+    std::vector<VkPresentModeKHR> presentModes;
+};
+
 class HelloTriangleApplication {
 public:
     void run() {
@@ -67,7 +82,7 @@ public:
     }
 
 private:
-    GLFWwindow *window;
+    SDL_Window *window;
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
@@ -107,42 +122,29 @@ private:
     std::vector<VkFence> inFlightFences;
     uint32_t currentFrame = 0;
 
-    // 所有的 queue family 都使用 index 表示
-    struct QueueFamilyIndices {
-        // 支持图像的 queue family 的 index（支持绘制的 queue family）
-        std::optional<uint32_t> graphicsFamily;
-        // 支持呈现的 queue family
-        std::optional<uint32_t> presentFamily;
-
-        [[nodiscard]] bool isComplete() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-
-        operator bool() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-    };
-
-    struct SwapChainSupportDetails {
-        // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 / 最大的宽度和高度
-        VkSurfaceCapabilitiesKHR capabilities;
-        // surface 的格式，例如像素格式、色彩空间
-        std::vector<VkSurfaceFormatKHR> formats;
-        // 可用的呈现模式
-        std::vector<VkPresentModeKHR> presentModes;
-    };
-
 private:
     void initWindow() {
-        // 初始化 glfw
-        glfwInit();
 
-        // 设置不适用 opengl api
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        // 先不管 resize
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        if (!SDL_Init(SDL_INIT_VIDEO)) {
+            throw std::runtime_error(
+                std::string("Couldn't initialize SDL: {} ") + SDL_GetError());
+        }
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        window = SDL_CreateWindow("Vulkan ", WIDTH, HEIGHT,
+                                  SDL_WINDOW_VULKAN /*|SDL_WINDOW_RESIZABLE*/);
+
+        SDL_Surface *icon = IMG_Load(ICON_PATH);
+        if (icon) {
+            SDL_SetWindowIcon(window, icon);
+            SDL_DestroySurface(icon);
+        } else {
+            LOG_WARNING(logger, "failed to load icon: {}", ICON_PATH);
+        }
+
+        if (!window) {
+            throw std::runtime_error(std::string("Couldn't create window: ") +
+                                     SDL_GetError());
+        }
     }
 
     void initVulkan() {
@@ -684,9 +686,10 @@ private:
     }
 
     void createSurface() {
-        // 创建 surface
-        if (glfwCreateWindowSurface(instance, window, nullptr, &surface)) {
-            throw std::runtime_error { "failed to create window surface!" };
+        if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface)) {
+            throw std::runtime_error(
+                std::string("failed to create window surface: ") +
+                SDL_GetError());
         }
     }
 
@@ -963,9 +966,13 @@ private:
             // 如果窗口管理系统没有将宽度和高度设置为最大的话，说明 currentExtent 是可用的
             return capabilities.currentExtent;
         } else {
-            int width {}, height {};
-            // 考虑到高 DPI 显示器可能会导致分辨率大于屏幕坐标，使用最好使用 glfwGetFramebufferSize 查询窗口分辨率（像素）
-            glfwGetFramebufferSize(window, &width, &height);
+            int width = 0, height = 0;
+            // 用 SDL3 获取窗口的真实像素宽高（drawable / frame buffer 大小）
+            if (!SDL_GetWindowSizeInPixels(window, &width, &height)) {
+                throw std::runtime_error(
+                    std::string("SDL_GetWindowSizeInPixels failed: ") +
+                    SDL_GetError());
+            }
 
             VkExtent2D actualExtent {
                 static_cast<uint32_t>(width),
@@ -1077,8 +1084,14 @@ private:
     }
 
     void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
-            glfwPollEvents();
+        bool running { true };
+        while (running) {
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_EVENT_QUIT) {
+                    running = false;
+                }
+            }
             drawFrame();
         }
 
@@ -1214,10 +1227,8 @@ private:
         // 销毁 VkInstnace
         vkDestroyInstance(instance, nullptr);
 
-        // 销毁 glfwWindow
-        glfwDestroyWindow(window);
-        // 停止 glfw
-        glfwTerminate();
+        SDL_DestroyWindow(window);
+        SDL_Quit();
     }
 
     void createInstance() {
@@ -1342,14 +1353,27 @@ private:
     }
 
     std::vector<const char *> getRequiredExtensions() {
-        uint32_t glfwExtensionCount = 0;
-        const char **glfwExtensions {};
-        // 查询 glfw 需要的 vulkan 拓展
-        // 如果是 sdl 就查询 sdl 的
-        glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        uint32_t sdlExtensionCount = 0;
+        const char *const *sdlExtensions =
+            SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+        if (!sdlExtensions) {
+            throw std::runtime_error(
+                "SDL_Vulkan_GetInstanceExtensions failed: " +
+                std::string(SDL_GetError()));
+        }
 
-        std::vector<const char *> extensions(
-            glfwExtensions, glfwExtensions + glfwExtensionCount);
+#ifdef DEBUG_USER
+        tabulate::Table sdlRequiredInstanceExtensionsTable;
+        LOG_DEBUG(logger, "sdl 需要的扩展:");
+        sdlRequiredInstanceExtensionsTable.add_row({ "Name" });
+        for (int i {}; i < sdlExtensionCount; ++i) {
+            sdlRequiredInstanceExtensionsTable.add_row({ sdlExtensions[i] });
+        }
+        LOG_DEBUG(logger, "{}", sdlRequiredInstanceExtensionsTable.str());
+#endif
+
+        std::vector<const char *> extensions(sdlExtensions,
+                                             sdlExtensions + sdlExtensionCount);
 
         if constexpr (enableValidationLayers) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);

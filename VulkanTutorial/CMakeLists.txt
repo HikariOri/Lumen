@@ -29,7 +29,6 @@ add_subdirectory(026_texture_mapping)
 add_subdirectory(027_depth_buffering)
 add_subdirectory(028_model_loading)
 add_subdirectory(029_mipmapping)
-add_subdirectory(029_mipmapping_pre_gen)
 add_subdirectory(030_multisampling)
 add_subdirectory(031_compute_shader)
 
