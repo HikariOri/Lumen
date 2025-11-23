@@ -21,6 +21,7 @@ find_package(slang CONFIG REQUIRED)
 # ============================================================================
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
 find_package(tinyobjloader CONFIG REQUIRED)
+find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
 
 # ============================================================================
 # UI库
