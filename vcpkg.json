@@ -19,7 +19,8 @@
         "docking-experimental",
         "vulkan-binding",
         "glfw-binding",
-        "sdl3-binding"
+        "sdl3-binding",
+        "sdlgpu3-binding"
       ]
     },
     {
