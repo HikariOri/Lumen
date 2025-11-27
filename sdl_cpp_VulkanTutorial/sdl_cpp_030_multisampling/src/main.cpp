@@ -30,6 +30,7 @@
 #include <fstream>
 #include <set>
 #include <stdexcept>
+#include <vector>
 
 // OpenGL depth [-1, 1]
 // Vulkan depth [0, 1]
@@ -73,7 +74,7 @@ const std::vector<const char *> validationLayers = {
 };
 
 const std::vector<const char *> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    vk::KHRSwapchainExtensionName
 };
 
 #ifdef NDEBUG
@@ -241,6 +242,7 @@ private:
 
     std::vector<vk::Semaphore> imageAvailableSemaphores;
     std::vector<vk::Semaphore> renderFinishedSemaphores;
+    std::vector<vk::Semaphore> presentSemaphores;
     std::vector<vk::Fence> inFlightFences;
     uint32_t currentFrame = 0;
 
@@ -423,7 +425,7 @@ private:
 
         vk::SubpassDependency dependency {};
         // 特殊值 VK_SUBPASS_EXTERNAL 指的是在渲染阶段之前或之后的隐式子渲染阶段，具体取决于它是否在 srcSubpass 或 dstSubpass 中指定。
-        dependency.setSrcSubpass(VK_SUBPASS_EXTERNAL)
+        dependency.setSrcSubpass(vk::SubpassExternal)
             .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput |
                              vk::PipelineStageFlagBits::eLateFragmentTests)
             .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite |
@@ -502,7 +504,7 @@ private:
         */
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly {};
         inputAssembly.setTopology(vk::PrimitiveTopology::eTriangleList)
-            .setPrimitiveRestartEnable(VK_FALSE);
+            .setPrimitiveRestartEnable(vk::False);
 
         // viewport 阶段（使用动态阶段）
         vk::PipelineViewportStateCreateInfo viewportState {};
@@ -513,9 +515,9 @@ private:
         // 如果 depthClampEnable 设置为 VK_TRUE ，那么超出近裁剪面和远裁剪面的片段会被裁剪到这些平面上，而不是被丢弃。
         // 在制作阴影贴图可能需要这样
         rasterizer
-            .setDepthClampEnable(VK_FALSE)
+            .setDepthClampEnable(vk::False)
             // 如果 rasterizerDiscardEnable 设置为 VK_TRUE ，那么几何体将不会通过光栅化阶段。这基本上禁用了任何输出到帧缓冲区
-            .setRasterizerDiscardEnable(VK_FALSE)
+            .setRasterizerDiscardEnable(vk::False)
             /*
         polygonMode 确定如何为几何体生成片段。以下模式可用：
             VK_POLYGON_MODE_FILL : 用片段填充多边形区域
@@ -527,29 +529,18 @@ private:
             .setCullMode(vk::CullModeFlagBits::eBack)
             .setFrontFace(vk::FrontFace::eCounterClockwise)
             // 光栅化器可以通过添加一个常量值或根据片段的斜率对其进行偏置来改变深度值，这有时用于阴影映射
-            .setDepthBiasEnable(VK_FALSE)
-            .setDepthBiasConstantFactor(0.0F) // Optional
-            .setDepthBiasClamp(0.0F)          // Optional
-            .setDepthBiasSlopeFactor(0.0F);   // Optional
+            .setDepthBiasEnable(vk::False);
 
         vk::PipelineMultisampleStateCreateInfo multisampling {};
-        multisampling.setSampleShadingEnable(VK_FALSE)
-            .setRasterizationSamples(msaaSamples)
-            .setMinSampleShading(1.0F)          // Optional
-            .setPSampleMask(nullptr)            // Optional
-            .setAlphaToCoverageEnable(VK_FALSE) // Optional
-            .setAlphaToOneEnable(VK_FALSE);     // Optional
+        multisampling.setSampleShadingEnable(vk::False).setRasterizationSamples(
+            msaaSamples);
 
         vk::PipelineDepthStencilStateCreateInfo depthStencil {};
-        depthStencil.setDepthTestEnable(VK_TRUE)
-            .setDepthWriteEnable(VK_TRUE)
+        depthStencil.setDepthTestEnable(vk::True)
+            .setDepthWriteEnable(vk::True)
             .setDepthCompareOp(vk::CompareOp::eLess)
-            .setDepthBoundsTestEnable(VK_FALSE)
-            .setMinDepthBounds(0.0F) // Optional
-            .setMaxDepthBounds(1.0F) // Optional
-            .setStencilTestEnable(VK_FALSE);
-        // depthStencil.front = {}; // Optional
-        // depthStencil.back = {};  // Optional
+            .setDepthBoundsTestEnable(vk::False)
+            .setStencilTestEnable(vk::False);
 
         vk::PipelineColorBlendAttachmentState colorBlendAttachment {};
         colorBlendAttachment
@@ -557,19 +548,11 @@ private:
                                vk::ColorComponentFlagBits::eG |
                                vk::ColorComponentFlagBits::eB |
                                vk::ColorComponentFlagBits::eA)
-            .setBlendEnable(VK_FALSE)
-            .setSrcColorBlendFactor(vk::BlendFactor::eOne)  // Optional
-            .setDstColorBlendFactor(vk::BlendFactor::eZero) // Optional
-            .setColorBlendOp(vk::BlendOp::eAdd)             // Optional
-            .setSrcAlphaBlendFactor(vk::BlendFactor::eOne)  // Optional
-            .setDstAlphaBlendFactor(vk::BlendFactor::eZero) // Optional
-            .setAlphaBlendOp(vk::BlendOp::eAdd);            // Optional
+            .setBlendEnable(vk::False);
 
         vk::PipelineColorBlendStateCreateInfo colorBlending {};
-        colorBlending.setLogicOpEnable(VK_FALSE)
-            .setLogicOp(vk::LogicOp::eCopy) // Optional
-            .setAttachments(colorBlendAttachment)
-            .setBlendConstants({ 0.0F, 0.0F, 0.0F, 0.0F }); // Optional
+        colorBlending.setLogicOpEnable(vk::False).setAttachments(
+            colorBlendAttachment);
 
         // 可以指定为静态的
         // VkViewport viewport {};
@@ -609,8 +592,7 @@ private:
 
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {};
         // 绑定标识符集
-        pipelineLayoutInfo.setSetLayouts({ descriptorSetLayout })
-            .setPushConstantRanges({}); // Optional
+        pipelineLayoutInfo.setSetLayouts({ descriptorSetLayout });
 
         pipelineLayout = device.createPipelineLayout(pipelineLayoutInfo);
 
@@ -626,9 +608,7 @@ private:
             .setPDynamicState(&dynamicState)
             .setLayout(pipelineLayout)
             .setRenderPass(renderPass)
-            .setSubpass(0)
-            .setBasePipelineHandle(VK_NULL_HANDLE) // Optional
-            .setBasePipelineIndex(-1);             // Optional
+            .setSubpass(0);
 
         graphicsPipeline =
             device.createGraphicsPipeline(nullptr, pipelineInfo).value;
@@ -647,8 +627,7 @@ private:
             // 有几个
             .setDescriptorCount(1)
             // 在哪个阶段中应用
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
-            .setPImmutableSamplers(nullptr); // Optional
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex);
 
         vk::DescriptorSetLayoutBinding samplerLayoutBinding {};
         samplerLayoutBinding.setBinding(1)
@@ -850,8 +829,8 @@ private:
         // 创建一个 image memory barrier，用于 mipmap 级别布局转换
         vk::ImageMemoryBarrier barrier {};
         barrier.setImage(image)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+            .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+            .setDstQueueFamilyIndex(vk::QueueFamilyIgnored);
         // 我们只处理颜色 (color) 方面
         barrier.subresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor)
             .setBaseArrayLayer(0)
@@ -879,7 +858,7 @@ private:
                 vk::PipelineStageFlagBits::
                     eTransfer, // 写入发生在 transfer 阶段
                 vk::PipelineStageFlagBits::eTransfer, // 读取也在 transfer 阶段
-                vk::DependencyFlagBits(0), nullptr, nullptr, barrier);
+                {}, nullptr, nullptr, barrier);
 
             // 配置 blit 区域 (region)，从前一 mip 级别 (i-1) blit 到当前 (i)
 
@@ -915,7 +894,7 @@ private:
             commandBuffer.pipelineBarrier(
                 vk::PipelineStageFlagBits::eTransfer,       // blit 完成后
                 vk::PipelineStageFlagBits::eFragmentShader, // shader 读取
-                vk::DependencyFlagBits(0), nullptr, nullptr, barrier);
+                {}, nullptr, nullptr, barrier);
 
             // 缩小 mip 的宽和高，为下一循环做准备
             if (mipWidth > 1) {
@@ -936,7 +915,7 @@ private:
         commandBuffer.pipelineBarrier(
             vk::PipelineStageFlagBits::eTransfer,       // 写入结束
             vk::PipelineStageFlagBits::eFragmentShader, // 接下来 shader 读取
-            vk::DependencyFlagBits(0), nullptr, nullptr, barrier);
+            {}, nullptr, nullptr, barrier);
 
         // 提交并结束一次性命令缓冲区
         endSingleTimeCommands(commandBuffer);
@@ -967,7 +946,7 @@ private:
             .setAddressModeV(vk::SamplerAddressMode::eRepeat)
             .setAddressModeW(vk::SamplerAddressMode::eRepeat)
             // 各向异性过滤，如果不是性能瓶颈，没有理由不开启
-            .setAnisotropyEnable(VK_TRUE)
+            .setAnisotropyEnable(vk::True)
             .setMaxAnisotropy(properties.limits.maxSamplerAnisotropy)
             // borderColor 字段指定在使用边界 clamp 地址模式采样图像外部时返回哪种颜色。可以返回黑色、白色或透明，并且可以以浮点或整数格式返回。你不能指定任意颜色。
             .setBorderColor(vk::BorderColor::eIntOpaqueBlack)
@@ -975,15 +954,13 @@ private:
             // 如果这个字段是 VK_TRUE ，那么你可以直接使用 [0, texWidth) 和 [0, texHeight) 范围内的坐标。
             // 如果它是 VK_FALSE ，那么所有轴上都使用 [0, 1) 范围内的坐标来寻址纹理单元。
             // 实际应用几乎总是使用归一化坐标，因为这样可以使用不同分辨率的纹理并使用完全相同的坐标。
-            .setUnnormalizedCoordinates(VK_FALSE)
+            .setUnnormalizedCoordinates(vk::False)
             // 如果启用了比较函数，则首先会将纹理单元与一个值进行比较，该比较的结果将用于过滤操作。这主要用于阴影贴图的百分比更近过滤（PCSS）。
-            .setCompareEnable(VK_FALSE)
+            .setCompareEnable(vk::False)
             .setCompareOp(vk::CompareOp::eAlways)
             // mipmapping
             .setMipmapMode(vk::SamplerMipmapMode::eLinear)
-            .setMinLod(0.0F) // Optional
-            .setMaxLod(VK_LOD_CLAMP_NONE)
-            .setMipLodBias(0.0F); //
+            .setMaxLod(vk::LodClampNone);
 
         textureSampler = device.createSampler(samplerInfo);
     }
@@ -1038,10 +1015,10 @@ private:
         vk::SubmitInfo submitInfo {};
         submitInfo.setCommandBuffers(commandBuffer);
 
-        graphicsQueue.submit(1, &submitInfo, nullptr);
+        graphicsQueue.submit(submitInfo);
         graphicsQueue.waitIdle();
 
-        device.freeCommandBuffers(commandPool, { commandBuffer });
+        device.freeCommandBuffers(commandPool, commandBuffer);
     }
 
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer,
@@ -1050,13 +1027,10 @@ private:
         vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
 
         vk::BufferCopy copyRegion {};
-        copyRegion
-            .setSrcOffset(0) // Optional
-            .setDstOffset(0) // Optional
-            .setSize(size);
+        copyRegion.setSize(size);
 
         // 复制 buffer
-        commandBuffer.copyBuffer(srcBuffer, dstBuffer, { copyRegion });
+        commandBuffer.copyBuffer(srcBuffer, dstBuffer, copyRegion);
 
         endSingleTimeCommands(commandBuffer);
     }
@@ -1212,8 +1186,7 @@ private:
             .setPNext(nullptr) // 没有扩展结构体
             // flags 可以指定一些行为，比如是否能单独释放描述符集 (descriptor set)。
             // 这里我们不设置 flags，表示默认行为（一般是全部重置或释放，而不是单个释放）。
-            .setFlags(vk::DescriptorPoolCreateFlagBits(0))
-            // 指向刚才定义的 poolSizes 数组
+            .setFlags({})
             .setPoolSizes(poolSizes)
             // maxSets 是这个描述符池里最多能分配多少个 descriptor set（描述符集）
             // 我们把它设为 MAX_FRAMES_IN_FLIGHT，表示我们打算为每一帧都分配一个 descriptor set
@@ -1354,7 +1327,6 @@ private:
             例如，如果你使用 3D 纹理来表示体素地形，那么你可以使用这个功能来避免为存储大量的"空气"值分配内存。
             */
             .setSamples(numSamples);
-        // imageInfo.flags = 0; // Optional
 
         image = device.createImage(imageInfo);
 
@@ -1387,8 +1359,8 @@ private:
         barrier.setOldLayout(oldLayout)
             .setNewLayout(newLayout)
             // 如果你使用屏障来转移队列家族所有权，那么这两个字段应该是队列家族的索引。如果你不想这样做（不是默认值！），必须将它们设置为 VK_QUEUE_FAMILY_IGNORED 。
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+            .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
             .setImage(image)
             .setSubresourceRange(
                 { vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0, 1 });
@@ -1417,9 +1389,8 @@ private:
         }
 
         // 命令缓冲区后的第一个参数指定屏障之前应发生的操作所在的管线阶段。第二个参数指定操作将在哪个管线阶段等待屏障。
-        commandBuffer.pipelineBarrier(sourceStage, destinationStage,
-                                      vk::DependencyFlagBits(0), nullptr,
-                                      nullptr, barrier);
+        commandBuffer.pipelineBarrier(sourceStage, destinationStage, {},
+                                      nullptr, nullptr, barrier);
 
         endSingleTimeCommands(commandBuffer);
     }
@@ -1442,7 +1413,7 @@ private:
         region.setImageOffset({ 0, 0, 0 }).setImageExtent({ width, height, 1 });
 
         commandBuffer.copyBufferToImage(
-            buffer, image, vk::ImageLayout::eTransferDstOptimal, { region });
+            buffer, image, vk::ImageLayout::eTransferDstOptimal, region);
 
         endSingleTimeCommands(commandBuffer);
     }
@@ -1488,6 +1459,7 @@ private:
     void createSyncObjects() {
         imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        presentSemaphores.resize(swapChainImages.size());
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
 
         // 当前版本创建同步对象很简单
@@ -1510,6 +1482,15 @@ private:
                                          "objects for a frame!");
             }
         }
+
+        for (size_t i {}; i < presentSemaphores.size(); ++i) {
+            presentSemaphores[i] = device.createSemaphore(semaphoreInfo);
+
+            if (presentSemaphores[i] == nullptr) {
+                throw std::runtime_error("failed to create synchronization "
+                                         "objects for a frame!");
+            }
+        }
     }
 
     void recordCommandBuffer(vk::CommandBuffer commandBuffer,
@@ -1521,16 +1502,8 @@ private:
             VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: 这是一个辅助命令缓冲区，它将完全包含在单个渲染过程中。
             VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：即使命令缓冲区已处于待执行状态，也可以重新提交该命令缓冲区。
         */
-        // beginInfo.flags = 0; // Optional
-        // pInheritanceInfo 参数仅与辅助命令缓冲区相关。它指定要从调用的主命令缓冲区继承哪个状态。
-        // beginInfo.pInheritanceInfo = nullptr; // Optional
 
         commandBuffer.begin(beginInfo);
-
-        vk::RenderPassBeginInfo renderPassInfo {};
-        renderPassInfo.setRenderPass(renderPass)
-            .setFramebuffer(swapChainFramebuffers[imageIndex])
-            .setRenderArea({ vk::Offset2D { 0, 0 }, swapChainExtent });
 
         // The last two parameters define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR,
         // which we used as load operation for the color attachment.
@@ -1539,7 +1512,11 @@ private:
             vk::ClearDepthStencilValue { 1.0F, 0 }
         };
 
-        renderPassInfo.setClearValues(clearValues);
+        vk::RenderPassBeginInfo renderPassInfo {};
+        renderPassInfo.setRenderPass(renderPass)
+            .setFramebuffer(swapChainFramebuffers[imageIndex])
+            .setRenderArea({ vk::Offset2D { 0, 0 }, swapChainExtent })
+            .setClearValues(clearValues);
 
         /*
         每个命令的第一个参数始终是用于记录命令的命令缓冲区。第二个参数指定我们刚刚提供的渲染通道的详细信息。最后一个参数控制渲染通道中绘图命令的提供方式。它可以取以下两个值之一：
@@ -1666,7 +1643,7 @@ private:
         // 指定需要的物理设备的特性
         vk::PhysicalDeviceFeatures deviceFeatures {};
         // 各向异性过滤是一个可选的设备功能
-        deviceFeatures.setSamplerAnisotropy(VK_TRUE);
+        deviceFeatures.setSamplerAnisotropy(vk::True);
 
         vk::DeviceCreateInfo createInfo {};
 
@@ -1682,8 +1659,6 @@ private:
         // 这里为了兼容旧版本还是设置一下
         if constexpr (enableValidationLayers) {
             createInfo.setPEnabledLayerNames(validationLayers);
-        } else {
-            createInfo.enabledLayerCount = 0;
         }
 
         device = physicalDevice.createDevice(createInfo);
@@ -1749,7 +1724,7 @@ private:
             .setCompositeAlpha(vk::CompositeAlphaFlagBitsKHR::eOpaque)
             .setPresentMode(presentMode)
             // 是否裁剪，如果希望一直得到完整的图像应该设置为 VK_FALSE;
-            .setClipped(VK_TRUE)
+            .setClipped(vk::True)
             .setOldSwapchain(nullptr);
 
         swapChain = device.createSwapchainKHR(createInfo);
@@ -2036,13 +2011,13 @@ private:
         */
 
         // 等待上一帧完成
-        device.waitForFences(1, &inFlightFences[currentFrame], VK_TRUE,
-                             UINT64_MAX);
+        auto t = device.waitForFences(inFlightFences[currentFrame], vk::True,
+                                      UINT64_MAX);
 
         // 从交换链中获取图像
         auto [result, imageIndex] = device.acquireNextImageKHR(
             swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame],
-            VK_NULL_HANDLE);
+            nullptr);
 
         /*
         现在我们只需要确定何时需要重新创建交换链，并调用我们的新 recreateSwapChain 函数。
@@ -2064,10 +2039,10 @@ private:
 
         // fence 必须手动 reset
         // 确实能 submit 才 reset
-        device.resetFences(1, &inFlightFences[currentFrame]);
+        device.resetFences(inFlightFences[currentFrame]);
 
         // reset 一下 command 确保它可以被记录
-        commandBuffers[currentFrame].reset(vk::CommandBufferResetFlagBits(0));
+        commandBuffers[currentFrame].reset({});
         // 记录命令
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
@@ -2085,26 +2060,24 @@ private:
             .setWaitDstStageMask(waitStages)
             .setCommandBuffers(commandBuffers[currentFrame]);
 
-        vk::Semaphore signalSemaphores[] = {
-            renderFinishedSemaphores[currentFrame]
-        };
-        submitInfo.setSignalSemaphores(signalSemaphores);
+        // vk::Semaphore signalSemaphores[] = {
+        //     renderFinishedSemaphores[currentFrame]
+        // };
+        submitInfo.setSignalSemaphores(presentSemaphores[imageIndex]);
 
         // 提交命令到队列
         // 此处会 reset imageAvailableSemaphore and signal renderFinishedSemaphore
-        graphicsQueue.submit({ submitInfo }, inFlightFences[currentFrame]);
+        graphicsQueue.submit(submitInfo, inFlightFences[currentFrame]);
 
         // present
         vk::PresentInfoKHR presentInfo {};
 
-        presentInfo.setWaitSemaphores(signalSemaphores);
+        presentInfo.setWaitSemaphores(presentSemaphores[imageIndex]);
 
-        vk::SwapchainKHR swapChains[] = { swapChain };
-        presentInfo.setSwapchains(swapChains)
-            .setImageIndices(imageIndex)
-            .setPResults(nullptr); // Optional
+        // vk::SwapchainKHR swapChains[] = { swapChain };
+        presentInfo.setSwapchains(swapChain).setImageIndices(imageIndex);
 
-        // 提交向交换链呈现镜像的请求
+        // 提交向交换链呈现镜像的请求presentSemaphores
         result = presentQueue.presentKHR(presentInfo);
 
         if (result == vk::Result::eErrorOutOfDateKHR ||
@@ -2173,6 +2146,10 @@ private:
             device.destroySemaphore(renderFinishedSemaphores[i]);
             device.destroySemaphore(imageAvailableSemaphores[i]);
             device.destroyFence(inFlightFences[i]);
+        }
+
+        for (auto presentSemaphore : presentSemaphores) {
+            device.destroySemaphore(presentSemaphore);
         }
 
         device.destroyCommandPool(commandPool);
@@ -2269,7 +2246,7 @@ private:
                                              sdlExtensions + sdlExtensionCount);
 
         if constexpr (enableValidationLayers) {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            extensions.push_back(vk::EXTDebugUtilsExtensionName);
         }
 
         return extensions;
