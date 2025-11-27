@@ -100,6 +100,22 @@
     {
       "name": "cli11",
       "version>=": "2.6.1"
+    },
+    {
+      "name": "fmt",
+      "version>=": "11.0.2#1"
+    },
+    {
+      "name": "fastgltf",
+      "version>=": "0.9.0"
+    },
+    {
+      "name": "vk-bootstrap",
+      "version>=": "1.4.312"
+    },
+    {
+      "name": "vulkan-headers",
+      "version>=": "1.4.309.0"
     }
   ]
 }

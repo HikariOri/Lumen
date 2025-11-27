@@ -22,6 +22,7 @@ find_package(slang CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
 find_package(tinyobjloader CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
+find_package(fastgltf CONFIG REQUIRED)
 
 # ============================================================================
 # UI库
@@ -35,6 +36,7 @@ find_package(unofficial-imgui-node-editor CONFIG REQUIRED)
 # ============================================================================
 find_package(quill CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
 
 # ============================================================================
 # 媒体库 (SDL)
@@ -49,6 +51,7 @@ find_package(SDL3_ttf CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(volk CONFIG REQUIRED)
+find_package(vk-bootstrap CONFIG REQUIRED)
 
 # ============================================================================
 # 工具库
