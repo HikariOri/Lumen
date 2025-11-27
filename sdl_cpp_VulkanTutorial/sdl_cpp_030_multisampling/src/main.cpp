@@ -362,7 +362,6 @@ private:
 
         colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
         colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-        ;
 
         /*
         一些最常见的布局包括：
@@ -937,17 +936,6 @@ private:
             blit.dstSubresource.layerCount = 1;
 
             // 执行 blit，从 src mip 级别到 dst mip 级别，并使用线性过滤
-            // vkCmdBlitImage(commandBuffer, image,
-            //                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
-            //                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
-            //                VK_FILTER_LINEAR);
-
-            // commandBuffer
-            //     .blitImage(vk::Image srcImage, vk::ImageLayout srcImageLayout,
-            //                vk::Image dstImage, vk::ImageLayout dstImageLayout,
-            //                uint32_t regionCount, const vk::ImageBlit *pRegions,
-            //                vk::Filter filter)
-
             commandBuffer.blitImage(image, vk::ImageLayout::eTransferSrcOptimal,
                                     image, vk::ImageLayout::eTransferDstOptimal,
                                     1, &blit, vk::Filter::eLinear);
@@ -1066,9 +1054,6 @@ private:
         // 对于这种短命的 commandBuffer 最好为他们单独分配一个 commandPool
         allocInfo.commandPool = commandPool;
         allocInfo.commandBufferCount = 1;
-
-        // vk::CommandBuffer commandBuffer;
-        // vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
 
         vk::CommandBuffer commandBuffer =
             device.allocateCommandBuffers(allocInfo).front();
@@ -1215,9 +1200,6 @@ private:
                      indexBufferMemory);
 
         copyBuffer(stagingBuffer, indexBuffer, bufferSize);
-
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
 
         device.destroyBuffer(stagingBuffer);
         device.freeMemory(stagingBufferMemory);
@@ -1563,7 +1545,6 @@ private:
         vk::FenceCreateInfo fenceInfo {};
         // 设置为已发出信号的状态，这样防止保证第一帧还为渲染时无限期等待 fence
         fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
-        ;
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 
@@ -1851,33 +1832,22 @@ private:
     }
 
     void cleanupSwapChain() {
-        // vkDestroyImageView(device, depthImageView, nullptr);
-        // vkDestroyImage(device, depthImage, nullptr);
-        // vkFreeMemory(device, depthImageMemory, nullptr);
-
         device.destroyImageView(depthImageView);
         device.destroyImage(depthImage);
         device.freeMemory(depthImageMemory);
-
-        // vkDestroyImageView(device, colorImageView, nullptr);
-        // vkDestroyImage(device, colorImage, nullptr);
-        // vkFreeMemory(device, colorImageMemory, nullptr);
 
         device.destroyImageView(colorImageView);
         device.destroyImage(colorImage);
         device.freeMemory(colorImageMemory);
 
         for (auto framebuffer : swapChainFramebuffers) {
-            // vkDestroyFramebuffer(device, framebuffer, nullptr);
             device.destroyFramebuffer(framebuffer);
         }
 
         for (auto imageView : swapChainImageViews) {
-            // vkDestroyImageView(device, imageView, nullptr);
             device.destroyImageView(imageView);
         }
 
-        // vkDestroySwapchainKHR(device, swapChain, nullptr);
         device.destroySwapchainKHR(swapChain);
     }
 
@@ -1899,7 +1869,6 @@ private:
             SDL_WaitEvent(&event);
         }
 
-        // vkDeviceWaitIdle(device);
         device.waitIdle();
 
         cleanupSwapChain();
