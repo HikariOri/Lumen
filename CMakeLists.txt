@@ -24,6 +24,22 @@ else ()
     add_compile_options(-Wall -Wextra -Werror=return-type)
 endif ()
 
+find_package(Doxygen OPTIONAL_COMPONENTS dot)
+
+if (Doxygen_FOUND)
+    # 假设你的 Doxyfile 位于项目根 (或 docs/ 目录下)
+    set(MY_DOXYFILE ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile)
+
+    add_custom_target(doc
+        COMMAND ${DOXYGEN_EXECUTABLE} ${MY_DOXYFILE}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating documentation with Doxygen"
+        VERBATIM
+    )
+else()
+    message(WARNING "Doxygen not found — documentation target will be skipped")
+endif()
+
 find_program(SLANGC_COMPILER slangc REQUIRED)
 find_program(GLSLC_COMPILER glslc REQUIRED)
 
