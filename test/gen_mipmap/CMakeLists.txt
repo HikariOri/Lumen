@@ -1,7 +1,0 @@
-set(CUR_TARGET gen_mipmap)
-add_executable(${CUR_TARGET} ./src/main.cpp)
-target_include_directories(${CUR_TARGET} PUBLIC include)
-target_link_libraries(${CUR_TARGET} PRIVATE quill::quill)
-target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
-target_include_directories(${CUR_TARGET} PRIVATE ${TINYGLTF_INCLUDE_DIRS})
-target_link_libraries(${CUR_TARGET} PRIVATE CLI11::CLI11)

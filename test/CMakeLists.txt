@@ -1,1 +1,0 @@
-add_subdirectory(gen_mipmap)
