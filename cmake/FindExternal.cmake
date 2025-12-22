@@ -60,3 +60,5 @@ find_package(Stb REQUIRED)
 find_package(tabulate CONFIG REQUIRED)
 find_package(indicators CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
+
+find_package(Drogon CONFIG REQUIRED)
