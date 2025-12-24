@@ -1,3 +1,0 @@
-add_subdirectory(test_drogon)
-add_subdirectory(test_zxing)
-add_subdirectory(test_sqlite3)

@@ -27,7 +27,6 @@ endif ()
 find_package(Doxygen OPTIONAL_COMPONENTS dot)
 
 if (Doxygen_FOUND)
-    # 假设你的 Doxyfile 位于项目根 (或 docs/ 目录下)
     set(MY_DOXYFILE ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile)
 
     add_custom_target(doc
@@ -51,8 +50,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_subdirectory(VulkanTutorial)
-add_subdirectory(sdl_cpp_VulkanTutorial)
-add_subdirectory(vkguide)
 add_subdirectory(engine)
+add_subdirectory(examples)
 add_subdirectory(test)

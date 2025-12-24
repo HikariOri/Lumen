@@ -1,0 +1,7 @@
+add_subdirectory(sdl_cpp_VulkanTutorial)
+add_subdirectory(vkguide)
+add_subdirectory(VulkanTutorial)
+add_subdirectory(example_drogon)
+add_subdirectory(example_sqlite3)
+add_subdirectory(example_zxing)
+

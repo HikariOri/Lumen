@@ -1,4 +1,4 @@
-set(CUR_TARGET test_sqlite3)
+set(CUR_TARGET example_sqlite3)
 add_executable(${CUR_TARGET} ./src/main.cpp)
 target_include_directories(${CUR_TARGET} PUBLIC include)
 

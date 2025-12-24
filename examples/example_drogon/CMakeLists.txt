@@ -1,5 +1,4 @@
-project(test_drogon CXX)
-
+project(example_drogon CXX)
 
 include(CheckIncludeFileCXX)
 
