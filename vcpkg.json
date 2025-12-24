@@ -155,12 +155,21 @@
       ]
     },
     {
+      "name": "sqlite-orm",
+      "version>=": "1.9.1"
+    },
+    {
       "name": "nu-book-zxing-cpp",
       "version>=": "2.3.0"
     },
     {
       "name": "opencv",
       "version>=": "4.11.0"
+    },
+    {
+      "name": "cpr",
+      "version>=": "1.12.0",
+      "features": ["ssl"]
     }
   ]
 }

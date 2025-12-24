@@ -63,7 +63,10 @@ find_package(CLI11 CONFIG REQUIRED)
 
 find_package(Drogon CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(SqliteOrm CONFIG REQUIRED)
 
 find_package(ZXing CONFIG REQUIRED)
 
 find_package(OpenCV CONFIG REQUIRED)
+
+find_package(cpr CONFIG REQUIRED)
