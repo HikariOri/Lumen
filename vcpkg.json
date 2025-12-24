@@ -153,6 +153,14 @@
         "tool",
         "zlib"
       ]
+    },
+    {
+      "name": "nu-book-zxing-cpp",
+      "version>=": "2.3.0"
+    },
+    {
+      "name": "opencv",
+      "version>=": "4.11.0"
     }
   ]
 }
