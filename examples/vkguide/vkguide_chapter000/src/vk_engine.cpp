@@ -10,12 +10,15 @@
 #include <chrono>
 #include <thread>
 
+using namespace std::chrono;
+
 //> init
 constexpr bool bUseValidationLayers = false;
 
 VulkanEngine *loadedEngine = nullptr;
 
 VulkanEngine &VulkanEngine::Get() { return *loadedEngine; }
+
 void VulkanEngine::init() {
     // only one engine initialization is allowed with the application.
     assert(loadedEngine == nullptr);
@@ -72,7 +75,8 @@ void VulkanEngine::run() {
         // do not draw if we are minimized
         if (stop_rendering) {
             // throttle the speed to avoid the endless spinning
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            std::this_thread::sleep_for(100ms);
             continue;
         }
 

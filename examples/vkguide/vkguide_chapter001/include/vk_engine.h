@@ -8,7 +8,8 @@
 
 //> framedata
 struct FrameData {
-    VkSemaphore _swapchainSemaphore, _renderSemaphore;
+    VkSemaphore _swapchainSemaphore;
+    VkSemaphore _renderSemaphore;
     VkFence _renderFence;
 
     VkCommandPool _commandPool;

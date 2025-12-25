@@ -7,9 +7,9 @@ public:
     glm::vec3 velocity;
     glm::vec3 position;
     // vertical rotation
-    float pitch { 0.f };
+    float pitch { 0.0F };
     // horizontal rotation
-    float yaw { 0.f };
+    float yaw { 0.0F };
 
     glm::mat4 getViewMatrix() const;
     glm::mat4 getRotationMatrix() const;
