@@ -24,6 +24,7 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC tinyobjloader::tinyobjloader_doubl
 target_include_directories(${ENGINE_TARGET} PUBLIC ${Stb_INCLUDE_DIR})
 target_include_directories(${ENGINE_TARGET} PUBLIC imgui::imgui)
 target_include_directories(${ENGINE_TARGET} PUBLIC imguizmo::imguizmo)
+target_link_libraries(${ENGINE_TARGET} PRIVATE cpr::cpr)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 
