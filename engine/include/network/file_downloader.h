@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <future>
 #include <map>
 #include <optional>
 #include <string>
@@ -14,15 +15,17 @@ namespace cake {
          * @brief HTTP响应信息结构体
          */
         struct DownloadResponse {
-            int status_code = 0;                        // HTTP状态码
+            int statusCode = 0;                         // HTTP状态码
             std::vector<uint8_t> data;                  // 响应数据
             std::map<std::string, std::string> headers; // 响应头
-            std::string error_message;                  // 错误信息
-            double elapsed_time = 0.0;                  // 请求耗时（秒）
+            std::string errorMessage;                   // 错误信息
+            double elapsedTime = 0.0;                   // 请求耗时（秒）
 
             bool isSuccess() const {
-                return status_code >= 200 && status_code < 300;
+                return statusCode >= 200 && statusCode < 300;
             }
+
+            operator bool() const { return isSuccess(); }
         };
 
         /**
@@ -34,33 +37,44 @@ namespace cake {
             std::function<void(int64_t downloaded, int64_t total)>;
 
         /**
+         * @brief 下载完成回调函数类型
+         * @param response 下载响应信息
+         */
+        using CompletionCallback =
+            std::function<void(const DownloadResponse &response)>;
+
+        /**
          * @brief 下载配置选项
          */
         struct DownloadOptions {
             std::map<std::string, std::string> headers;  // 自定义HTTP头
             std::chrono::milliseconds timeout { 30000 }; // 超时时间（默认30秒）
-            int max_retries = 0; // 最大重试次数（默认不重试）
-            std::chrono::milliseconds retry_delay {
+            int maxRetries = 0; // 最大重试次数（默认不重试）
+            std::chrono::milliseconds retryDelay {
                 1000
             }; // 重试延迟（默认1秒）
-            ProgressCallback progress_callback;            // 进度回调函数
+            ProgressCallback progressCallback;             // 进度回调函数
             bool verify_ssl = true;                        // 是否验证SSL证书
-            std::string user_agent = "FileDownloader/1.0"; // User-Agent
+            std::string userAgent = "FileDownloader/1.0"; // User-Agent
 
             // 添加自定义HTTP头
-            void AddHeader(const std::string &key, const std::string &value) {
+            DownloadOptions &addHeader(const std::string &key,
+                                       const std::string &value) {
                 headers[key] = value;
+                return *this;
             }
 
             // 设置超时时间
-            void SetTimeout(int milliseconds) {
+            DownloadOptions &setTimeout(int milliseconds) {
                 timeout = std::chrono::milliseconds(milliseconds);
+                return *this;
             }
 
             // 设置重试参数
-            void SetRetry(int max_retries, int delay_ms = 1000) {
-                this->max_retries = max_retries;
-                this->retry_delay = std::chrono::milliseconds(delay_ms);
+            DownloadOptions &setRetry(int maxRetries, int delayMs = 1000) {
+                this->maxRetries = maxRetries;
+                this->retryDelay = std::chrono::milliseconds(delayMs);
+                return *this;
             }
         };
 
@@ -154,6 +168,77 @@ namespace cake {
              * @return 是否可访问
              */
             static bool CheckUrl(const std::string &url, int timeout_ms = 5000);
+
+            // ========== 异步下载方法 ==========
+
+            /**
+             * @brief 异步下载文件到内存
+             * @param url 要下载的文件URL
+             * @param options 下载配置选项（可选）
+             * @return std::future<DownloadResponse>，可通过get()获取结果
+             */
+            static std::future<DownloadResponse>
+            DownloadToMemoryAsync(const std::string &url,
+                                  const DownloadOptions &options = {});
+
+            /**
+             * @brief 异步下载文件并保存到本地
+             * @param url 要下载的文件URL
+             * @param filepath 保存文件的本地路径
+             * @param options 下载配置选项（可选）
+             * @return std::future<DownloadResponse>，可通过get()获取结果
+             */
+            static std::future<DownloadResponse>
+            DownloadToFileAsync(const std::string &url,
+                                const std::string &filepath,
+                                const DownloadOptions &options = {});
+
+            /**
+             * @brief 异步获取HTTP响应的文本内容
+             * @param url 要请求的URL
+             * @param options 下载配置选项（可选）
+             * @return std::future<DownloadResponse>，可通过get()获取结果
+             */
+            static std::future<DownloadResponse>
+            DownloadTextAsync(const std::string &url,
+                              const DownloadOptions &options = {});
+
+            /**
+             * @brief 异步发送POST请求
+             * @param url 请求的URL
+             * @param data POST数据
+             * @param options 请求配置选项（可选）
+             * @return std::future<DownloadResponse>，可通过get()获取结果
+             */
+            static std::future<DownloadResponse>
+            PostAsync(const std::string &url, const std::string &data,
+                      const DownloadOptions &options = {});
+
+            /**
+             * @brief 使用回调函数异步下载文件到内存
+             * @param url 要下载的文件URL
+             * @param callback 完成回调函数
+             * @param options 下载配置选项（可选）
+             * @note 回调函数会在后台线程中执行
+             */
+            static void
+            DownloadToMemoryAsync(const std::string &url,
+                                  const CompletionCallback &callback,
+                                  const DownloadOptions &options = {});
+
+            /**
+             * @brief 使用回调函数异步下载文件并保存到本地
+             * @param url 要下载的文件URL
+             * @param filepath 保存文件的本地路径
+             * @param callback 完成回调函数
+             * @param options 下载配置选项（可选）
+             * @note 回调函数会在后台线程中执行
+             */
+            static void
+            DownloadToFileAsync(const std::string &url,
+                                const std::string &filepath,
+                                const CompletionCallback &callback,
+                                const DownloadOptions &options = {});
 
         private:
             /**
