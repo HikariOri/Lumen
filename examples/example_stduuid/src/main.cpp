@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
                                     gen() };
 
         assert(ids.size() == 5);
-        assert(ids.find(uuid {}) != ids.end());
+        assert(ids.find(uuids::uuid {}) != ids.end());
     }
 
     {
@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
                                               gen(), gen() };
 
         assert(ids.size() == 5);
-        assert(ids.find(uuid {}) != ids.end());
+        assert(ids.find(uuids::uuid {}) != ids.end());
     }
 
     {
