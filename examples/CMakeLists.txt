@@ -5,4 +5,5 @@ add_subdirectory(example_drogon)
 add_subdirectory(example_sqlite3)
 add_subdirectory(example_zxing)
 add_subdirectory(example_cpr_opencv)
+add_subdirectory(example_stduuid)
 

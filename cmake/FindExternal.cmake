@@ -72,3 +72,4 @@ find_package(OpenCV CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 
 find_package(doctest CONFIG REQUIRED)
+find_package(stduuid CONFIG REQUIRED)
