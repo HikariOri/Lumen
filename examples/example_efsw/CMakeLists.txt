@@ -1,0 +1,5 @@
+set(CUR_TARGET example_efsw)
+add_executable(${CUR_TARGET} ./src/main.cpp)
+target_include_directories(${CUR_TARGET} PUBLIC include)
+target_link_libraries(${CUR_TARGET} PRIVATE efsw::efsw)
+target_link_libraries(${CUR_TARGET} PRIVATE ghc_filesystem)
