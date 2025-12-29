@@ -209,6 +209,19 @@
       "name": "protobuf",
       "version>=": "5.29.3#1",
       "features": ["zlib"]
+    },
+    {
+      "name": "doctest",
+      "version>=": "2.4.12"
+    },
+    {
+      "name": "stduuid",
+      "version>=": "1.2.3",
+      "features": ["system-gen"]
+    },
+    {
+      "name": "efsw",
+      "version>=": "1.5.0"
     }
   ]
 }
