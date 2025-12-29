@@ -53,8 +53,8 @@ namespace cake {
             std::chrono::milliseconds retryDelay {
                 1000
             }; // 重试延迟（默认1秒）
-            ProgressCallback progressCallback;             // 进度回调函数
-            bool verify_ssl = true;                        // 是否验证SSL证书
+            ProgressCallback progressCallback;            // 进度回调函数
+            bool verify_ssl = true;                       // 是否验证SSL证书
             std::string userAgent = "FileDownloader/1.0"; // User-Agent
 
             // 添加自定义HTTP头
