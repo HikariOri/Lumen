@@ -222,6 +222,11 @@
     {
       "name": "efsw",
       "version>=": "1.5.0"
+    },
+    {
+      "name": "mimalloc",
+      "version>=": "2.2.4",
+      "features": ["override", "secure"]
     }
   ]
 }
