@@ -6,6 +6,8 @@
 #include <efsw/efsw.hpp>
 #include <ghc/filesystem.hpp>
 
+namespace fs = ghc::filesystem;
+
 // Inherits from the abstract listener class, and implements the the file action
 // handler
 class UpdateListener : public efsw::FileWatchListener {
@@ -14,30 +16,27 @@ public:
                           const std::string &filename, efsw::Action action,
                           std::string oldFilename) override {
 
-        ghc::filesystem::path path = dir;
+        fs::path path = dir;
         path /= filename;
+
+        std::string fileOrDir = fs::is_regular_file(path) ? "FILE" : "DIR";
 
         switch (action) {
         case efsw::Actions::Add:
-            if (ghc::filesystem::is_regular_file(path)) {
-                std::println("DIR ({}) FILE ({}) has event Added", dir,
-                             filename);
-            }
-            if (ghc::filesystem::is_directory(path)) {
-                std::println("DIR ({}) DIR ({}) has event Added", dir,
-                             filename);
-            }
+            std::println("DIR ({}) {} ({}) has event Added", dir, fileOrDir,
+                         filename);
             break;
         case efsw::Actions::Delete:
-            std::println("DIR ({}) FILE ({}) has event Delete", dir, filename);
+            std::println("DIR ({}) {} ({}) has event Delete", dir, fileOrDir,
+                         filename);
             break;
         case efsw::Actions::Modified:
-            std::println("DIR ({}) FILE ({}) has event Modified", dir,
+            std::println("DIR ({}) {} ({}) has event Modified", dir, fileOrDir,
                          filename);
             break;
         case efsw::Actions::Moved:
-            std::println("DIR ({}) FILE ({}) has event Moved from ({})", dir,
-                         filename, oldFilename);
+            std::println("DIR ({}) {} ({}) has event Moved from ({})", dir,
+                         fileOrDir, filename, oldFilename);
             break;
         default: std::println("Should never happen!");
         }
