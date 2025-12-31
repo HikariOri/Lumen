@@ -6,7 +6,8 @@
 
 // 假设你有某种 GPU 资源句柄类型
 struct BufferHandle {
-    uint32_t id = 0; // 具体类型看你的图形 API，例如 GLuint 或 Vulkan 的 buffer handle
+    uint32_t id =
+        0; // 具体类型看你的图形 API，例如 GLuint 或 Vulkan 的 buffer handle
 };
 
 // 一个顶点结构体例子

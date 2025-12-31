@@ -74,3 +74,9 @@ find_package(cpr CONFIG REQUIRED)
 find_package(doctest CONFIG REQUIRED)
 find_package(stduuid CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
+
+find_package(nlohmann_json CONFIG REQUIRED)
+
+find_package(simdjson CONFIG REQUIRED)
+find_package(reflectcpp CONFIG REQUIRED)
+find_package(protobuf CONFIG REQUIRED)
