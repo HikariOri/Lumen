@@ -235,6 +235,10 @@
     {
       "name": "eigen3",
       "version>=": "3.4.1#1"
+    },
+    {
+      "name": "ghc-filesystem",
+      "version>=": "1.5.14"
     }
   ]
 }
