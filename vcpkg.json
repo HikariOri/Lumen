@@ -227,6 +227,14 @@
       "name": "mimalloc",
       "version>=": "2.2.4",
       "features": ["override", "secure"]
+    },
+    {
+      "name": "boost-math",
+      "version>=": "1.90.0"
+    },
+    {
+      "name": "eigen3",
+      "version>=": "3.4.1#1"
     }
   ]
 }
