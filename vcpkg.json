@@ -239,6 +239,10 @@
     {
       "name": "ghc-filesystem",
       "version>=": "1.5.14"
+    },
+    {
+      "name": "eventpp",
+      "version>=": "0.1.3#1"
     }
   ]
 }
