@@ -251,23 +251,6 @@
     {
       "name": "libuv",
       "version>=": "1.51.0"
-    },
-    {
-      "name": "llvm",
-      "version>=": "18.1.6#5",
-      "features": [
-        "bolt",
-        "clang",
-        "clang-tools-extra",
-        "compiler-rt",
-        "tools",
-        "utils",
-        "default-targets",
-        "enable-assertions",
-        "enable-rtti",
-        "enable-zlib",
-        "enable-zstd"
-      ]
     }
   ]
 }
