@@ -1,17 +1,14 @@
+#include <SDL3/SDL_gpu.h>
 #define SDL_MAIN_USE_CALLBACKS
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_main.h"
 #include <iostream>
+#include <print>
 #include <vector>
-
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_sdlgpu3.h"
 
 struct GPUShaderBundle {
     SDL_GPUShader *vertex {};
     SDL_GPUShader *fragment {};
-
     operator bool() const { return vertex && fragment; }
 };
 
@@ -33,7 +30,7 @@ bool initSDL() {
     }
 
     for (int i = 0; i < SDL_GetNumGPUDrivers(); i++) {
-        std::cout << SDL_GetGPUDriver(i) << std::endl;
+        std::println("{}", SDL_GetGPUDriver(i));
     }
 
     // NOTE: must create gpu gDevice firstly, then create gWindow
@@ -47,6 +44,7 @@ bool initSDL() {
         return false;
     }
 
+    // NOTE: 离屏渲染不需要 window
     gWindow = SDL_CreateWindow("triangle", 1024, 720, SDL_WINDOW_RESIZABLE);
     if (!gWindow) {
         SDL_LogError(SDL_LOG_CATEGORY_VIDEO, "SDL create gWindow failed");
@@ -57,30 +55,6 @@ bool initSDL() {
         SDL_LogError(SDL_LOG_CATEGORY_GPU, "Your system don't support SDL GPU");
         return false;
     }
-
-    // Setup Dear ImGui context
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    (void)io;
-    io.ConfigFlags |=
-        ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-    io.ConfigFlags |=
-        ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
-
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
-    // ImGui::StyleColorsLight();
-
-    // Setup Platform/Renderer backends
-    ImGui_ImplSDL3_InitForSDLGPU(gWindow);
-    ImGui_ImplSDLGPU3_InitInfo init_info = {};
-    init_info.Device = gDevice;
-    init_info.ColorTargetFormat =
-        SDL_GetGPUSwapchainTextureFormat(gDevice, gWindow);
-    init_info.MSAASamples =
-        SDL_GPU_SAMPLECOUNT_1; // Only used in multi-viewports mode.
-    ImGui_ImplSDLGPU3_Init(&init_info);
 
     return true;
 }
@@ -327,12 +301,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
-    // Start the Dear ImGui frame
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-
-    ImGui::ShowDemoWindow();
 
     bool is_minimized = SDL_GetWindowFlags(gWindow) & SDL_WINDOW_MINIMIZED;
     if (is_minimized) {
@@ -396,34 +364,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
     SDL_EndGPURenderPass(render_pass);
 
-    { // Rendering
-        ImGui::Render();
-        ImDrawData *draw_data = ImGui::GetDrawData();
-        // const bool is_minimized = (draw_data->DisplaySize.x <= 0.0f ||
-        //    draw_data->DisplaySize.y <= 0.0f);
-
-        // This is mandatory: call ImGui_ImplSDLGPU3_PrepareDrawData() to
-        // upload the vertex/index buffer!
-
-        Imgui_ImplSDLGPU3_PrepareDrawData(draw_data, cmd);
-
-        // Setup and start a render pass
-        SDL_GPUColorTargetInfo target_info = {};
-        target_info.texture = swapchain_texture;
-        target_info.load_op = SDL_GPU_LOADOP_LOAD;
-        target_info.store_op = SDL_GPU_STOREOP_STORE;
-        target_info.mip_level = 0;
-        target_info.layer_or_depth_plane = 0;
-        target_info.cycle = false;
-        SDL_GPURenderPass *render_pass =
-            SDL_BeginGPURenderPass(cmd, &target_info, 1, nullptr);
-
-        // Render ImGui
-        ImGui_ImplSDLGPU3_RenderDrawData(draw_data, cmd, render_pass);
-
-        SDL_EndGPURenderPass(render_pass);
-    }
-
     if (!SDL_SubmitGPUCommandBuffer(cmd)) {
         SDL_LogError(SDL_LOG_CATEGORY_GPU,
                      "SDL submit command buffer failed! %s", SDL_GetError());
@@ -433,7 +373,6 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
-    ImGui_ImplSDL3_ProcessEvent(event);
     if (event->type == SDL_EVENT_QUIT) {
         return SDL_APP_SUCCESS;
     }
@@ -451,9 +390,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     SDL_ReleaseGPUShader(gDevice, gShaders.fragment);
 
     SDL_WaitForGPUIdle(gDevice);
-    ImGui_ImplSDL3_Shutdown();
-    ImGui_ImplSDLGPU3_Shutdown();
-    ImGui::DestroyContext();
 
     SDL_ReleaseWindowFromGPUDevice(gDevice, gWindow);
     SDL_DestroyGPUDevice(gDevice);
