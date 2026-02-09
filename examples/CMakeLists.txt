@@ -9,4 +9,5 @@ add_subdirectory(example_stduuid)
 add_subdirectory(example_efsw)
 add_subdirectory(example_eventpp)
 add_subdirectory(example_uvw)
+add_subdirectory(example_sdlgpu)
 
