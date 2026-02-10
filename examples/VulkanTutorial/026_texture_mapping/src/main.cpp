@@ -1,8 +1,10 @@
 /*
 1. 所有的查询基本上都在物理设备上
-2. 应该注意的是，在实际应用中，你不应该为每个单独的缓冲区实际调用 vkAllocateMemory 。
-   同时进行的内存分配数量受 maxMemoryAllocationCount 物理设备限制，即使是在高端硬件如 NVIDIA GTX 1080 上，这个限制也可能低至 4096 。
-   同时为大量对象分配内存的正确方法是，通过我们在许多函数中看到的使用 offset 参数，将单个内存分配分割到多个不同的对象中。(合并)
+2. 应该注意的是，在实际应用中，你不应该为每个单独的缓冲区实际调用
+vkAllocateMemory 。 同时进行的内存分配数量受 maxMemoryAllocationCount
+物理设备限制，即使是在高端硬件如 NVIDIA GTX 1080 上，这个限制也可能低至 4096 。
+   同时为大量对象分配内存的正确方法是，通过我们在许多函数中看到的使用 offset
+参数，将单个内存分配分割到多个不同的对象中。(合并)
 3. 描述符的使用包括三个部分：
     在创建管线时指定描述符集布局
     从描述符池中分配描述符集
@@ -18,8 +20,9 @@
    在进行任何图像操作时，你必须确保它们具有该操作的最佳布局。实际上，我们在指定渲染通道时已经见过一些这样的布局：
     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: 适合演示
     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: 作为从片元着色器写入颜色的最佳附件
-    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: 作为传输操作的最佳源，例如 vkCmdCopyImageToBuffer
-    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: 作为传输操作的最佳目标，例如 vkCmdCopyBufferToImage
+    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL: 作为传输操作的最佳源，例如
+vkCmdCopyImageToBuffer VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+作为传输操作的最佳目标，例如 vkCmdCopyBufferToImage
     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: 用于从着色器采样最佳
 6. 最常见的一种转换图像布局的方式是管线屏障。
    管线屏障主要用于同步资源访问，比如确保图像在读取之前已被写入，但它们也可以用来转换布局。
@@ -108,7 +111,8 @@ struct QueueFamilyIndices {
 };
 
 struct SwapChainSupportDetails {
-    // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 / 最大的宽度和高度
+    // 基本 surface 能力，例如交换链中图像的最大 / 最小数量、图像的最小 /
+    // 最大的宽度和高度
     VkSurfaceCapabilitiesKHR capabilities;
     // surface 的格式，例如像素格式、色彩空间
     std::vector<VkSurfaceFormatKHR> formats;
@@ -127,7 +131,7 @@ struct Vertex {
         /*
         我们所有的顶点数据都打包在一个数组中，因此我们只需要一个绑定。
         binding 指定绑定在绑定数组中的索引。
-        stride 指定从一个条目到下一个条目的字节数， 
+        stride 指定从一个条目到下一个条目的字节数，
         inputRate 参数可以具有以下值之一：
             VK_VERTEX_INPUT_RATE_VERTEX：在每个顶点之后移动到下一个数据条目
             VK_VERTEX_INPUT_RATE_INSTANCE：每个实例后移动到下一个数据条目
@@ -145,10 +149,11 @@ struct Vertex {
             attributeDescriptions {};
 
         /*
-        binding 参数告诉 Vulkan 每个顶点的数据来自哪个绑定。 
+        binding 参数告诉 Vulkan 每个顶点的数据来自哪个绑定。
         location 参数引用顶点着色器中输入的 location 指令。
         顶点着色器中位置为 0 输入是位置信息，它包含两个 32 位浮点分量。
-        format 参数描述属性的数据类型。需要注意的是，格式的指定使用了与颜色格式相同的枚举。以下着色器类型和格式通常一起使用：
+        format
+        参数描述属性的数据类型。需要注意的是，格式的指定使用了与颜色格式相同的枚举。以下着色器类型和格式通常一起使用：
         float: VK_FORMAT_R32_SFLOAT
         vec2: VK_FORMAT_R32G32_SFLOAT
         vec3: VK_FORMAT_R32G32B32_SFLOAT
@@ -376,7 +381,9 @@ private:
         subpass.pColorAttachments = &colorAttachmentRef;
 
         VkSubpassDependency dependency {};
-        // 特殊值 VK_SUBPASS_EXTERNAL 指的是在渲染阶段之前或之后的隐式子渲染阶段，具体取决于它是否在 srcSubpass 或 dstSubpass 中指定。
+        // 特殊值 VK_SUBPASS_EXTERNAL
+        // 指的是在渲染阶段之前或之后的隐式子渲染阶段，具体取决于它是否在
+        // srcSubpass 或 dstSubpass 中指定。
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         // 索引 0 指的是我们的子渲染阶段，它是第一个且唯一的。
         dependency.dstSubpass = 0;
@@ -432,9 +439,11 @@ private:
         };
 
         /*
-        VkPipelineVertexInputStateCreateInfo 结构描述了将要传递给顶点着色器的顶点数据的格式。它大致以两种方式来描述：
+        VkPipelineVertexInputStateCreateInfo
+        结构描述了将要传递给顶点着色器的顶点数据的格式。它大致以两种方式来描述：
             Bindings: 数据之间的间隔以及数据是按顶点还是按实例
-            Attribute descriptions: 传递给顶点着色器的属性类型，从哪个绑定加载它们以及它们在哪个偏移量
+            Attribute descriptions:
+        传递给顶点着色器的属性类型，从哪个绑定加载它们以及它们在哪个偏移量
         */
         // 顶点输入阶段
         VkPipelineVertexInputStateCreateInfo vertexInputInfo {};
@@ -444,7 +453,8 @@ private:
         auto bindingDescription = Vertex::getBindingDescription();
         auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
-        // pVertexBindingDescriptions 和 pVertexAttributeDescriptions 成员各自指向一个结构体数组，该数组描述了上述用于加载顶点数据的详细信息。
+        // pVertexBindingDescriptions 和 pVertexAttributeDescriptions
+        // 成员各自指向一个结构体数组，该数组描述了上述用于加载顶点数据的详细信息。
         // 这里只是告诉程序如何解析顶点数据，但实际的数据还未传递到 GPU
         vertexInputInfo.vertexBindingDescriptionCount = 1;
         vertexInputInfo.vertexAttributeDescriptionCount =
@@ -454,17 +464,21 @@ private:
             attributeDescriptions.data();
 
         /*
-        VkPipelineInputAssemblyStateCreateInfo 结构体描述了两件事：1. 将从顶点绘制何种几何图形（拓扑） 2. 是否启用原始图形重启动。
-        前者在 topology 成员中指定，可以具有如下的值：
-            VK_PRIMITIVE_TOPOLOGY_POINT_LIST: 
+        VkPipelineInputAssemblyStateCreateInfo 结构体描述了两件事：1.
+        将从顶点绘制何种几何图形（拓扑） 2. 是否启用原始图形重启动。 前者在
+        topology 成员中指定，可以具有如下的值：
+            VK_PRIMITIVE_TOPOLOGY_POINT_LIST:
             VK_PRIMITIVE_TOPOLOGY_LINE_LIST: 每 2 个顶点取一条线，不重复使用
-            VK_PRIMITIVE_TOPOLOGY_LINE_STRIP: 每条线的末尾顶点被用作下一条线的起始顶点
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST: 每 3 个顶点取一个三角形，不重复使用
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP: 每个三角形的第二和第三个顶点被用作下一个三角形的第一个和第二个顶点
+            VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+        每条线的末尾顶点被用作下一条线的起始顶点
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST: 每 3
+        个顶点取一个三角形，不重复使用 VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+        每个三角形的第二和第三个顶点被用作下一个三角形的第一个和第二个顶点
         通常情况下，顶点会按顺序从顶点缓冲区中通过索引加载，但使用元素缓冲区时，你可以自行指定要使用的索引。
         这允许你执行优化操作，如重复使用顶点。
         如果你将 primitiveRestartEnable 成员设置为 VK_TRUE，
-        那么可以通过使用特殊的 0xFFFF 或 0xFFFFFFFF 索引来拆分 _STRIP 顶点拓扑模式中的线和三角形。
+        那么可以通过使用特殊的 0xFFFF 或 0xFFFFFFFF 索引来拆分 _STRIP
+        顶点拓扑模式中的线和三角形。
         */
         VkPipelineInputAssemblyStateCreateInfo inputAssembly {};
         inputAssembly.sType =
@@ -483,10 +497,12 @@ private:
         VkPipelineRasterizationStateCreateInfo rasterizer {};
         rasterizer.sType =
             VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        // 如果 depthClampEnable 设置为 VK_TRUE ，那么超出近裁剪面和远裁剪面的片段会被裁剪到这些平面上，而不是被丢弃。
+        // 如果 depthClampEnable 设置为 VK_TRUE
+        // ，那么超出近裁剪面和远裁剪面的片段会被裁剪到这些平面上，而不是被丢弃。
         // 在制作阴影贴图可能需要这样
         rasterizer.depthClampEnable = VK_FALSE;
-        // 如果 rasterizerDiscardEnable 设置为 VK_TRUE ，那么几何体将不会通过光栅化阶段。这基本上禁用了任何输出到帧缓冲区
+        // 如果 rasterizerDiscardEnable 设置为 VK_TRUE
+        // ，那么几何体将不会通过光栅化阶段。这基本上禁用了任何输出到帧缓冲区
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         /*
         polygonMode 确定如何为几何体生成片段。以下模式可用：
@@ -557,7 +573,8 @@ private:
         // scissor.offset = { 0, 0 };
         // scissor.extent = swapChainExtent;
 
-        // 不使用动态状态，视口和裁剪矩形需要在管线中使用 VkPipelineViewportStateCreateInfo 结构体进行设置。
+        // 不使用动态状态，视口和裁剪矩形需要在管线中使用
+        // VkPipelineViewportStateCreateInfo 结构体进行设置。
         // 这使得该管线的视口和裁剪矩形不可变。对这些值所需的任何更改都需要创建一个具有新值的新的管线。
         // VkPipelineViewportStateCreateInfo viewportState {};
         // viewportState.sType =
@@ -770,11 +787,16 @@ private:
         samplerInfo.minFilter = VK_FILTER_LINEAR;
 
         /*
-        地址模式可以通过 addressMode 字段按轴指定。可用值如下所示。其中大部分在上面的图像中进行了演示。请注意，轴被称为 U、V 和 W，而不是 X、Y 和 Z。这是纹理空间坐标的约定。
+        地址模式可以通过 addressMode
+        字段按轴指定。可用值如下所示。其中大部分在上面的图像中进行了演示。请注意，轴被称为
+        U、V 和 W，而不是 X、Y 和 Z。这是纹理空间坐标的约定。
         VK_SAMPLER_ADDRESS_MODE_REPEAT: 当超出图像维度时重复纹理。
-        VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT: 类似于重复，但在超出维度时反转坐标以镜像图像。
-        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE: 取超出图像维度时最接近该坐标的边缘颜色。
-        VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE: 类似于边缘钳位，但使用与最近边缘相反的边缘。
+        VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT:
+        类似于重复，但在超出维度时反转坐标以镜像图像。
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE:
+        取超出图像维度时最接近该坐标的边缘颜色。
+        VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE:
+        类似于边缘钳位，但使用与最近边缘相反的边缘。
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER: 当采样超出图像尺寸时返回纯色。
         */
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -783,11 +805,14 @@ private:
         // 各向异性过滤，如果不是性能瓶颈，没有理由不开启
         samplerInfo.anisotropyEnable = VK_TRUE;
         samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-        // borderColor 字段指定在使用边界 clamp 地址模式采样图像外部时返回哪种颜色。可以返回黑色、白色或透明，并且可以以浮点或整数格式返回。你不能指定任意颜色。
+        // borderColor 字段指定在使用边界 clamp
+        // 地址模式采样图像外部时返回哪种颜色。可以返回黑色、白色或透明，并且可以以浮点或整数格式返回。你不能指定任意颜色。
         samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        // unnormalizedCoordinates 字段指定你想要使用哪种坐标系来寻址图像中的纹理单元。
-        // 如果这个字段是 VK_TRUE ，那么你可以直接使用 [0, texWidth) 和 [0, texHeight) 范围内的坐标。
-        // 如果它是 VK_FALSE ，那么所有轴上都使用 [0, 1) 范围内的坐标来寻址纹理单元。
+        // unnormalizedCoordinates
+        // 字段指定你想要使用哪种坐标系来寻址图像中的纹理单元。 如果这个字段是
+        // VK_TRUE ，那么你可以直接使用 [0, texWidth) 和 [0, texHeight)
+        // 范围内的坐标。 如果它是 VK_FALSE ，那么所有轴上都使用 [0, 1)
+        // 范围内的坐标来寻址纹理单元。
         // 实际应用几乎总是使用归一化坐标，因为这样可以使用不同分辨率的纹理并使用完全相同的坐标。
         samplerInfo.unnormalizedCoordinates = VK_FALSE;
         // 如果启用了比较函数，则首先会将纹理单元与一个值进行比较，该比较的结果将用于过滤操作。这主要用于阴影贴图的百分比更近过滤（PCSS）。
@@ -901,10 +926,12 @@ private:
 
         // 内存映射
         /*
-        现在您可以直接将顶点数据 memcpy 映射到内存中，并使用 vkUnmapMemory 再次取消映射。
+        现在您可以直接将顶点数据 memcpy 映射到内存中，并使用 vkUnmapMemory
+        再次取消映射。
         不幸的是，驱动程序可能不会立即将数据复制到缓冲区内存中，例如由于缓存的原因。还可能存在写入缓冲区的内容在映射内存中尚未可见的情况。处理这个问题有两种方法：
             使用主机一致的内存堆，用 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 标记
-            在写入映射内存后调用 vkFlushMappedMemoryRanges ，在从映射内存读取前调用 vkInvalidateMappedMemoryRanges
+            在写入映射内存后调用 vkFlushMappedMemoryRanges
+        ，在从映射内存读取前调用 vkInvalidateMappedMemoryRanges
         */
         void *data {};
         // 将数据写入到仅主机可见的暂存缓冲区内存
@@ -976,7 +1003,8 @@ private:
         // 我们第一种描述符类型：Uniform Buffer（比如 UBO）
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         // descriptorCount 表示这个池里为这种类型准备多少个“描述符”。
-        // 通常我们希望每帧（每个 in-flight）都有一个 Uniform Buffer 的描述符，所以设置为 MAX_FRAMES_IN_FLIGHT。
+        // 通常我们希望每帧（每个 in-flight）都有一个 Uniform Buffer
+        // 的描述符，所以设置为 MAX_FRAMES_IN_FLIGHT。
         poolSizes[0].descriptorCount =
             static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
@@ -993,7 +1021,8 @@ private:
         poolInfo.pNext = nullptr;                          // 没有扩展结构体
 
         // flags 可以指定一些行为，比如是否能单独释放描述符集 (descriptor set)。
-        // 这里我们不设置 flags，表示默认行为（一般是全部重置或释放，而不是单个释放）。
+        // 这里我们不设置
+        // flags，表示默认行为（一般是全部重置或释放，而不是单个释放）。
         poolInfo.flags = 0;
 
         // poolSizeCount 是 poolSizes 数组里有多少种类型
@@ -1002,8 +1031,10 @@ private:
         poolInfo.pPoolSizes = poolSizes.data();
 
         // maxSets 是这个描述符池里最多能分配多少个 descriptor set（描述符集）
-        // 我们把它设为 MAX_FRAMES_IN_FLIGHT，表示我们打算为每一帧都分配一个 descriptor set
-        // 注意：这个值不是 “每类型 descriptor 的数量”，而是 descriptor 集 (set) 的最大数量。 :contentReference[oaicite:0]{index=0}
+        // 我们把它设为 MAX_FRAMES_IN_FLIGHT，表示我们打算为每一帧都分配一个
+        // descriptor set 注意：这个值不是 “每类型 descriptor 的数量”，而是
+        // descriptor 集 (set) 的最大数量。
+        // :contentReference[oaicite:0]{index=0}
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
         // 创建描述符池
@@ -1014,7 +1045,8 @@ private:
     }
 
     void createDescriptorSets() {
-        // 创建一个存 descriptor set layout 的 vector，每个 in-flight 帧都对应一个 layout
+        // 创建一个存 descriptor set layout 的 vector，每个 in-flight
+        // 帧都对应一个 layout
         std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT,
                                                    descriptorSetLayout);
 
@@ -1054,7 +1086,8 @@ private:
             imageInfo.imageView = textureImageView; // 纹理对应的 image view
             imageInfo.sampler = textureSampler;     // 使用的 sampler
 
-            // 要写入 descriptor set 的结构体数组（两种类型：buffer + image sampler）
+            // 要写入 descriptor set 的结构体数组（两种类型：buffer + image
+            // sampler）
             std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
 
             // 第一个写操作 —— uniform buffer
@@ -1081,7 +1114,8 @@ private:
                 1; // 在 layout 里 binding = 1 的 sampler 位置
             descriptorWrites[1].dstArrayElement = 0; // 第一个元素
             descriptorWrites[1].descriptorType =
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // 类型是图像 + 采样器
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // 类型是图像 +
+                                                           // 采样器
             descriptorWrites[1].descriptorCount = 1;       // 写 1 个
             descriptorWrites[1].pImageInfo = &imageInfo;   // 指向 imageInfo
 
@@ -1118,7 +1152,8 @@ private:
         /*
         VkMemoryRequirements 结构体有三个字段：
             size：所需内存的大小（以字节为单位），可能与 bufferInfo.size 不同
-            alignment：缓冲区在已分配内存区域中开始的字节偏移量，取决于 bufferInfo.usage 和 bufferInfo.flags 。
+            alignment：缓冲区在已分配内存区域中开始的字节偏移量，取决于
+        bufferInfo.usage 和 bufferInfo.flags 。
             memoryTypeBits：适用于缓冲区的内存类型的位域。
         */
         VkMemoryRequirements memRequirements;
@@ -1155,21 +1190,25 @@ private:
         /*
             tiling 字段可以是两种值之一：
                 VK_IMAGE_TILING_LINEAR: 纹素按行主序排列，就像我们的 pixels 数组
-                VK_IMAGE_TILING_OPTIMAL: 纹素按实现定义的顺序排列，以实现最佳访问
+                VK_IMAGE_TILING_OPTIMAL:
+           纹素按实现定义的顺序排列，以实现最佳访问
             */
         imageInfo.tiling = tiling;
         /*
             图像的 initialLayout 只有两种可能的值：
-                VK_IMAGE_LAYOUT_UNDEFINED : 对 GPU 不可用，且第一个转换将丢弃纹理元素。
-                VK_IMAGE_LAYOUT_PREINITIALIZED : 对 GPU 不可用，但第一个转换将保留纹理元素。
+                VK_IMAGE_LAYOUT_UNDEFINED : 对 GPU
+           不可用，且第一个转换将丢弃纹理元素。 VK_IMAGE_LAYOUT_PREINITIALIZED :
+           对 GPU 不可用，但第一个转换将保留纹理元素。
             */
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         imageInfo.usage = usage;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         /*
-            samples 标志与多重采样相关。这仅适用于将图像用作附件的情况，因此请坚持使用单采样。
+            samples
+           标志与多重采样相关。这仅适用于将图像用作附件的情况，因此请坚持使用单采样。
             有一些可选的标志与稀疏图像相关。稀疏图像是指只有特定区域实际由内存支持的图像。
-            例如，如果你使用 3D 纹理来表示体素地形，那么你可以使用这个功能来避免为存储大量的"空气"值分配内存。
+            例如，如果你使用 3D
+           纹理来表示体素地形，那么你可以使用这个功能来避免为存储大量的"空气"值分配内存。
             这里我们不会使用它，因此将其保留为 0 的默认值。
             */
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1180,7 +1219,9 @@ private:
         }
 
         // 为图像分配内存的方式与为缓冲区分配内存完全相同。
-        // 使用 vkGetImageMemoryRequirements 代替 vkGetBufferMemoryRequirements，使用 vkBindImageMemory 代替 vkBindBufferMemory。
+        // 使用 vkGetImageMemoryRequirements 代替
+        // vkGetBufferMemoryRequirements，使用 vkBindImageMemory 代替
+        // vkBindBufferMemory。
         VkMemoryRequirements memRequirements;
         vkGetImageMemoryRequirements(device, image, &memRequirements);
 
@@ -1205,14 +1246,17 @@ private:
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
         // 执行布局转换最常见的方法之一是使用图像内存屏障。
-        // 像这样的管线屏障通常用于同步对资源的访问，例如确保向缓冲区的写入完成后再从中读取，但它也可以用于转换图像布局以及在 VK_SHARING_MODE_EXCLUSIVE 使用时转移队列家族所有权。
+        // 像这样的管线屏障通常用于同步对资源的访问，例如确保向缓冲区的写入完成后再从中读取，但它也可以用于转换图像布局以及在
+        // VK_SHARING_MODE_EXCLUSIVE 使用时转移队列家族所有权。
         // 有一个等效的缓冲区内存屏障可以用来为缓冲区执行此操作。
         VkImageMemoryBarrier barrier {};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        // 前两个字段指定布局转换。如果你不在乎图像的现有内容，可以使用 VK_IMAGE_LAYOUT_UNDEFINED 作为 oldLayout
+        // 前两个字段指定布局转换。如果你不在乎图像的现有内容，可以使用
+        // VK_IMAGE_LAYOUT_UNDEFINED 作为 oldLayout
         barrier.oldLayout = oldLayout;
         barrier.newLayout = newLayout;
-        // 如果你使用屏障来转移队列家族所有权，那么这两个字段应该是队列家族的索引。如果你不想这样做（不是默认值！），必须将它们设置为 VK_QUEUE_FAMILY_IGNORED 。
+        // 如果你使用屏障来转移队列家族所有权，那么这两个字段应该是队列家族的索引。如果你不想这样做（不是默认值！），必须将它们设置为
+        // VK_QUEUE_FAMILY_IGNORED 。
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
@@ -1232,7 +1276,8 @@ private:
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
             sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            // 需要注意的是 VK_PIPELINE_STAGE_TRANSFER_BIT 不是图形和计算管线中的真实阶段。它更像是一个伪阶段，传输发生在这里。
+            // 需要注意的是 VK_PIPELINE_STAGE_TRANSFER_BIT
+            // 不是图形和计算管线中的真实阶段。它更像是一个伪阶段，传输发生在这里。
             destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
                    newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -1263,12 +1308,14 @@ private:
 
         // bufferOffset 指定像素值在缓冲区中的字节偏移量。
         // bufferRowLength 和 bufferImageHeight 字段指定像素在内存中的排列方式。
-        // 例如，你可以在图像的行之间有一些填充字节。为两者指定 0 表示像素像本例中这样紧密排列。
+        // 例如，你可以在图像的行之间有一些填充字节。为两者指定 0
+        // 表示像素像本例中这样紧密排列。
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         region.imageSubresource.mipLevel = 0;
         region.imageSubresource.baseArrayLayer = 0;
         region.imageSubresource.layerCount = 1;
-        // imageSubresource、imageOffset 和 imageExtent 字段指示我们将像素复制到图像的哪一部分。
+        // imageSubresource、imageOffset 和 imageExtent
+        // 字段指示我们将像素复制到图像的哪一部分。
         region.imageOffset = { .x = 0, .y = 0, .z = 0 };
         region.imageExtent = { .width = width, .height = height, .depth = 1 };
 
@@ -1307,7 +1354,8 @@ private:
         allocInfo.commandPool = commandPool;
         /*
         level 参数指定分配的命令缓冲区是主命令缓冲区还是辅助命令缓冲区。
-            VK_COMMAND_BUFFER_LEVEL_PRIMARY: 可以提交到队列中执行，但不能从其他命令缓冲区调用。
+            VK_COMMAND_BUFFER_LEVEL_PRIMARY:
+        可以提交到队列中执行，但不能从其他命令缓冲区调用。
             VK_COMMAND_BUFFER_LEVEL_SECONDARY：不能直接提交，但可以从主命令缓冲区调用。
         */
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1354,12 +1402,15 @@ private:
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         /*
         flags 参数指定我们如何使用命令缓冲区。以下是可用的值：
-            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: 命令缓冲区将在执行一次后立即重新记录。
-            VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: 这是一个辅助命令缓冲区，它将完全包含在单个渲染过程中。
+            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT:
+        命令缓冲区将在执行一次后立即重新记录。
+            VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT:
+        这是一个辅助命令缓冲区，它将完全包含在单个渲染过程中。
             VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：即使命令缓冲区已处于待执行状态，也可以重新提交该命令缓冲区。
         */
         beginInfo.flags = 0; // Optional
-        // pInheritanceInfo 参数仅与辅助命令缓冲区相关。它指定要从调用的主命令缓冲区继承哪个状态。
+        // pInheritanceInfo
+        // 参数仅与辅助命令缓冲区相关。它指定要从调用的主命令缓冲区继承哪个状态。
         beginInfo.pInheritanceInfo = nullptr; // Optional
 
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
@@ -1374,8 +1425,9 @@ private:
         renderPassInfo.renderArea.offset = { 0, 0 };
         renderPassInfo.renderArea.extent = swapChainExtent;
 
-        // The last two parameters define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR,
-        // which we used as load operation for the color attachment.
+        // The last two parameters define the clear values to use for
+        // VK_ATTACHMENT_LOAD_OP_CLEAR, which we used as load operation for the
+        // color attachment.
         VkClearValue clearColor = { { { 0.0F, 0.0F, 0.0F, 1.0F } } };
         renderPassInfo.clearValueCount = 1;
         renderPassInfo.pClearValues = &clearColor;
@@ -1383,7 +1435,8 @@ private:
         /*
         每个命令的第一个参数始终是用于记录命令的命令缓冲区。第二个参数指定我们刚刚提供的渲染通道的详细信息。最后一个参数控制渲染通道中绘图命令的提供方式。它可以取以下两个值之一：
             VK_SUBPASS_CONTENTS_INLINE：渲染通道命令将嵌入到主命令缓冲区本身中，不会执行任何辅助命令缓冲区。
-            VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: 渲染通道命令将从辅助命令缓冲区执行。
+            VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS:
+        渲染通道命令将从辅助命令缓冲区执行。
         */
 
         // 接下来开始 draw
@@ -1424,13 +1477,17 @@ private:
 
         // draw call
         /*
-        vkCmdDraw 函数本身可能有点平淡无奇，但它之所以如此简单，是因为我们预先指定了所有信息。除了命令缓冲区之外，它还有以下参数：
-            vertexCount：即使我们没有顶点缓冲区，但从技术上讲，我们仍然有 3 个顶点要绘制。
+        vkCmdDraw
+        函数本身可能有点平淡无奇，但它之所以如此简单，是因为我们预先指定了所有信息。除了命令缓冲区之外，它还有以下参数：
+            vertexCount：即使我们没有顶点缓冲区，但从技术上讲，我们仍然有 3
+        个顶点要绘制。
             instanceCount：用于实例化渲染，如果不进行实例化渲染，则使用 1 。
-            firstVertex：用作顶点缓冲区中的偏移量，定义 gl_VertexIndex 的最小值。
-            firstInstance：用作实例化渲染的偏移量，定义 gl_InstanceIndex 的最小值。
+            firstVertex：用作顶点缓冲区中的偏移量，定义 gl_VertexIndex
+        的最小值。 firstInstance：用作实例化渲染的偏移量，定义 gl_InstanceIndex
+        的最小值。
         */
-        // vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0,
+        // vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1,
+        // 0,
         //           0);
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()),
                          1, 0, 0, 0);
@@ -1608,7 +1665,8 @@ private:
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         // 设置图像大小
         createInfo.imageExtent = extent;
-        // imageArrayLayers 指定了每个图像包含的层数。这始终是 1，除非你正在开发立体 3D 应用程序。
+        // imageArrayLayers 指定了每个图像包含的层数。这始终是
+        // 1，除非你正在开发立体 3D 应用程序。
         createInfo.imageArrayLayers = 1;
         // 因为颜色附件使用
         // TODO: 难道说 depth map 需要创建新的 swapchain?
@@ -1632,12 +1690,13 @@ private:
             createInfo.pQueueFamilyIndices = nullptr; // Optional
         }
 
-        // 如果支持，可以指定对交换链中的图像应用某种变换，例如 90 度顺时针旋转或水平翻转
-        // 如果不希望有任何变换，只需指定当前变换即可
+        // 如果支持，可以指定对交换链中的图像应用某种变换，例如 90
+        // 度顺时针旋转或水平翻转 如果不希望有任何变换，只需指定当前变换即可
         createInfo.preTransform =
             swapChainSupport.capabilities.currentTransform;
-        // compositeAlpha 字段指定是否应使用 alpha 通道与其他窗口系统中的其他窗口进行混。
-        // 几乎总是希望简单地忽略 alpha 通道，因此设置为 VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+        // compositeAlpha 字段指定是否应使用 alpha
+        // 通道与其他窗口系统中的其他窗口进行混。 几乎总是希望简单地忽略 alpha
+        // 通道，因此设置为 VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         createInfo.presentMode = presentMode;
         // 是否裁剪，如果希望一直得到完整的图像应该设置为 VK_FALSE;
@@ -1715,8 +1774,8 @@ private:
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(
         const std::vector<VkSurfaceFormatKHR> &availableFormats) {
         // 每个 VkSurfaceFormatKHR 条目包含一个 format 和一个 colorSpace 成员
-        // format 成员指定颜色通道和类型。例如，VK_FORMAT_B8G8R8A8_SRGB, 表示按顺序存储 B、G、R 和 A
-        // 使用 8 位无符号整数，每个像素总共 32 位
+        // format 成员指定颜色通道和类型。例如，VK_FORMAT_B8G8R8A8_SRGB,
+        // 表示按顺序存储 B、G、R 和 A 使用 8 位无符号整数，每个像素总共 32 位
         // colorSpace  成员使用 VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
 
         // 查找满足条件的 VkSurfaceFormatKHR
@@ -1736,8 +1795,8 @@ private:
     VkPresentModeKHR chooseSwapPresentMode(
         const std::vector<VkPresentModeKHR> &availablePresentModes) {
         /*
-显示模式可以说是交换链最重要的设置，因为它代表了向屏幕显示图像的实际条件。Vulkan 中有四种可能的模式可用：
-    VK_PRESENT_MODE_IMMEDIATE_KHR: 
+显示模式可以说是交换链最重要的设置，因为它代表了向屏幕显示图像的实际条件。Vulkan
+中有四种可能的模式可用： VK_PRESENT_MODE_IMMEDIATE_KHR:
         （立即模式）你的应用程序提交的图像会立即传输到屏幕上，这可能导致撕裂。
     VK_PRESENT_MODE_FIFO_KHR:
         （FIFO）交换链是一个队列，显示器在刷新时从前端队列中获取图像，而程序在队列后端插入渲染的图像。
@@ -1745,11 +1804,11 @@ private:
         这最类似于现代游戏中常见的垂直同步。
         显示器刷新的时刻被称为"垂直空白"。
         此模式一定会被支持。
-    VK_PRESENT_MODE_FIFO_RELAXED_KHR: 
+    VK_PRESENT_MODE_FIFO_RELAXED_KHR:
         这种模式只有在应用程序延迟且在最后一个垂直空白时队列为空的情况下才与之前的不同。
         在这种情况下，图像在最终到达时立即传输，而不是等待下一个垂直空白。
         这可能导致可见的撕裂。
-    VK_PRESENT_MODE_MAILBOX_KHR: 
+    VK_PRESENT_MODE_MAILBOX_KHR:
         这是第二种模式的另一种变体。
         当队列满时，它不会阻塞应用程序，而是将已入队的图像简单地用较新的图像替换。
         这种模式可以在避免撕裂的同时尽可能快地渲染帧，从而比标准垂直同步产生更少的延迟问题。
@@ -1771,11 +1830,13 @@ private:
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
         if (capabilities.currentExtent.width !=
             std::numeric_limits<uint32_t>::max()) {
-            // 如果窗口管理系统没有将宽度和高度设置为最大的话，说明 currentExtent 是可用的
+            // 如果窗口管理系统没有将宽度和高度设置为最大的话，说明
+            // currentExtent 是可用的
             return capabilities.currentExtent;
         } else {
             int width {}, height {};
-            // 考虑到高 DPI 显示器可能会导致分辨率大于屏幕坐标，使用最好使用 glfwGetFramebufferSize 查询窗口分辨率（像素）
+            // 考虑到高 DPI 显示器可能会导致分辨率大于屏幕坐标，使用最好使用
+            // glfwGetFramebufferSize 查询窗口分辨率（像素）
             glfwGetFramebufferSize(window, &width, &height);
 
             VkExtent2D actualExtent {
@@ -1919,7 +1980,9 @@ private:
         // Semaphores 可以让两个 GPU 操作等待
         // Fences 可以让 CPU 等待 GPU
         /*
-        In summary, semaphores are used to specify the execution order of operations on the GPU while fences are used to keep the CPU and GPU in sync with each-other.
+        In summary, semaphores are used to specify the execution order of
+        operations on the GPU while fences are used to keep the CPU and GPU in
+        sync with each-other.
         */
 
         // 等待上一帧完成
@@ -1934,11 +1997,14 @@ private:
                                   VK_NULL_HANDLE, &imageIndex);
 
         /*
-        现在我们只需要确定何时需要重新创建交换链，并调用我们的新 recreateSwapChain 函数。
-        幸运的是，Vulkan 通常会在呈现时告诉我们交换链不再适用。 
-        vkAcquireNextImageKHR 和 vkQueuePresentKHR 函数可以返回以下特殊值来指示这一点。
-            VK_ERROR_OUT_OF_DATE_KHR: 交换链与表面不再兼容，无法用于渲染。通常在窗口大小调整后发生。
-            VK_SUBOPTIMAL_KHR: 交换链仍然可以成功地向表面呈现，但表面属性不再完全匹配。
+        现在我们只需要确定何时需要重新创建交换链，并调用我们的新
+        recreateSwapChain 函数。 幸运的是，Vulkan
+        通常会在呈现时告诉我们交换链不再适用。 vkAcquireNextImageKHR 和
+        vkQueuePresentKHR 函数可以返回以下特殊值来指示这一点。
+            VK_ERROR_OUT_OF_DATE_KHR:
+        交换链与表面不再兼容，无法用于渲染。通常在窗口大小调整后发生。
+            VK_SUBOPTIMAL_KHR:
+        交换链仍然可以成功地向表面呈现，但表面属性不再完全匹配。
         */
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapChain();
@@ -1984,7 +2050,8 @@ private:
         submitInfo.pSignalSemaphores = signalSemaphores;
 
         // 提交命令到队列
-        // 此处会 reset imageAvailableSemaphore and signal renderFinishedSemaphore
+        // 此处会 reset imageAvailableSemaphore and signal
+        // renderFinishedSemaphore
         if (vkQueueSubmit(graphicsQueue, 1, &submitInfo,
                           inFlightFences[currentFrame]) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
@@ -2323,15 +2390,16 @@ private:
     messageSeverity: 指定消息的严重程度，它可以是以下标志之一
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: 调试信息
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT: 类似资源创建的信息性消息
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: 关于行为的信息，不一定是错误，但很可能是您的应用程序中的错误
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT: 关于无效行为的信息，可能会导致崩溃
-    messageType 参数可以有以下值：
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+    关于行为的信息，不一定是错误，但很可能是您的应用程序中的错误
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+    关于无效行为的信息，可能会导致崩溃 messageType 参数可以有以下值：
         VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT：发生了与规范或性能无关的事件
         VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT：发生了违反规范或可能表示错误的情况
-        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT: 潜在的 Vulkan 非最优使用
-    pCallbackData 参数指的是一个包含消息本身的详细信息的 VkDebugUtilsMessengerCallbackDataEXT 结构体，其中最重要的成员是：
-        pMessage: 作为空终止字符串的调试消息
-        pObjects: 与消息相关的 Vulkan 对象句柄数组
+        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT: 潜在的 Vulkan
+    非最优使用 pCallbackData 参数指的是一个包含消息本身的详细信息的
+    VkDebugUtilsMessengerCallbackDataEXT 结构体，其中最重要的成员是： pMessage:
+    作为空终止字符串的调试消息 pObjects: 与消息相关的 Vulkan 对象句柄数组
         objectCount: 数组中的对象数量
     pUserData 参数包含在回调设置期间指定的指针，允许你将其自己的数据传递给它。
     */
