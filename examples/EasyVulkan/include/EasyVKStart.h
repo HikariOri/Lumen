@@ -1,5 +1,6 @@
 #pragma once
 // 可能会用上的C++标准库
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <format>
@@ -19,9 +20,9 @@
 
 // GLM
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-// 如果你惯用左手坐标系，在此定义GLM_FORCE_LEFT_HANDED
-// #include <glm.hpp>
-// #include <gtc/matrix_transform.hpp>
+// 如果你惯用左手坐标系，在此定义 GLM_FORCE_LEFT_HANDED
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 // stb_image.h
 #include <stb_image.h>

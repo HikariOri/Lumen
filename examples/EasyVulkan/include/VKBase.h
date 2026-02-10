@@ -3,6 +3,9 @@
 #include "EasyVKStart.h"
 
 namespace vulkan {
+    // 全局常量用constexpr修饰定义在类外：
+    constexpr VkExtent2D defaultWindowSize = { 1280, 720 };
+
     class graphicsBase {
         static graphicsBase singleton;
         graphicsBase() = default;
@@ -295,14 +298,60 @@ namespace vulkan {
 
         VkResult GetSurfaceFormats() { /*待Ch1-4填充*/ }
 
-        VkResult SetSurfaceFormat(VkSurfaceFormatKHR surfaceFormat) {
-            /*待Ch1-4填充*/
-        }
+        VkResult
+        SetSurfaceFormat(VkSurfaceFormatKHR surfaceFormat) { /*待Ch1-4填充*/ }
         // 该函数用于创建交换链
         VkResult CreateSwapchain(bool limitFrameRate = true,
                                  VkSwapchainCreateFlagsKHR flags = 0) {
-            /*待Ch1-4填充*/
+            VkSurfaceCapabilitiesKHR surfaceCapabilities {};
+            if (VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                    physicalDevice, surface, &surfaceCapabilities)) {
+                std::println("[ graphicsBase ] ERROR\nFailed to get physical "
+                             "device surface capabilities!\nError code: {}",
+                             string_VkResult(result));
+                return result;
+            }
+
+            swapchainCreateInfo.minImageCount =
+                surfaceCapabilities.minImageCount +
+                (surfaceCapabilities.maxImageCount >
+                 surfaceCapabilities.minImageCount);
+
+            swapchainCreateInfo.imageExtent =
+                surfaceCapabilities.currentExtent.width == -1
+                    ? VkExtent2D { std::clamp(
+                                       defaultWindowSize.width,
+                                       surfaceCapabilities.minImageExtent.width,
+                                       surfaceCapabilities.maxImageExtent
+                                           .width),
+                                   std::clamp(defaultWindowSize.height,
+                                              surfaceCapabilities.minImageExtent
+                                                  .height,
+                                              surfaceCapabilities.maxImageExtent
+                                                  .height) }
+                    : surfaceCapabilities.currentExtent;
+
+            swapchainCreateInfo.imageArrayLayers = 1;
+            swapchainCreateInfo.preTransform =
+                surfaceCapabilities.currentTransform;
+
+            if (surfaceCapabilities.supportedCompositeAlpha &
+                VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+                swapchainCreateInfo.compositeAlpha =
+                    VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+            } else {
+                for (size_t i = 0; i < 4; i++) {
+                    if (surfaceCapabilities.supportedCompositeAlpha & 1 << i) {
+                        swapchainCreateInfo.compositeAlpha =
+                            VkCompositeAlphaFlagBitsKHR(
+                                surfaceCapabilities.supportedCompositeAlpha &
+                                1 << i);
+                        break;
+                    }
+                }
+            }
         }
+
         // 该函数用于重建交换链
         VkResult RecreateSwapchain() { /*待Ch1-4填充*/ }
 
@@ -321,11 +370,11 @@ namespace vulkan {
             AddInstanceLayer("VK_LAYER_KHRONOS_validation");
             AddInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 #endif
-            VkApplicationInfo applicationInfo;
+            VkApplicationInfo applicationInfo {};
             applicationInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
             applicationInfo.apiVersion = apiVersion;
 
-            VkInstanceCreateInfo instanceCreateInfo;
+            VkInstanceCreateInfo instanceCreateInfo {};
             instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
             instanceCreateInfo.flags = flags;
             instanceCreateInfo.pApplicationInfo = &applicationInfo;
@@ -520,18 +569,14 @@ namespace vulkan {
         VkResult DeterminePhysicalDevice(uint32_t deviceIndex = 0,
                                          bool enableGraphicsQueue = true,
                                          bool enableComputeQueue = true) {
-
             // 定义一个特殊值用于标记一个队列族索引已被找过但未找到
-            static constexpr uint32_t notFound =
-                INT32_MAX; //== VK_QUEUE_FAMILY_IGNORED & INT32_MAX
-
+            static constexpr uint32_t notFound = INT32_MAX;
             // 定义队列族索引组合的结构体
             struct queueFamilyIndexCombination {
                 uint32_t graphics = VK_QUEUE_FAMILY_IGNORED;
                 uint32_t presentation = VK_QUEUE_FAMILY_IGNORED;
                 uint32_t compute = VK_QUEUE_FAMILY_IGNORED;
             };
-
             // queueFamilyIndexCombinations
             // 用于为各个物理设备保存一份队列族索引组合
             static std::vector<queueFamilyIndexCombination>
@@ -572,13 +617,7 @@ namespace vulkan {
                         ic = indices[2] & INT32_MAX;
                     }
                 }
-                // 如果GetQueueFamilyIndices(...)执行失败，return
-                if (result) {
-                    return result;
-                }
-            }
-            // 若以上两个if分支皆不执行，则说明所需的队列族索引皆已被获取，从queueFamilyIndexCombinations[deviceIndex]中取得索引
-            else {
+            } else {
                 queueFamilyIndex_graphics =
                     enableGraphicsQueue ? ig : VK_QUEUE_FAMILY_IGNORED;
                 queueFamilyIndex_presentation =
@@ -591,7 +630,84 @@ namespace vulkan {
         }
 
         // 该函数用于创建逻辑设备，并获取队列
-        VkResult CreateDevice(VkDeviceCreateFlags flags = 0) {}
+        VkResult CreateDevice(VkDeviceCreateFlags flags = 0) {
+            float queuePriority = 1.F;
+            VkDeviceQueueCreateInfo queueCreateInfos[3] {};
+            queueCreateInfos[0].sType =
+                VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfos[0].queueCount = 1;
+            queueCreateInfos[0].pQueuePriorities = &queuePriority;
+
+            queueCreateInfos[1].sType =
+                VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfos[1].queueCount = 1;
+            queueCreateInfos[1].pQueuePriorities = &queuePriority;
+
+            queueCreateInfos[2].sType =
+                VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfos[2].queueCount = 1;
+            queueCreateInfos[2].pQueuePriorities = &queuePriority;
+
+            uint32_t queueCreateInfoCount = 0;
+            if (queueFamilyIndex_graphics != VK_QUEUE_FAMILY_IGNORED) {
+                queueCreateInfos[queueCreateInfoCount++].queueFamilyIndex =
+                    queueFamilyIndex_graphics;
+            }
+            if (queueFamilyIndex_presentation != VK_QUEUE_FAMILY_IGNORED &&
+                queueFamilyIndex_presentation != queueFamilyIndex_graphics) {
+                queueCreateInfos[queueCreateInfoCount++].queueFamilyIndex =
+                    queueFamilyIndex_presentation;
+            }
+            if (queueFamilyIndex_compute != VK_QUEUE_FAMILY_IGNORED &&
+                queueFamilyIndex_compute != queueFamilyIndex_graphics &&
+                queueFamilyIndex_compute != queueFamilyIndex_presentation) {
+                queueCreateInfos[queueCreateInfoCount++].queueFamilyIndex =
+                    queueFamilyIndex_compute;
+            }
+
+            VkPhysicalDeviceFeatures physicalDeviceFeatures;
+            vkGetPhysicalDeviceFeatures(physicalDevice,
+                                        &physicalDeviceFeatures);
+            VkDeviceCreateInfo deviceCreateInfo {};
+            deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+            deviceCreateInfo.flags = flags;
+            deviceCreateInfo.queueCreateInfoCount = queueCreateInfoCount;
+            deviceCreateInfo.pQueueCreateInfos = queueCreateInfos;
+            deviceCreateInfo.enabledExtensionCount =
+                static_cast<uint32_t>(deviceExtensions.size());
+            deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
+            deviceCreateInfo.pEnabledFeatures = &physicalDeviceFeatures;
+
+            if (VkResult result = vkCreateDevice(
+                    physicalDevice, &deviceCreateInfo, nullptr, &device)) {
+                std::println("[ graphicsBase ] ERROR\nFailed to create a "
+                             "vulkan logical device!\nError code: {}",
+                             string_VkResult(result));
+                return result;
+            }
+
+            if (queueFamilyIndex_graphics != VK_QUEUE_FAMILY_IGNORED) {
+                vkGetDeviceQueue(device, queueFamilyIndex_graphics, 0,
+                                 &queue_graphics);
+            }
+            if (queueFamilyIndex_presentation != VK_QUEUE_FAMILY_IGNORED) {
+                vkGetDeviceQueue(device, queueFamilyIndex_presentation, 0,
+                                 &queue_presentation);
+            }
+            if (queueFamilyIndex_compute != VK_QUEUE_FAMILY_IGNORED) {
+                vkGetDeviceQueue(device, queueFamilyIndex_compute, 0,
+                                 &queue_compute);
+            }
+
+            vkGetPhysicalDeviceProperties(physicalDevice,
+                                          &physicalDeviceProperties);
+            vkGetPhysicalDeviceMemoryProperties(
+                physicalDevice, &physicalDeviceMemoryProperties);
+            // 输出所用的物理设备名称
+            std::println("Renderer: {}", physicalDeviceProperties.deviceName);
+            /*待Ch1-4填充*/
+            return VK_SUCCESS;
+        }
 
         // 以下函数用于创建逻辑设备失败后
         VkResult

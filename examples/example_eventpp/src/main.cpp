@@ -18,7 +18,7 @@ int main() {
         callbackList("Hello world", true);
     }
 
-    std::println();
+    std::println("");
 
     {
         eventpp::EventDispatcher<int, void()> dispatcher;
@@ -32,7 +32,7 @@ int main() {
         dispatcher.dispatch(5);
     }
 
-    std::println();
+    std::println("");
 
     {
         eventpp::EventQueue<int, void(const std::string &, const bool)> queue;
