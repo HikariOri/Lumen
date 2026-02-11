@@ -1,3 +1,5 @@
+#pragma once
+
 #include "VKBase.h"
 
 #define GLFW_INCLUDE_VULKAN
@@ -66,7 +68,7 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false,
 
     // 创建window surface
     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    if (VkResult result = glfwCreateWindowSurface(
+    if (result_t result = glfwCreateWindowSurface(
             graphicsBase::Base().Instance(), pWindow, nullptr, &surface)) {
         std::println("[ InitializeWindow ] ERROR\nFailed to create a window "
                      "surface!\nError code: {}\n",
@@ -85,9 +87,11 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false,
         graphicsBase::Base().CreateDevice()) {
         return false;
     }
-    //----------------------------------------
 
-    /*待Ch1-4填充*/
+    if (graphicsBase::Base().CreateSwapchain(limitFrameRate)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -95,7 +99,10 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false,
  * @brief 终止窗口时清理 GLFW
  *
  */
-void TerminateWindow() { glfwTerminate(); }
+void TerminateWindow() {
+    vulkan::graphicsBase::Base().WaitIdle();
+    glfwTerminate();
+}
 
 /**
  * @brief 在标题上显示帧率，每帧调用一次。约每一秒更新一次帧率
