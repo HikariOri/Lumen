@@ -1166,6 +1166,121 @@ namespace vulkan {
             }
             return VK_SUCCESS;
         }
+
+        // 该函数用于将命令缓冲区提交到用于图形的队列
+        result_t
+        SubmitCommandBuffer_Graphics(VkSubmitInfo &submitInfo,
+                                     VkFence fence = VK_NULL_HANDLE) const {
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            VkResult result =
+                vkQueueSubmit(queue_graphics, 1, &submitInfo, fence);
+            if (result) {
+                std::println("[ graphicsBase ] ERROR\nFailed to submit the "
+                             "command buffer!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        // 该函数用于在渲染循环中将命令缓冲区提交到图形队列的常见情形
+        result_t SubmitCommandBuffer_Graphics(
+            VkCommandBuffer commandBuffer,
+            VkSemaphore semaphore_imageIsAvailable = VK_NULL_HANDLE,
+            VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE,
+            VkFence fence = VK_NULL_HANDLE,
+            VkPipelineStageFlags waitDstStage_imageIsAvailable =
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT) const {
+
+            VkSubmitInfo submitInfo {};
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &commandBuffer;
+
+            if (semaphore_imageIsAvailable) {
+                submitInfo.waitSemaphoreCount = 1;
+                submitInfo.pWaitSemaphores = &semaphore_imageIsAvailable;
+                submitInfo.pWaitDstStageMask = &waitDstStage_imageIsAvailable;
+            }
+
+            if (semaphore_renderingIsOver) {
+                submitInfo.signalSemaphoreCount = 1;
+                submitInfo.pSignalSemaphores = &semaphore_renderingIsOver;
+            }
+
+            return SubmitCommandBuffer_Graphics(submitInfo, fence);
+        }
+
+        // 该函数用于将命令缓冲区提交到用于图形的队列，且只使用栅栏的常见情形
+        result_t
+        SubmitCommandBuffer_Graphics(VkCommandBuffer commandBuffer,
+                                     VkFence fence = VK_NULL_HANDLE) const {
+            VkSubmitInfo submitInfo {};
+
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &commandBuffer;
+
+            return SubmitCommandBuffer_Graphics(submitInfo, fence);
+        }
+
+        // 该函数用于将命令缓冲区提交到用于计算的队列
+        result_t
+        SubmitCommandBuffer_Compute(VkSubmitInfo &submitInfo,
+                                    VkFence fence = VK_NULL_HANDLE) const {
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            VkResult result =
+                vkQueueSubmit(queue_compute, 1, &submitInfo, fence);
+            if (result) {
+                std::println("[ graphicsBase ] ERROR\nFailed to submit the "
+                             "command buffer!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        // 该函数用于将命令缓冲区提交到用于计算的队列，且只使用栅栏的常见情形
+        result_t
+        SubmitCommandBuffer_Compute(VkCommandBuffer commandBuffer,
+                                    VkFence fence = VK_NULL_HANDLE) const {
+            VkSubmitInfo submitInfo {};
+
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &commandBuffer;
+
+            return SubmitCommandBuffer_Compute(submitInfo, fence);
+        }
+
+        result_t PresentImage(VkPresentInfoKHR &presentInfo) {
+
+            presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+            switch (VkResult result =
+                        vkQueuePresentKHR(queue_presentation, &presentInfo)) {
+            case VK_SUCCESS: return VK_SUCCESS;
+            case VK_SUBOPTIMAL_KHR:
+            case VK_ERROR_OUT_OF_DATE_KHR: return RecreateSwapchain();
+            default:
+                std::println("[ graphicsBase ] ERROR\nFailed to queue the "
+                             "image for presentation!\nError code: {}",
+                             string_VkResult(result));
+                return result;
+            }
+        }
+
+        // 该函数用于在渲染循环中呈现图像的常见情形
+        result_t
+        PresentImage(VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE) {
+            VkPresentInfoKHR presentInfo {};
+
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = &swapchain;
+            presentInfo.pImageIndices = &currentImageIndex;
+
+            if (semaphore_renderingIsOver) {
+                presentInfo.waitSemaphoreCount = 1;
+                presentInfo.pWaitSemaphores = &semaphore_renderingIsOver;
+            }
+
+            return PresentImage(presentInfo);
+        }
     };
 
     class fence {
@@ -1444,6 +1559,102 @@ namespace vulkan {
             createInfo.queueFamilyIndex = queueFamilyIndex;
 
             return Create(createInfo);
+        }
+    };
+
+    class renderPass {
+        VkRenderPass handle = VK_NULL_HANDLE;
+
+    public:
+        renderPass() = default;
+
+        renderPass(VkRenderPassCreateInfo &createInfo) { Create(createInfo); }
+
+        renderPass(renderPass &&other) noexcept { MoveHandle; }
+
+        ~renderPass() { DestroyHandleBy(vkDestroyRenderPass); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+
+        // Const Function
+        void CmdBegin(VkCommandBuffer commandBuffer,
+                      VkRenderPassBeginInfo &beginInfo,
+                      VkSubpassContents subpassContents =
+                          VK_SUBPASS_CONTENTS_INLINE) const {
+            beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            beginInfo.renderPass = handle;
+            vkCmdBeginRenderPass(commandBuffer, &beginInfo, subpassContents);
+        }
+
+        void CmdBegin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer,
+                      VkRect2D renderArea,
+                      arrayRef<const VkClearValue> clearValues = {},
+                      VkSubpassContents subpassContents =
+                          VK_SUBPASS_CONTENTS_INLINE) const {
+            VkRenderPassBeginInfo beginInfo {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            beginInfo.renderPass = handle;
+            beginInfo.framebuffer = framebuffer;
+            beginInfo.renderArea = renderArea;
+            beginInfo.clearValueCount = uint32_t(clearValues.Count());
+            beginInfo.pClearValues = clearValues.Pointer();
+            vkCmdBeginRenderPass(commandBuffer, &beginInfo, subpassContents);
+        }
+
+        void CmdNext(VkCommandBuffer commandBuffer,
+                     VkSubpassContents subpassContents =
+                         VK_SUBPASS_CONTENTS_INLINE) const {
+            vkCmdNextSubpass(commandBuffer, subpassContents);
+        }
+
+        void CmdEnd(VkCommandBuffer commandBuffer) const {
+            vkCmdEndRenderPass(commandBuffer);
+        }
+
+        // Non-const Function
+        result_t Create(VkRenderPassCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            VkResult result = vkCreateRenderPass(graphicsBase::Base().Device(),
+                                                 &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ renderPass ] ERROR\nFailed to create a render "
+                             "pass!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+    };
+
+    class framebuffer {
+        VkFramebuffer handle = VK_NULL_HANDLE;
+
+    public:
+        framebuffer() = default;
+
+        framebuffer(VkFramebufferCreateInfo &createInfo) { Create(createInfo); }
+
+        framebuffer(framebuffer &&other) noexcept { MoveHandle; }
+
+        ~framebuffer() { DestroyHandleBy(vkDestroyFramebuffer); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+
+        // Non-const Function
+
+        result_t Create(VkFramebufferCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            VkResult result = vkCreateFramebuffer(
+                graphicsBase::Base().Device(), &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ framebuffer ] ERROR\nFailed to create a "
+                             "framebuffer!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
         }
     };
 

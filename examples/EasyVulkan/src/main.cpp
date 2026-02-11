@@ -6,7 +6,7 @@ int main() {
         return -1;
     }
 
-    vulkan::fence fence { VK_FENCE_CREATE_SIGNALED_BIT }; // 以置位状态创建栅栏
+    vulkan::fence fence; // 以非置位状态创建栅栏
     vulkan::semaphore semaphore_imageIsAvailable;
     vulkan::semaphore semaphore_renderingIsOver;
 
@@ -17,22 +17,26 @@ int main() {
     commandPool.AllocateBuffers(commandBuffer);
 
     while (!glfwWindowShouldClose(pWindow)) {
+        while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED)) {
+            glfwWaitEvents();
+        }
 
-        fence.WaitAndReset();
         vulkan::graphicsBase::Base().SwapImage(semaphore_imageIsAvailable);
 
         commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         /*渲染命令，待填充*/
         commandBuffer.End();
 
-        /*提交命令缓冲区，待后续填充*/
-        /*呈现图像，待后续填充*/
+        vulkan::graphicsBase::Base().SubmitCommandBuffer_Graphics(
+            commandBuffer, semaphore_imageIsAvailable,
+            semaphore_renderingIsOver, fence);
+        vulkan::graphicsBase::Base().PresentImage(semaphore_renderingIsOver);
 
         glfwPollEvents();
         TitleFps();
+
+        fence.WaitAndReset();
     }
-
     TerminateWindow();
-
     return 0;
 }
