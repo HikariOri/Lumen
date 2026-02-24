@@ -3,6 +3,7 @@
 #include "EasyVKStart.h"
 #include "arrayRef.hpp"
 #include "result_t.h"
+#include <vulkan/vulkan_core.h>
 
 #define DestroyHandleBy(Func)                                                  \
     if (handle) {                                                              \
@@ -718,7 +719,7 @@ namespace vulkan {
             callbacks_createSwapchain.push_back(function);
         }
 
-        void AddCallback_DestorySwapchain(void (*function)()) {
+        void AddCallback_DestroySwapchain(void (*function)()) {
             callbacks_destroySwapchain.push_back(function);
         }
 
@@ -1652,6 +1653,88 @@ namespace vulkan {
             if (result) {
                 std::println("[ framebuffer ] ERROR\nFailed to create a "
                              "framebuffer!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+    };
+
+    class pipelineLayout {
+        VkPipelineLayout handle = VK_NULL_HANDLE;
+
+    public:
+        pipelineLayout() = default;
+
+        pipelineLayout(VkPipelineLayoutCreateInfo &createInfo) {
+            Create(createInfo);
+        }
+
+        pipelineLayout(pipelineLayout &&other) noexcept { MoveHandle; }
+
+        ~pipelineLayout() { DestroyHandleBy(vkDestroyPipelineLayout); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+        // Non-const Function
+
+        result_t Create(VkPipelineLayoutCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            VkResult result = vkCreatePipelineLayout(
+                graphicsBase::Base().Device(), &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ pipelineLayout ] ERROR\nFailed to create a "
+                             "pipeline layout!\nError code: {}",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+    };
+
+    class pipeline {
+        VkPipeline handle = VK_NULL_HANDLE;
+
+    public:
+        pipeline() = default;
+
+        pipeline(VkGraphicsPipelineCreateInfo &createInfo) {
+            Create(createInfo);
+        }
+
+        pipeline(VkComputePipelineCreateInfo &createInfo) {
+            Create(createInfo);
+        }
+
+        pipeline(pipeline &&other) noexcept { MoveHandle; }
+
+        ~pipeline() { DestroyHandleBy(vkDestroyPipeline); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+
+        // Non-const Function
+        result_t Create(VkGraphicsPipelineCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            VkResult result = vkCreateGraphicsPipelines(
+                graphicsBase::Base().Device(), VK_NULL_HANDLE, 1, &createInfo,
+                nullptr, &handle);
+            if (result) {
+                std::println("[ pipeline ] ERROR\nFailed to create a graphics "
+                             "pipeline!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t Create(VkComputePipelineCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+            VkResult result = vkCreateComputePipelines(
+                graphicsBase::Base().Device(), VK_NULL_HANDLE, 1, &createInfo,
+                nullptr, &handle);
+            if (result) {
+                std::println("[ pipeline ] ERROR\nFailed to create a compute "
+                             "pipeline!\nError code: {}\n",
                              string_VkResult(result));
             }
             return result;
