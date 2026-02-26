@@ -4,8 +4,46 @@
 
 using namespace vulkan;
 
+using namespace vulkan; // 上一节中在main.cpp中全局范围内使用了命名空间
+
 pipelineLayout pipelineLayout_triangle; // 管线布局
 pipeline pipeline_triangle;             // 管线
+
+// 该函数调用easyVulkan::CreateRpwf_Screen()并存储返回的引用到静态变量
+const auto &RenderPassAndFramebuffers() {
+    static const auto &rpwf = easyVulkan::CreateRpwf_Screen();
+    return rpwf;
+}
+// 该函数用于创建管线布局
+void CreateLayout() {
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {};
+    pipelineLayout_triangle.Create(pipelineLayoutCreateInfo);
+}
+
+// 该函数用于创建管线
+void CreatePipeline() {
+    static shaderModule vert("shader/FirstTriangle.vert.spv");
+    static shaderModule frag("shader/FirstTriangle.frag.spv");
+
+    static VkPipelineShaderStageCreateInfo
+        shaderStageCreateInfos_triangle[2] = {
+            vert.StageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT),
+            frag.StageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT)
+        };
+
+    auto Create = [] {
+        graphicsPipelineCreateInfoPack pipelineCiPack;
+        /*待后续填充*/
+        pipeline_triangle.Create(pipelineCiPack);
+    };
+
+    auto Destroy = [] { pipeline_triangle.~pipeline(); };
+
+    graphicsBase::Base().AddCallback_CreateSwapchain(Create);
+    graphicsBase::Base().AddCallback_DestroySwapchain(Destroy);
+    // 调用Create()以创建管线
+    Create();
+}
 
 int main() {
     if (!InitializeWindow({ 1280, 720 })) {

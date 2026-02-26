@@ -15,11 +15,11 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E make_directory
           "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl"
   COMMAND ${GLSLC_COMPILER}
-          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.vert"
-          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/vert.spv"
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/FirstTriangle.vert.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/FirstTriangle.vert.spv"
   COMMAND ${GLSLC_COMPILER}
-          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/shader.frag"
-          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/frag.spv"
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/FirstTriangle.frag.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/FirstTriangle.frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "EasyVKStart.h"
+#include "VKBase+.h"
 #include "arrayRef.hpp"
 #include "result_t.h"
+
 #include <vulkan/vulkan_core.h>
 
 #define DestroyHandleBy(Func)                                                  \
@@ -39,7 +41,7 @@
 inline auto &outStream = std::cout;
 
 namespace vulkan {
-    // 全局常量用constexpr修饰定义在类外：
+
     constexpr VkExtent2D defaultWindowSize = { 1280, 720 };
 
     class graphicsBase {
@@ -1738,6 +1740,78 @@ namespace vulkan {
                              string_VkResult(result));
             }
             return result;
+        }
+    };
+
+    class shaderModule {
+        VkShaderModule handle = VK_NULL_HANDLE;
+
+    public:
+        shaderModule() = default;
+        shaderModule(VkShaderModuleCreateInfo &createInfo) {
+            Create(createInfo);
+        }
+        shaderModule(const char *filepath /*VkShaderModuleCreateFlags flags*/) {
+            Create(filepath);
+        }
+        shaderModule(
+            size_t codeSize,
+            const uint32_t *pCode /*VkShaderModuleCreateFlags flags*/) {
+            Create(codeSize, pCode);
+        }
+        shaderModule(shaderModule &&other) noexcept { MoveHandle; }
+        ~shaderModule() { DestroyHandleBy(vkDestroyShaderModule); }
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+        // Const Function
+        VkPipelineShaderStageCreateInfo
+        StageCreateInfo(VkShaderStageFlagBits stage,
+                        const char *entry = "main") const {
+            return {
+                VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, // sType
+                nullptr,                                             // pNext
+                0,                                                   // flags
+                stage,                                               // stage
+                handle,                                              // module
+                entry,                                               // pName
+                nullptr // pSpecializationInfo
+            };
+        }
+        // Non-const Function
+        result_t Create(VkShaderModuleCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+            VkResult result = vkCreateShaderModule(
+                graphicsBase::Base().Device(), &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ shader ] ERROR\nFailed to create a shader "
+                             "module!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t
+        Create(const char *filepath /*VkShaderModuleCreateFlags flags*/) {
+            std::ifstream file(filepath, std::ios::ate | std::ios::binary);
+            if (!file) {
+                std::println("[ shader ] ERROR\nFailed to open the file: {}\n",
+                             filepath);
+                return VK_RESULT_MAX_ENUM; // 没有合适的错误代码，别用VK_ERROR_UNKNOWN
+            }
+            size_t fileSize = size_t(file.tellg());
+            std::vector<uint32_t> binaries(fileSize / 4);
+            file.seekg(0);
+            file.read(reinterpret_cast<char *>(binaries.data()), fileSize);
+            file.close();
+            return Create(fileSize, binaries.data());
+        }
+        result_t
+        Create(size_t codeSize,
+               const uint32_t *pCode /*VkShaderModuleCreateFlags flags*/) {
+            VkShaderModuleCreateInfo createInfo = { .codeSize = codeSize,
+                                                    .pCode = pCode };
+            return Create(createInfo);
         }
     };
 
