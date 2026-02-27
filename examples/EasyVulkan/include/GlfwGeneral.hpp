@@ -46,8 +46,8 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false,
     }
 
     uint32_t extensionCount = 0;
-    const char **extensionNames;
-    extensionNames = glfwGetRequiredInstanceExtensions(&extensionCount);
+    const char **extensionNames =
+        glfwGetRequiredInstanceExtensions(&extensionCount);
     if (!extensionNames) {
         std::cout << std::format(
             "[ InitializeWindow ]\nVulkan is not available on this machine!\n");
