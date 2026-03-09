@@ -1815,5 +1815,313 @@ namespace vulkan {
         }
     };
 
+    class event {
+        VkEvent handle = VK_NULL_HANDLE;
+
+    public:
+        // event() = default;
+        event(VkEventCreateInfo &createInfo) { Create(createInfo); }
+
+        event(VkEventCreateFlags flags = 0) { Create(flags); }
+
+        event(event &&other) noexcept { MoveHandle; }
+
+        ~event() { DestroyHandleBy(vkDestroyEvent); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+        // Const Function
+
+        void CmdSet(VkCommandBuffer commandBuffer,
+                    VkPipelineStageFlags stage_from) const {
+            vkCmdSetEvent(commandBuffer, handle, stage_from);
+        }
+
+        void CmdReset(VkCommandBuffer commandBuffer,
+                      VkPipelineStageFlags stage_from) const {
+            vkCmdResetEvent(commandBuffer, handle, stage_from);
+        }
+
+        void CmdWait(VkCommandBuffer commandBuffer,
+                     VkPipelineStageFlags stage_from,
+                     VkPipelineStageFlags stage_to,
+                     arrayRef<VkMemoryBarrier> memoryBarriers,
+                     arrayRef<VkBufferMemoryBarrier> bufferMemoryBarriers,
+                     arrayRef<VkImageMemoryBarrier> imageMemoryBarriers) const {
+
+            for (auto &i : memoryBarriers) {
+                i.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            }
+
+            for (auto &i : bufferMemoryBarriers) {
+                i.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            }
+
+            for (auto &i : imageMemoryBarriers) {
+                i.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            }
+
+            vkCmdWaitEvents(
+                commandBuffer, 1, &handle, stage_from, stage_to,
+                memoryBarriers.Count(), memoryBarriers.Pointer(),
+                bufferMemoryBarriers.Count(), bufferMemoryBarriers.Pointer(),
+                imageMemoryBarriers.Count(), imageMemoryBarriers.Pointer());
+        }
+
+        result_t Set() const {
+            VkResult result = vkSetEvent(graphicsBase::Base().Device(), handle);
+            if (result) {
+                std::println("[ event ] ERROR\nFailed to singal the "
+                             "event!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t Reset() const {
+            VkResult result =
+                vkResetEvent(graphicsBase::Base().Device(), handle);
+            if (result) {
+                std::println("[ event ] ERROR\nFailed to unsingal the "
+                             "event!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t Status() const {
+            VkResult result =
+                vkGetEventStatus(graphicsBase::Base().Device(), handle);
+            if (result < 0) // vkGetEventStatus(...)成功时有两种结果
+            {
+                std::println("[ event ] ERROR\nFailed to get the status of the "
+                             "event!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        // Non-const Function
+        result_t Create(VkEventCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+            VkResult result = vkCreateEvent(graphicsBase::Base().Device(),
+                                            &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ event ] ERROR\nFailed to create an "
+                             "event!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t Create(VkEventCreateFlags flags = 0) {
+            VkEventCreateInfo createInfo = { .flags = flags };
+            return Create(createInfo);
+        }
+    };
+
+    class deviceMemory {
+
+        VkDeviceMemory handle = VK_NULL_HANDLE;
+
+        VkDeviceSize allocationSize = 0; // 实际分配的内存大小
+
+        VkMemoryPropertyFlags memoryProperties = 0; // 内存属性
+
+        //--------------------
+        // 该函数用于在映射内存区时，调整非 host-coherent 的内存区域的范围。
+        // 非 host-coherent 内存需要通过 vkFlushMappedMemoryRanges /
+        // vkInvalidateMappedMemoryRanges 做显式同步，且 offset 和 size 必须是
+        // nonCoherentAtomSize 的整数倍。
+        //
+        // 逻辑：1) 将 offset 向下对齐到 nonCoherentAtomSize 的倍数
+        //      2) 将请求范围 (offset + size) 的结束地址向上对齐，计算新的 size
+        //      3) 用 std::min 确保不超过 allocationSize
+        // 返回值：_offset - offset，即 offset
+        // 被向下对齐的字节数，供调用方修正数据指针
+        VkDeviceSize AdjustNonCoherentMemoryRange(VkDeviceSize &size,
+                                                  VkDeviceSize &offset) const {
+            const VkDeviceSize &nonCoherentAtomSize =
+                graphicsBase::Base()
+                    .PhysicalDeviceProperties()
+                    .limits.nonCoherentAtomSize;
+            VkDeviceSize _offset = offset;
+            offset = offset / nonCoherentAtomSize * nonCoherentAtomSize;
+            size = std::min((size + _offset + nonCoherentAtomSize - 1) /
+                                nonCoherentAtomSize * nonCoherentAtomSize,
+                            allocationSize) -
+                   offset;
+            return _offset - offset;
+        }
+
+    protected:
+        // 用于bufferMemory或imageMemory，定义于此以节省8个字节
+        class {
+            friend class bufferMemory;
+            friend class imageMemory;
+            bool value = false;
+            operator bool() const { return value; }
+            auto &operator=(bool value) {
+                this->value = value;
+                return *this;
+            }
+        } areBound;
+
+    public:
+        deviceMemory() = default;
+
+        deviceMemory(VkMemoryAllocateInfo &allocateInfo) {
+            Allocate(allocateInfo);
+        }
+
+        deviceMemory(deviceMemory &&other) noexcept {
+            MoveHandle;
+            allocationSize = other.allocationSize;
+            memoryProperties = other.memoryProperties;
+            other.allocationSize = 0;
+            other.memoryProperties = 0;
+        }
+
+        ~deviceMemory() {
+            DestroyHandleBy(vkFreeMemory);
+            allocationSize = 0;
+            memoryProperties = 0;
+        }
+
+        // Getter
+        DefineHandleTypeOperator;
+
+        DefineAddressFunction;
+
+        VkDeviceSize AllocationSize() const { return allocationSize; }
+
+        VkMemoryPropertyFlags MemoryProperties() const {
+            return memoryProperties;
+        }
+
+        // Const Function
+        // 映射host-visible的内存区
+        result_t MapMemory(void *&pData, VkDeviceSize size,
+                           VkDeviceSize offset = 0) const {
+
+            VkDeviceSize inverseDeltaOffset;
+
+            if (!(memoryProperties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                inverseDeltaOffset = AdjustNonCoherentMemoryRange(size, offset);
+            }
+
+            if (VkResult result =
+                    vkMapMemory(graphicsBase::Base().Device(), handle, offset,
+                                size, 0, &pData)) {
+                std::println("[ deviceMemory ] ERROR\nFailed to map the "
+                             "memory!\nError code: {}\n",
+                             string_VkResult(result));
+                return result;
+            }
+
+            if (!(memoryProperties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                pData = static_cast<uint8_t *>(pData) + inverseDeltaOffset;
+                VkMappedMemoryRange mappedMemoryRange = {
+                    .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                    .memory = handle,
+                    .offset = offset,
+                    .size = size
+                };
+                if (VkResult result = vkInvalidateMappedMemoryRanges(
+                        graphicsBase::Base().Device(), 1, &mappedMemoryRange)) {
+                    std::println("[ deviceMemory ] ERROR\nFailed to flush the "
+                                 "memory!\nError code: {}\n",
+                                 string_VkResult(result));
+                    return result;
+                }
+            }
+            return VK_SUCCESS;
+        }
+
+        // 取消映射host-visible的内存区
+        result_t UnmapMemory(VkDeviceSize size, VkDeviceSize offset = 0) const {
+            if (!(memoryProperties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                AdjustNonCoherentMemoryRange(size, offset);
+                VkMappedMemoryRange mappedMemoryRange = {
+                    .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                    .memory = handle,
+                    .offset = offset,
+                    .size = size
+                };
+                if (VkResult result = vkFlushMappedMemoryRanges(
+                        graphicsBase::Base().Device(), 1, &mappedMemoryRange)) {
+                    std::println("[ deviceMemory ] ERROR\nFailed to flush the "
+                                 "memory!\nError code: {}\n",
+                                 string_VkResult(result));
+                    return result;
+                }
+            }
+            vkUnmapMemory(graphicsBase::Base().Device(), handle);
+            return VK_SUCCESS;
+        }
+
+        // BufferData(...)用于方便地更新设备内存区，适用于用memcpy(...)向内存区写入数据后立刻取消映射的情况
+        result_t BufferData(const void *pData_src, VkDeviceSize size,
+                            VkDeviceSize offset = 0) const {
+            void *pData_dst;
+
+            if (VkResult result = MapMemory(pData_dst, size, offset)) {
+                return result;
+            }
+
+            memcpy(pData_dst, pData_src, size_t(size));
+
+            return UnmapMemory(size, offset);
+        }
+
+        result_t BufferData(const auto &data_src) const {
+            return BufferData(&data_src, sizeof data_src);
+        }
+
+        // RetrieveData(...)用于方便地从设备内存区取回数据，适用于用memcpy(...)从内存区取得数据后立刻取消映射的情况
+        result_t RetrieveData(void *pData_dst, VkDeviceSize size,
+                              VkDeviceSize offset = 0) const {
+            void *pData_src;
+            if (VkResult result = MapMemory(pData_src, size, offset)) {
+                return result;
+            }
+            memcpy(pData_dst, pData_src, size_t(size));
+            return UnmapMemory(size, offset);
+        }
+
+        // Non-const Function
+        result_t Allocate(VkMemoryAllocateInfo &allocateInfo) {
+            if (allocateInfo.memoryTypeIndex >=
+                graphicsBase::Base()
+                    .PhysicalDeviceMemoryProperties()
+                    .memoryTypeCount) {
+                std::println(
+                    "[ deviceMemory ] ERROR\nInvalid memory type index!\n");
+                return VK_RESULT_MAX_ENUM; // 没有合适的错误代码，别用VK_ERROR_UNKNOWN
+            }
+
+            allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+
+            if (VkResult result =
+                    vkAllocateMemory(graphicsBase::Base().Device(),
+                                     &allocateInfo, nullptr, &handle)) {
+                std::println("[ deviceMemory ] ERROR\nFailed to allocate "
+                             "memory!\nError code: {}\n",
+                             string_VkResult(result));
+                return result;
+            }
+
+            // 记录实际分配的内存大小
+            allocationSize = allocateInfo.allocationSize;
+            // 取得内存属性
+            memoryProperties = graphicsBase::Base()
+                                   .PhysicalDeviceMemoryProperties()
+                                   .memoryTypes[allocateInfo.memoryTypeIndex]
+                                   .propertyFlags;
+            return VK_SUCCESS;
+        }
+    };
+
     graphicsBase graphicsBase::singleton;
 } // namespace vulkan
