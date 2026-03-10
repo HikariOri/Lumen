@@ -7,6 +7,7 @@ struct formatInfo {
         integer,      // 1，数据类型为整型
         floatingPoint // 1，数据类型为浮点数
     };
+
     uint8_t componentCount;   // 通道数
     uint8_t sizePerComponent; // 每个通道的大小，0意味着压缩，或不均等，或少于1
     uint8_t sizePerPixel;     // 每个像素的大小，0意味着压缩
@@ -14,6 +15,7 @@ struct formatInfo {
 };
 
 constexpr formatInfo formatInfos_v1_0[] = {
+    
     { 0, 0, 0, 0 }, // VK_FORMAT_UNDEFINED = 0,
 
     { 2, 0, 1, 1 }, // VK_FORMAT_R4G4_UNORM_PACK8 = 1,
