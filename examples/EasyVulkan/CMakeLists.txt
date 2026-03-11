@@ -8,6 +8,7 @@ target_include_directories(${CUR_TARGET} PRIVATE ${Stb_INCLUDE_DIR})
 target_include_directories(${CUR_TARGET} PRIVATE ${TINYGLTF_INCLUDE_DIRS})
 target_link_libraries(${CUR_TARGET} PRIVATE tinyobjloader::tinyobjloader_double)
 target_link_libraries(${CUR_TARGET} PRIVATE glfw)
+target_link_libraries(${CUR_TARGET} PRIVATE imgui::imgui)
 
 add_custom_command(
   TARGET ${CUR_TARGET}
