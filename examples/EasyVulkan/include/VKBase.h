@@ -2790,5 +2790,352 @@ namespace vulkan {
         }
     };
 
+    class sampler {
+        VkSampler handle = VK_NULL_HANDLE;
+
+    public:
+        sampler() = default;
+
+        sampler(VkSamplerCreateInfo &createInfo) { Create(createInfo); }
+
+        sampler(sampler &&other) noexcept { MoveHandle; }
+
+        ~sampler() { DestroyHandleBy(vkDestroySampler); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+        // Non-const Function
+
+        result_t Create(VkSamplerCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            VkResult result = vkCreateSampler(graphicsBase::Base().Device(),
+                                              &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ sampler ] ERROR\nFailed to create a "
+                             "sampler!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+    };
+
+    class queryPool {
+        VkQueryPool handle = VK_NULL_HANDLE;
+
+    public:
+        queryPool() = default;
+
+        queryPool(VkQueryPoolCreateInfo &createInfo) { Create(createInfo); }
+
+        queryPool(VkQueryType queryType, uint32_t queryCount,
+                  VkQueryPipelineStatisticFlags pipelineStatistics = 0,
+                  VkQueryPoolCreateFlags flags = 0) {
+            Create(queryType, queryCount, pipelineStatistics, flags);
+        }
+
+        queryPool(queryPool &&other) noexcept { MoveHandle; }
+
+        ~queryPool() { DestroyHandleBy(vkDestroyQueryPool); }
+
+        // Getter
+        DefineHandleTypeOperator;
+        DefineAddressFunction;
+        // Const Function
+
+        void CmdReset(VkCommandBuffer commandBuffer, uint32_t firstQueryIndex,
+                      uint32_t queryCount) const {
+            vkCmdResetQueryPool(commandBuffer, handle, firstQueryIndex,
+                                queryCount);
+        }
+
+        void CmdBegin(VkCommandBuffer commandBuffer, uint32_t queryIndex,
+                      VkQueryControlFlags flags = 0) const {
+            vkCmdBeginQuery(commandBuffer, handle, queryIndex, flags);
+        }
+
+        void CmdEnd(VkCommandBuffer commandBuffer, uint32_t queryIndex) const {
+            vkCmdEndQuery(commandBuffer, handle, queryIndex);
+        }
+
+        void CmdWriteTimestamp(VkCommandBuffer commandBuffer,
+                               VkPipelineStageFlagBits pipelineStage,
+                               uint32_t queryIndex) const {
+            vkCmdWriteTimestamp(commandBuffer, pipelineStage, handle,
+                                queryIndex);
+        }
+
+        void CmdCopyResults(VkCommandBuffer commandBuffer,
+                            uint32_t firstQueryIndex, uint32_t queryCount,
+                            VkBuffer dstBuffer, VkDeviceSize dstOffset,
+                            VkDeviceSize stride,
+                            VkQueryResultFlags flags = 0) const {
+            vkCmdCopyQueryPoolResults(commandBuffer, handle, firstQueryIndex,
+                                      queryCount, dstBuffer, dstOffset, stride,
+                                      flags);
+        }
+
+        result_t GetResults(uint32_t firstQueryIndex, uint32_t queryCount,
+                            size_t dataSize, void *pData_dst,
+                            VkDeviceSize stride,
+                            VkQueryResultFlags flags = 0) const {
+            VkResult result = vkGetQueryPoolResults(
+                graphicsBase::Base().Device(), handle, firstQueryIndex,
+                queryCount, dataSize, pData_dst, stride, flags);
+
+            if (result) {
+                result > 0
+                    ? // 若返回值为VK_NOT_READY，则查询尚未结束，有查询结果尚不可获
+                    std::println("[ queryPool ] WARNING\nNot all queries are "
+                                 "available!\nError code: {}\n",
+                                 string_VkResult(result))
+                    : std::println("[ queryPool ] ERROR\nFailed to get query "
+                                   "pool results!\nError code: {}\n",
+                                   string_VkResult(result));
+            }
+
+            return result;
+        }
+
+        /* Provided by VK_API_VERSION_1_2 */
+        void Reset(uint32_t firstQueryIndex, uint32_t queryCount) const {
+            vkResetQueryPool(graphicsBase::Base().Device(), handle,
+                             firstQueryIndex, queryCount);
+        }
+
+        // Non-const Function
+        result_t Create(VkQueryPoolCreateInfo &createInfo) {
+            createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+            VkResult result = vkCreateQueryPool(graphicsBase::Base().Device(),
+                                                &createInfo, nullptr, &handle);
+            if (result) {
+                std::println("[ queryPool ] ERROR\nFailed to create a query "
+                             "pool!\nError code: {}\n",
+                             string_VkResult(result));
+            }
+            return result;
+        }
+
+        result_t Create(VkQueryType queryType, uint32_t queryCount,
+                        VkQueryPipelineStatisticFlags pipelineStatistics = 0,
+                        VkQueryPoolCreateFlags flags = 0) {
+            VkQueryPoolCreateInfo createInfo = { .flags = flags,
+                                                 .queryType = queryType,
+                                                 .queryCount = queryCount,
+                                                 .pipelineStatistics =
+                                                     pipelineStatistics };
+            return Create(createInfo);
+        }
+    };
+
+    class occlusionQueries {
+    protected:
+        queryPool queryPool;
+        std::vector<uint32_t> passingSampleCounts;
+
+    public:
+        occlusionQueries() = default;
+
+        occlusionQueries(uint32_t capacity) { Create(capacity); }
+
+        // Getter
+        operator VkQueryPool() const { return queryPool; }
+
+        const VkQueryPool *Address() const { return queryPool.Address(); }
+
+        uint32_t Capacity() const { return passingSampleCounts.size(); }
+
+        uint32_t PassingSampleCount(uint32_t index) const {
+            return passingSampleCounts[index];
+        }
+
+        // Const Function
+        /*重置整个查询池*/
+        void CmdReset(VkCommandBuffer commandBuffer) const {
+            queryPool.CmdReset(commandBuffer, 0, Capacity());
+        }
+
+        void CmdBegin(VkCommandBuffer commandBuffer, uint32_t queryIndex,
+                      bool isPrecise = false) const {
+            queryPool.CmdBegin(commandBuffer, queryIndex, isPrecise);
+        }
+
+        void CmdEnd(VkCommandBuffer commandBuffer, uint32_t queryIndex) const {
+            queryPool.CmdEnd(commandBuffer, queryIndex);
+        }
+
+        /*常用于GPU-driven遮挡剔除*/
+        void CmdCopyResults(VkCommandBuffer commandBuffer,
+                            uint32_t firstQueryIndex, uint32_t queryCount,
+                            VkBuffer dstBuffer, VkDeviceSize dstOffset,
+                            VkDeviceSize stride) const {
+            // 需要等待查询结束以获取正确的数值，flags为VK_QUERY_RESULT_WAIT_BIT
+            queryPool.CmdCopyResults(commandBuffer, firstQueryIndex, queryCount,
+                                     dstBuffer, dstOffset, stride,
+                                     VK_QUERY_RESULT_WAIT_BIT);
+        }
+
+        // Non-const Function
+        void Create(uint32_t capacity) {
+            passingSampleCounts.resize(capacity);
+            passingSampleCounts.shrink_to_fit();
+            queryPool.Create(VK_QUERY_TYPE_OCCLUSION, Capacity());
+        }
+
+        void Recreate(uint32_t capacity) {
+            graphicsBase::Base().WaitIdle();
+            queryPool.~queryPool();
+            Create(capacity);
+        }
+
+        result_t GetResults() { return GetResults(Capacity()); }
+
+        result_t GetResults(uint32_t queryCount) {
+            return queryPool.GetResults(0, queryCount, queryCount * 4,
+                                        passingSampleCounts.data(), 4);
+        }
+    };
+
+    class pipelineStatisticQuery {
+    protected:
+        enum statisticName {
+            // Input Assembly
+            vertexCount_ia,
+            primitiveCount_ia,
+            // Vertex Shader
+            invocationCount_vs,
+            // Geometry Shader
+            invocationCount_gs,
+            primitiveCount_gs,
+            // Clipping
+            invocationCount_clipping,
+            primitiveCount_clipping,
+            // Fragment Shader
+            invocationCount_fs,
+            // Tessellation
+            patchCount_tcs,
+            invocationCount_tes,
+            // Compute Shader
+            invocationCount_cs,
+            statisticCount
+        };
+
+        //--------------------
+        queryPool queryPool;
+        uint32_t statistics[statisticCount] = {};
+
+    public:
+        pipelineStatisticQuery() { Create(); }
+
+        // Getter
+        // clang-format off
+        operator VkQueryPool() const { return queryPool; }
+        const VkQueryPool* Address() const { return queryPool.Address(); }
+        uint32_t     VertexCount_Ia() const { return statistics[vertexCount_ia]; }
+        uint32_t  PrimitiveCount_Ia() const { return statistics[primitiveCount_ia]; }
+        uint32_t InvocationCount_Vs() const { return statistics[invocationCount_vs]; }
+        uint32_t InvocationCount_Gs() const { return statistics[invocationCount_gs]; }
+        uint32_t  PrimitiveCount_Gs() const { return statistics[primitiveCount_gs]; }
+        uint32_t InvocationCount_Clipping() const { return statistics[invocationCount_clipping]; }
+        uint32_t  PrimitiveCount_Clipping() const { return statistics[primitiveCount_clipping]; }
+        uint32_t InvocationCount_Fs() const { return statistics[invocationCount_fs]; }
+        uint32_t      PatchCount_Tcs() const { return statistics[patchCount_tcs]; }
+        uint32_t InvocationCount_Tes() const { return statistics[invocationCount_tes]; }
+        uint32_t InvocationCount_Cs() const { return statistics[invocationCount_cs]; }
+        // clang-format on
+
+        // Const Function
+        void CmdReset(VkCommandBuffer commandBuffer) const {
+            queryPool.CmdReset(commandBuffer, 0, 1);
+        }
+
+        void CmdBegin(VkCommandBuffer commandBuffer) const {
+            queryPool.CmdBegin(commandBuffer, 0);
+        }
+
+        void CmdEnd(VkCommandBuffer commandBuffer) const {
+            queryPool.CmdEnd(commandBuffer, 0);
+        }
+
+        void CmdResetAndBegin(VkCommandBuffer commandBuffer) const {
+            CmdReset(commandBuffer);
+            CmdBegin(commandBuffer);
+        }
+
+        // Non-const Function
+        void Create() {
+            queryPool.Create(VK_QUERY_TYPE_PIPELINE_STATISTICS, 1,
+                             (1 << statisticCount) - 1);
+        }
+
+        result_t GetResults() {
+            return queryPool.GetResults(
+                0,                 // firstQuery
+                1,                 // queryCount
+                sizeof statistics, // dataSize，内存区大小
+                statistics,        // pData
+                sizeof statistics // stride，每组查询结果在目标内存区中的间距，这里是紧密排列（因为就1组结果，可以写0）
+            );
+        }
+    };
+
+    class timestampQueries {
+    protected:
+        queryPool queryPool;
+        std::vector<uint32_t> timestamps;
+
+    public:
+        timestampQueries() = default;
+
+        timestampQueries(uint32_t capacity) { Create(capacity); }
+
+        // Getter
+        operator VkQueryPool() const { return queryPool; }
+
+        const VkQueryPool *Address() const { return queryPool.Address(); }
+
+        uint32_t Capacity() const { return timestamps.size(); }
+
+        uint32_t Timestamp(uint32_t index) const { return timestamps[index]; }
+
+        /*计算两个时间戳之间的差值*/
+        uint32_t Duration(uint32_t index) const {
+            return timestamps[index + 1] - timestamps[index];
+        }
+
+        // Const Function
+        /*重置整个查询池*/
+        void CmdReset(VkCommandBuffer commandBuffer) const {
+            queryPool.CmdReset(commandBuffer, 0, Capacity());
+        }
+
+        void CmdWriteTimestamp(VkCommandBuffer commandBuffer,
+                               VkPipelineStageFlagBits pipelineStage,
+                               uint32_t queryIndex) const {
+            queryPool.CmdWriteTimestamp(commandBuffer, pipelineStage,
+                                        queryIndex);
+        }
+
+        // Non-const Function
+        void Create(uint32_t capacity) {
+            timestamps.resize(capacity);
+            timestamps.shrink_to_fit();
+            queryPool.Create(VK_QUERY_TYPE_TIMESTAMP, Capacity());
+        }
+
+        void Recreate(uint32_t capacity) {
+            graphicsBase::Base().WaitIdle();
+            queryPool.~queryPool();
+            Create(capacity);
+        }
+
+        result_t GetResults() { return GetResults(Capacity()); }
+
+        result_t GetResults(uint32_t queryCount) {
+            return queryPool.GetResults(0, queryCount, queryCount * 4,
+                                        timestamps.data(), 4);
+        }
+    };
+
     graphicsBase graphicsBase::singleton;
 } // namespace vulkan
