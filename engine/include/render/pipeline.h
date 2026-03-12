@@ -10,7 +10,7 @@
 
 #include <vulkan/vulkan.hpp>
 
-namespace cake {
+namespace lumen {
 
     /**
      * # Pipeline 类
@@ -99,4 +99,4 @@ namespace cake {
         Used *m_usedClass;
     };
 
-} // namespace cake
+} // namespace lumen

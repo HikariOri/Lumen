@@ -9,5 +9,9 @@
 #include "transform.h"
 #include "uuid.h"
 
-// 渲染器组件（保留原始定义）
-struct Renderer {};
+namespace lumen {
+
+    // 渲染器组件（保留原始定义）
+    struct Renderer {};
+
+} // namespace lumen

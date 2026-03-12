@@ -4,7 +4,7 @@
 
 ### 概述
 
-`FileDownloader` 是一个功能完善的HTTP/HTTPS文件下载器类，位于 `cake::network` 命名空间中。它支持同步和异步下载，提供丰富的配置选项，包括超时设置、重试机制、自定义HTTP头等。
+`FileDownloader` 是一个功能完善的HTTP/HTTPS文件下载器类，位于 `lumen::network` 命名空间中。它支持同步和异步下载，提供丰富的配置选项，包括超时设置、重试机制、自定义HTTP头等。
 
 **位置**: `engine/include/network/file_downloader.h`
 
@@ -17,7 +17,7 @@
 ```cpp
 #include "network/file_downloader.h"
 
-using namespace cake::network;
+using namespace lumen::network;
 
 // 简单版本 - 返回 std::optional<std::vector<uint8_t>>
 auto data = FileDownloader::DownloadToMemory("https://example.com/image.jpg");

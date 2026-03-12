@@ -1,15 +1,34 @@
+/**
+ * @file arrayRef.hpp
+ * @brief 轻量级数组引用类型，模拟对连续数组的只读/读写引用
+ */
+
 #pragma once
 
+/**
+ * @class arrayRef
+ * @tparam T 元素类型
+ * @brief 非拥有式数组视图，支持从单个对象、连续范围或指针+数量构造
+ */
 template <typename T>
 class arrayRef {
     T *const pArray = nullptr;
     size_t count = 0;
 
 public:
-    // 从空参数构造，count为0
+    /** @brief 默认构造，空引用 count=0 */
     arrayRef() = default;
-    // 从单个对象构造，count为1
+
+    /**
+     * @brief 从单个对象构造，count=1
+     * @param data 单个元素的引用
+     */
     arrayRef(T &data) : pArray(&data), count(1) {}
+    /**
+     * @brief 从满足 contiguous_range 的容器构造
+     * @tparam R 连续范围类型
+     * @param range 可转发引用范围
+     */
     template <typename R>
     arrayRef(R &&range)
         requires requires(R r) {
@@ -20,20 +39,36 @@ public:
             requires sizeof(std::iter_value_t<R>) == sizeof(T);
         }
         : pArray(std::ranges::data(range)), count(std::ranges::size(range)) {}
-    // 从指针和元素个数构造
+
+    /**
+     * @brief 从指针和元素个数构造
+     * @param pData 数组首地址
+     * @param elementCount 元素个数
+     */
     arrayRef(T *pData, size_t elementCount)
         : pArray(pData), count(elementCount) {}
-    // 若T带const修饰，兼容从对应的无const修饰版本的arrayRef构造
+
+    /**
+     * @brief 从无 const 版本构造（当 T 为 const 修饰时）
+     * @param other 源 arrayRef
+     */
     arrayRef(const arrayRef<std::remove_const_t<T>> &other)
         : pArray(other.Pointer()), count(other.Count()) {}
-    // Getter
+
+    /** @brief 获取数组指针 */
     T *Pointer() const { return pArray; }
+
+    /** @brief 获取元素个数 */
     size_t Count() const { return count; }
-    // Const Function
+
+    /** @brief 下标访问 */
     T &operator[](size_t index) const { return pArray[index]; }
+    /** @brief 迭代器起始 */
     T *begin() const { return pArray; }
+
+    /** @brief 迭代器结尾 */
     T *end() const { return pArray + count; }
-    // Non-const Function
-    // 禁止复制/移动赋值（arrayRef旨在模拟“对数组的引用”，用处归根结底只是传参，故使其同C++引用的底层地址一样，防止初始化后被修改）
+
+    /** @brief 禁止赋值，arrayRef 模拟引用语义 */
     arrayRef &operator=(const arrayRef &) = delete;
 };

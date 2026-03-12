@@ -1,3 +1,8 @@
+/**
+ * @file GlfwGeneral.hpp
+ * @brief GLFW 窗口与 Vulkan 集成，初始化、帧率显示、全屏切换
+ */
+
 #pragma once
 
 #include "VKBase.h"
@@ -5,9 +10,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-GLFWwindow *pWindow {};
-GLFWmonitor *pMonitor {};
-const char *windowTitle = "EasyVK";
+GLFWwindow *pWindow {};      /**< 主窗口句柄 */
+GLFWmonitor *pMonitor {};    /**< 主显示器句柄 */
+const char *windowTitle = "EasyVK"; /**< 窗口标题 */
 
 /**
  * @brief 初始化窗口
@@ -130,12 +135,21 @@ void TitleFps(bool updatePerSecond = false) {
     }
 }
 
+/**
+ * @brief 将窗口切换为全屏模式
+ */
 void MakeWindowFullScreen() {
     const GLFWvidmode *pMode = glfwGetVideoMode(pMonitor);
     glfwSetWindowMonitor(pWindow, pMonitor, 0, 0, pMode->width, pMode->height,
                          pMode->refreshRate);
 }
 
+/**
+ * @brief 将窗口切换为窗口化模式
+ *
+ * @param position 窗口左上角位置
+ * @param size 窗口尺寸
+ */
 void MakeWindowWindowed(VkOffset2D position, VkExtent2D size) {
     const GLFWvidmode *pMode = glfwGetVideoMode(pMonitor);
     glfwSetWindowMonitor(pWindow, nullptr, position.x, position.y, size.width,

@@ -8,7 +8,7 @@
 
 #pragma once
 
-namespace cake {
+namespace lumen {
 
     /**
      * @brief 生成单个位掩码 (bit mask)。
@@ -32,4 +32,4 @@ namespace cake {
      */
     consteval auto BIT(auto x) { return 1U << x; }
 
-} // namespace cake
+} // namespace lumen

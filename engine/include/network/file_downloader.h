@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace cake {
+namespace lumen {
     namespace network {
 
         /**
@@ -251,4 +251,4 @@ namespace cake {
         };
 
     } // namespace network
-} // namespace cake
+} // namespace lumen

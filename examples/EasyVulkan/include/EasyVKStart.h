@@ -1,3 +1,8 @@
+/**
+ * @file EasyVKStart.h
+ * @brief EasyVulkan 公共头文件，标准库、GLM、stb_image、Vulkan 及工具函数
+ */
+
 #pragma once
 // 可能会用上的C++标准库
 #include <algorithm>
@@ -30,6 +35,12 @@
 #include "vk_enum_string_helper.h" //用于将枚举项转为对应的字符串，方便输出错误信息等
 #include <vulkan/vulkan.h>
 
+/**
+ * @brief 垂直翻转投影矩阵（用于 Vulkan NDC Y 轴向下与 GLM 的适配）
+ *
+ * @param projection 原始投影矩阵
+ * @return 翻转后的投影矩阵
+ */
 inline glm::mat4 FlipVertical(const glm::mat4 &projection) {
     glm::mat4 _projection = projection;
     for (uint32_t i = 0; i < 4; i++) {

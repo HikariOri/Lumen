@@ -1,3 +1,13 @@
+/**
+ * @file result_t.h
+ * @brief VkResult 封装，支持异常抛出或 [[nodiscard]] 警告
+ *
+ * 根据宏定义选择行为：
+ * - VK_RESULT_THROW: 非成功时抛异常
+ * - VK_RESULT_NODISCARD: 忽略返回值时编译器警告
+ * - 默认: 使用原生 VkResult
+ */
+
 #include "EasyVKStart.h"
 
 #ifndef NDEBUG
@@ -6,8 +16,8 @@
 #define ENABLE_DEBUG_MESSENGER false
 #endif
 
-// 情况1：根据函数返回值确定是否抛异常
 #ifdef VK_RESULT_THROW
+/** @brief VkResult 封装，失败时通过 callback 或抛异常处理 */
 class result_t {
     VkResult result;
 
@@ -39,8 +49,8 @@ public:
 
 inline void (*result_t::callback_throw)(VkResult);
 
-// 情况2：若抛弃函数返回值，让编译器发出警告
 #elifdef VK_RESULT_NODISCARD
+/** @brief 带 [[nodiscard]] 的 result_t，忽略返回值会触发编译器警告 */
 struct [[nodiscard]] result_t {
     VkResult result;
     result_t(VkResult result) : result(result) {}
@@ -50,7 +60,7 @@ struct [[nodiscard]] result_t {
 #pragma warning(disable : 4834)
 #pragma warning(disable : 6031)
 
-// 情况3：啥都不干
 #else
+/** @brief 默认：直接使用 VkResult 类型 */
 using result_t = VkResult;
 #endif

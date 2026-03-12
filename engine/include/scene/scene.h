@@ -2,9 +2,12 @@
 
 #include <flecs.h>
 
-class Scene {
-    Scene() { auto t = ecs.entity("bob"); }
+namespace lumen {
+    class Scene {
+        Scene() { auto t = ecs.entity("bob"); }
 
-private:
-    flecs::world ecs;
-};
+    private:
+        flecs::world ecs;
+    };
+
+} // namespace lumen

@@ -1,22 +1,30 @@
+/**
+ * @file VKBase.h
+ * @brief Vulkan 基础封装，实例、设备、交换链、命令池/缓冲区等 RAII 封装
+ */
+
 #pragma once
 
 #include <vulkan/vulkan_core.h>
 
 #include "EasyVKStart.h"
+#include "VKFormat.h"
 #include "arrayRef.hpp"
 #include "result_t.h"
-#include "VKFormat.h"
 
+/** @def DestroyHandleBy 使用指定函数销毁 Vulkan 句柄并置空 */
 #define DestroyHandleBy(Func)                                                  \
     if (handle) {                                                              \
         Func(vulkan::graphicsBase::Base().Device(), handle, nullptr);          \
         handle = VK_NULL_HANDLE;                                               \
     }
 
+/** @def MoveHandle 移动语义：将 other.handle 赋给 handle 并置空 other */
 #define MoveHandle                                                             \
     handle = other.handle;                                                     \
     other.handle = VK_NULL_HANDLE;
 
+/** @def DefineMoveAssignmentOperator 定义移动赋值运算符宏 */
 #define DefineMoveAssignmentOperator(type)                                     \
     type &operator=(type &&other) {                                            \
         this->~type();                                                         \
@@ -24,12 +32,15 @@
         return *this;                                                          \
     }
 
+/** @def DefineHandleTypeOperator 隐式转换为 handle 类型 */
 #define DefineHandleTypeOperator                                               \
     operator decltype(handle)() const { return handle; }
 
+/** @def DefineAddressFunction 返回 handle 指针的 Address() 函数 */
 #define DefineAddressFunction                                                  \
     const decltype(handle) *Address() const { return &handle; }
 
+/** @def ExecuteOnce 确保代码块仅执行一次，后续直接 return */
 #define ExecuteOnce(...)                                                       \
     {                                                                          \
         static bool executed = false;                                          \
@@ -38,15 +49,21 @@
         executed = true;                                                       \
     }
 
-inline auto &outStream = std::cout;
+inline auto &outStream = std::cout; /**< 默认输出流 */
 
 namespace vulkan {
 
-    constexpr VkExtent2D defaultWindowSize = { 1280, 720 };
+    constexpr VkExtent2D defaultWindowSize = { 1280, 720 }; /**< 默认窗口尺寸 */
 
     class graphicsBasePlus;
 
+    /**
+     * @class graphicsBase
+     * @brief Vulkan 核心单例，管理实例、物理/逻辑设备、交换链、队列及回调
+     */
     class graphicsBase {
+        /** @brief 过程地址封装，用于获取 vkGetInstanceProcAddr 等返回的函数指针
+         */
         struct procedureAddress {
             PFN_vkVoidFunction value;
             procedureAddress(PFN_vkVoidFunction value) : value(value) {}
@@ -301,71 +318,120 @@ namespace vulkan {
 
     public:
         /*其他成员函数略*/
-        //*pPlus的Getter
+        /** @brief 获取 graphicsBasePlus 扩展单例引用 */
         static graphicsBasePlus &Plus() { return *singleton.pPlus; }
-        //*pPlus的Setter，只允许设置pPlus一次
+
+        /** @brief 设置 graphicsBasePlus（仅允许设置一次） */
         static void Plus(graphicsBasePlus &plus) {
             if (!singleton.pPlus)
                 singleton.pPlus = &plus;
         }
 
-        // Getter
+        /** @brief 获取 Vulkan API 版本
+         * @return API 版本号 */
         uint32_t ApiVersion() const { return apiVersion; }
+
+        /** @brief 获取 Vulkan 实例句柄 */
         VkInstance Instance() const { return instance; }
+
+        /** @brief 获取当前物理设备 */
         VkPhysicalDevice PhysicalDevice() const { return physicalDevice; }
+        /** @brief 获取物理设备属性 */
         constexpr const VkPhysicalDeviceProperties &
         PhysicalDeviceProperties() const {
             return physicalDeviceProperties;
         }
 
+        /** @brief 获取物理设备内存属性 */
         constexpr const VkPhysicalDeviceMemoryProperties &
         PhysicalDeviceMemoryProperties() const {
             return physicalDeviceMemoryProperties;
         }
 
+        /** @brief 获取可用物理设备
+         * @param index 设备索引
+         * @return 物理设备句柄 */
         VkPhysicalDevice AvailablePhysicalDevice(uint32_t index) const {
             return availablePhysicalDevices[index];
         }
+
+        /** @brief 获取可用物理设备数量 */
         uint32_t AvailablePhysicalDeviceCount() const {
             return uint32_t(availablePhysicalDevices.size());
         }
 
+        /** @brief 获取逻辑设备句柄 */
         VkDevice Device() const { return device; }
+
+        /** @brief 获取图形队列族索引 */
         uint32_t QueueFamilyIndex_Graphics() const {
             return queueFamilyIndex_graphics;
         }
+
+        /** @brief 获取呈现队列族索引 */
         uint32_t QueueFamilyIndex_Presentation() const {
             return queueFamilyIndex_presentation;
         }
+
+        /** @brief 获取计算队列族索引 */
         uint32_t QueueFamilyIndex_Compute() const {
             return queueFamilyIndex_compute;
         }
+
+        /** @brief 获取图形队列 */
         VkQueue Queue_Graphics() const { return queue_graphics; }
+
+        /** @brief 获取呈现队列 */
         VkQueue Queue_Presentation() const { return queue_presentation; }
+
+        /** @brief 获取计算队列 */
         VkQueue Queue_Compute() const { return queue_compute; }
 
+        /** @brief 获取窗口 Surface */
         VkSurfaceKHR Surface() const { return surface; }
+
+        /** @brief 获取可用 Surface 格式
+         * @param index 格式索引
+         * @return VkFormat */
         VkFormat AvailableSurfaceFormat(uint32_t index) const {
             return availableSurfaceFormats[index].format;
         }
+
+        /** @brief 获取可用 Surface 色彩空间
+         * @param index 格式索引 */
         VkColorSpaceKHR AvailableSurfaceColorSpace(uint32_t index) const {
             return availableSurfaceFormats[index].colorSpace;
         }
+
+        /** @brief 获取可用 Surface 格式数量 */
         uint32_t AvailableSurfaceFormatCount() const {
             return uint32_t(availableSurfaceFormats.size());
         }
 
+        /** @brief 获取交换链句柄 */
         VkSwapchainKHR Swapchain() const { return swapchain; }
+
+        /** @brief 获取交换链图像
+         * @param index 图像索引 */
         VkImage SwapchainImage(uint32_t index) const {
             return swapchainImages[index];
         }
+
+        /** @brief 获取交换链图像视图
+         * @param index 图像索引 */
         VkImageView SwapchainImageView(uint32_t index) const {
             return swapchainImageViews[index];
         }
+
+        /** @brief 获取交换链图像数量 */
         uint32_t SwapchainImageCount() const {
             return uint32_t(swapchainImages.size());
         }
+
+        /** @brief 获取当前帧图像索引 */
         uint32_t CurrentImageIndex() const { return currentImageIndex; }
+
+        /** @brief 获取交换链创建信息 */
         constexpr const VkSwapchainCreateInfoKHR &SwapchainCreateInfo() const {
             return swapchainCreateInfo;
         }
@@ -380,41 +446,62 @@ namespace vulkan {
             return deviceExtensions;
         }
 
-        // Const Function
+        /** @brief 获取实例级过程地址
+         * @param functionName 函数名
+         * @return 函数指针或 nullptr */
         procedureAddress
         InstanceProcedureAddress(const char *functionName) const {
             return vkGetInstanceProcAddr(instance, functionName);
         }
+
+        /** @brief 获取设备级过程地址
+         * @param functionName 函数名
+         * @return 函数指针或 nullptr */
         procedureAddress
         DeviceProcedureAddress(const char *functionName) const {
             return vkGetDeviceProcAddr(device, functionName);
         }
 
-        // Const & Non-const Function
+        /** @brief 注册交换链创建后的回调
+         * @param function 回调函数 */
         void AddCallback_CreateSwapchain(void (*function)()) {
             callbacks_createSwapchain.push_back(function);
         }
+        /** @brief 注册交换链销毁前的回调
+         * @param function 回调函数 */
         void AddCallback_DestroySwapchain(void (*function)()) {
             callbacks_destroySwapchain.push_back(function);
         }
+        /** @brief 注册逻辑设备创建后的回调
+         * @param function 回调函数 */
         void AddCallback_CreateDevice(void (*function)()) {
             callbacks_createDevice.push_back(function);
         }
+        /** @brief 注册逻辑设备销毁前的回调
+         * @param function 回调函数 */
         void AddCallback_DestroyDevice(void (*function)()) {
             callbacks_destroyDevice.push_back(function);
         }
-        //                    Create Instance
+        /** @brief 添加实例层
+         * @param layerName 层名称 */
         void AddInstanceLayer(const char *layerName) {
             AddLayerOrExtension(instanceLayers, layerName);
         }
+        /** @brief 添加实例扩展
+         * @param extensionName 扩展名称 */
         void AddInstanceExtension(const char *extensionName) {
             AddLayerOrExtension(instanceExtensions, extensionName);
         }
+        /** @brief 使用可用的最新 Vulkan API 版本
+         * @return VK_SUCCESS 或错误码 */
         result_t UseLatestApiVersion() {
             if (InstanceProcedureAddress("vkEnumerateInstanceVersion"))
                 return vkEnumerateInstanceVersion(&apiVersion);
             return VK_SUCCESS;
         }
+        /** @brief 创建 Vulkan 实例
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t CreateInstance(VkInstanceCreateFlags flags = 0) {
             if constexpr (ENABLE_DEBUG_MESSENGER)
                 AddInstanceLayer("VK_LAYER_KHRONOS_validation"),
@@ -448,6 +535,10 @@ namespace vulkan {
                 CreateDebugMessenger();
             return VK_SUCCESS;
         }
+
+        /** @brief 检查实例层是否可用，不可用则置为 nullptr
+         * @param layersToCheck 要检查的层名称数组（会被修改）
+         * @return VK_SUCCESS 或错误码 */
         result_t
         CheckInstanceLayers(arrayRef<const char *> layersToCheck) const {
             uint32_t layerCount;
@@ -483,6 +574,11 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
+
+        /** @brief 检查实例扩展是否可用，不可用则置为 nullptr
+         * @param extensionsToCheck 要检查的扩展名数组（会被修改）
+         * @param layerName 可为 nullptr 表示不限定层
+         * @return VK_SUCCESS 或错误码 */
         result_t
         CheckInstanceExtensions(arrayRef<const char *> extensionsToCheck,
                                 const char *layerName) const {
@@ -526,22 +622,32 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
+
+        /** @brief 设置实例层列表（覆盖原有）
+         * @param layerNames 层名称列表 */
         void InstanceLayers(const std::vector<const char *> &layerNames) {
             instanceLayers = layerNames;
         }
+
+        /** @brief 设置实例扩展列表（覆盖原有）
+         * @param extensionNames 扩展名列表 */
         void
         InstanceExtensions(const std::vector<const char *> &extensionNames) {
             instanceExtensions = extensionNames;
         }
-        //                    Set Window Surface
+        /** @brief 设置窗口 Surface（仅允许设置一次）
+         * @param surface 窗口 Surface 句柄 */
         void Surface(VkSurfaceKHR surface) {
             if (!this->surface)
                 this->surface = surface;
         }
-        //                    Create Logical Device
+        /** @brief 添加设备扩展
+         * @param extensionName 扩展名称 */
         void AddDeviceExtension(const char *extensionName) {
             AddLayerOrExtension(deviceExtensions, extensionName);
         }
+        /** @brief 枚举并缓存所有物理设备
+         * @return VK_SUCCESS 或错误码 */
         result_t GetPhysicalDevices() {
             uint32_t deviceCount;
             if (VkResult result = vkEnumeratePhysicalDevices(
@@ -567,6 +673,11 @@ namespace vulkan {
                     string_VkResult(result));
             return result;
         }
+        /** @brief 选择物理设备并确定队列族索引
+         * @param deviceIndex 设备列表中的索引
+         * @param enableGraphicsQueue 是否启用图形队列
+         * @param enableComputeQueue 是否启用计算队列
+         * @return VK_SUCCESS 或错误码 */
         result_t DeterminePhysicalDevice(uint32_t deviceIndex = 0,
                                          bool enableGraphicsQueue = true,
                                          bool enableComputeQueue = true) {
@@ -612,6 +723,9 @@ namespace vulkan {
             physicalDevice = availablePhysicalDevices[deviceIndex];
             return VK_SUCCESS;
         }
+        /** @brief 创建逻辑设备
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t CreateDevice(VkDeviceCreateFlags flags = 0) {
             float queuePriority = 1.f;
             VkDeviceQueueCreateInfo queueCreateInfos[3] = {
@@ -675,6 +789,11 @@ namespace vulkan {
             ExecuteCallbacks(callbacks_createDevice);
             return VK_SUCCESS;
         }
+
+        /** @brief 检查设备扩展是否可用，不可用则置为 nullptr
+         * @param extensionsToCheck 要检查的扩展名数组（会被修改）
+         * @param layerName 可为 nullptr 表示不限定层
+         * @return VK_SUCCESS 或错误码 */
         result_t CheckDeviceExtensions(arrayRef<const char *> extensionsToCheck,
                                        const char *layerName = nullptr) const {
             uint32_t extensionCount;
@@ -717,10 +836,15 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
+
+        /** @brief 设置设备扩展列表（覆盖原有）
+         * @param extensionNames 扩展名列表 */
         void DeviceExtensions(const std::vector<const char *> &extensionNames) {
             deviceExtensions = extensionNames;
         }
-        //                    Create Swapchain
+
+        /** @brief 获取 Surface 支持的格式列表
+         * @return VK_SUCCESS 或错误码 */
         result_t GetSurfaceFormats() {
             uint32_t surfaceFormatCount;
             if (VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -746,6 +870,10 @@ namespace vulkan {
                              string_VkResult(result));
             return result;
         }
+
+        /** @brief 设置交换链 Surface 格式
+         * @param surfaceFormat 格式与色彩空间，format 为 0 时自动选择
+         * @return VK_SUCCESS、VK_ERROR_FORMAT_NOT_SUPPORTED 或错误码 */
         result_t SetSurfaceFormat(VkSurfaceFormatKHR surfaceFormat) {
             bool formatIsAvailable = false;
             if (!surfaceFormat.format) {
@@ -771,6 +899,10 @@ namespace vulkan {
                 return RecreateSwapchain();
             return VK_SUCCESS;
         }
+        /** @brief 创建交换链
+         * @param limitFrameRate true 使用 FIFO，false 优先使用 MAILBOX
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t CreateSwapchain(bool limitFrameRate = true,
                                  VkSwapchainCreateFlagsKHR flags = 0) {
             // Get surface capabilities
@@ -904,7 +1036,7 @@ namespace vulkan {
             return VK_SUCCESS;
         }
 
-        //                    After Initialization
+        /** @brief 终止 Vulkan，清理所有资源（析构后保留句柄可重用） */
         void Terminate() {
             this->~graphicsBase();
             instance = VK_NULL_HANDLE;
@@ -915,6 +1047,10 @@ namespace vulkan {
             swapchainCreateInfo = {};
             debugMessenger = VK_NULL_HANDLE;
         }
+
+        /** @brief 销毁并重新创建逻辑设备
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t RecreateDevice(VkDeviceCreateFlags flags = 0) {
             if (device) {
                 if (VkResult result = WaitIdle();
@@ -936,6 +1072,9 @@ namespace vulkan {
             }
             return CreateDevice(flags);
         }
+
+        /** @brief 重建交换链（窗口尺寸变化时调用）
+         * @return VK_SUCCESS、VK_SUBOPTIMAL_KHR 或错误码 */
         result_t RecreateSwapchain() {
             VkSurfaceCapabilitiesKHR surfaceCapabilities = {};
             if (VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
@@ -972,6 +1111,8 @@ namespace vulkan {
             ExecuteCallbacks(callbacks_createSwapchain);
             return VK_SUCCESS;
         }
+        /** @brief 等待设备所有操作完成
+         * @return VK_SUCCESS 或错误码 */
         result_t WaitIdle() const {
             VkResult result = vkDeviceWaitIdle(device);
             if (result)
@@ -981,6 +1122,9 @@ namespace vulkan {
                     string_VkResult(result));
             return result;
         }
+        /** @brief 获取下一帧交换链图像
+         * @param semaphore_imageIsAvailable 图像就绪时触发的信号量
+         * @return VK_SUCCESS 或错误码 */
         result_t SwapImage(VkSemaphore semaphore_imageIsAvailable) {
             if (swapchainCreateInfo.oldSwapchain &&
                 swapchainCreateInfo.oldSwapchain != swapchain) {
@@ -1007,6 +1151,11 @@ namespace vulkan {
                 }
             return VK_SUCCESS;
         }
+
+        /** @brief 向图形队列提交 VkSubmitInfo
+         * @param submitInfo 提交信息
+         * @param fence 可选的栅栏
+         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Graphics(VkSubmitInfo &submitInfo,
                                      VkFence fence = VK_NULL_HANDLE) const {
@@ -1020,6 +1169,14 @@ namespace vulkan {
                     string_VkResult(result));
             return result;
         }
+
+        /** @brief 向图形队列提交命令缓冲区（便捷重载）
+         * @param commandBuffer 命令缓冲区
+         * @param semaphore_imageIsAvailable 等待的图像就绪信号量
+         * @param semaphore_renderingIsOver 渲染完成时触发的信号量
+         * @param fence 可选的栅栏
+         * @param waitDstStage_imageIsAvailable 图像就绪等待阶段
+         * @return VK_SUCCESS 或错误码 */
         result_t SubmitCommandBuffer_Graphics(
             VkCommandBuffer commandBuffer,
             VkSemaphore semaphore_imageIsAvailable = VK_NULL_HANDLE,
@@ -1038,6 +1195,11 @@ namespace vulkan {
                 submitInfo.pSignalSemaphores = &semaphore_renderingIsOver;
             return SubmitCommandBuffer_Graphics(submitInfo, fence);
         }
+
+        /** @brief 向图形队列提交命令缓冲区（无信号量）
+         * @param commandBuffer 命令缓冲区
+         * @param fence 可选的栅栏
+         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Graphics(VkCommandBuffer commandBuffer,
                                      VkFence fence = VK_NULL_HANDLE) const {
@@ -1045,6 +1207,11 @@ namespace vulkan {
                                         .pCommandBuffers = &commandBuffer };
             return SubmitCommandBuffer_Graphics(submitInfo, fence);
         }
+
+        /** @brief 向计算队列提交 VkSubmitInfo
+         * @param submitInfo 提交信息
+         * @param fence 可选的栅栏
+         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Compute(VkSubmitInfo &submitInfo,
                                     VkFence fence = VK_NULL_HANDLE) const {
@@ -1058,6 +1225,11 @@ namespace vulkan {
                     string_VkResult(result));
             return result;
         }
+
+        /** @brief 向计算队列提交命令缓冲区
+         * @param commandBuffer 命令缓冲区
+         * @param fence 可选的栅栏
+         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Compute(VkCommandBuffer commandBuffer,
                                     VkFence fence = VK_NULL_HANDLE) const {
@@ -1066,6 +1238,12 @@ namespace vulkan {
             return SubmitCommandBuffer_Compute(submitInfo, fence);
         }
 
+        /** @brief 向呈现队列提交命令缓冲区
+         * @param commandBuffer 命令缓冲区
+         * @param semaphore_renderingIsOver 等待的渲染完成信号量
+         * @param semaphore_ownershipIsTransfered 所有权转移完成时触发的信号量
+         * @param fence 可选的栅栏
+         * @return VK_SUCCESS 或错误码 */
         result_t SubmitCommandBuffer_Presentation(
             VkCommandBuffer commandBuffer,
             VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE,
@@ -1103,6 +1281,8 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 在命令缓冲区中记录交换链图像队列族所有权转移（图形→呈现）
+         * @param commandBuffer 录制中的命令缓冲区 */
         void CmdTransferImageOwnership(VkCommandBuffer commandBuffer) const {
             VkImageMemoryBarrier imageMemoryBarrier_g2p = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1122,6 +1302,9 @@ namespace vulkan {
                 1, &imageMemoryBarrier_g2p);
         }
 
+        /** @brief 呈现到屏幕（使用 VkPresentInfoKHR）
+         * @param presentInfo 呈现信息
+         * @return VK_SUCCESS 或错误码 */
         result_t PresentImage(VkPresentInfoKHR &presentInfo) {
             presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
             switch (VkResult result =
@@ -1138,6 +1321,9 @@ namespace vulkan {
             }
         }
 
+        /** @brief 呈现当前帧到屏幕（便捷重载）
+         * @param semaphore_renderingIsOver 等待的渲染完成信号量
+         * @return VK_SUCCESS 或错误码 */
         result_t
         PresentImage(VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE) {
             VkPresentInfoKHR presentInfo = { .swapchainCount = 1,
@@ -1151,17 +1337,23 @@ namespace vulkan {
         }
 
         // Static Function
+        /** @brief 获取 graphicsBase 单例引用 */
         static constexpr graphicsBase &Base() { return singleton; }
     };
 
+    /**
+     * @class fence
+     * @brief VkFence 的 RAII 封装，用于 CPU-GPU 同步
+     */
     class fence {
         VkFence handle = VK_NULL_HANDLE;
 
     public:
-        // fence() = default;
+        /** @brief 从 CreateInfo 创建栅栏 */
         fence(VkFenceCreateInfo &createInfo) { Create(createInfo); }
 
-        // 默认构造器创建未置位的栅栏
+        /** @brief 创建栅栏
+         * @param flags 创建标志，0 表示未置位 */
         fence(VkFenceCreateFlags flags = 0) { Create(flags); }
 
         fence(fence &&other) noexcept { MoveHandle; }
@@ -1173,7 +1365,8 @@ namespace vulkan {
 
         DefineAddressFunction;
 
-        // Const Function
+        /** @brief 等待栅栏完成（阻塞）
+         * @return VK_SUCCESS 或错误码 */
         result_t Wait() const {
             VkResult result = vkWaitForFences(graphicsBase::Base().Device(), 1,
                                               &handle, false, UINT64_MAX);
@@ -1198,7 +1391,7 @@ namespace vulkan {
             return result;
         }
 
-        // 因为“等待后立刻重置”的情形经常出现，定义此函数
+        /** @brief 等待栅栏完成并重置（常用组合操作） */
         result_t WaitAndReset() const {
             VkResult result = Wait();
             result || (result = Reset());
@@ -1216,7 +1409,9 @@ namespace vulkan {
             return result;
         }
 
-        // Non-const Function
+        /** @brief 创建栅栏
+         * @param createInfo 创建信息（会被填充 sType）
+         * @return VK_SUCCESS 或错误码 */
         result_t Create(VkFenceCreateInfo &createInfo) {
             createInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
             VkResult result = vkCreateFence(graphicsBase::Base().Device(),
@@ -1230,6 +1425,9 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 创建栅栏
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t Create(VkFenceCreateFlags flags = 0) {
             VkFenceCreateInfo createInfo {};
             createInfo.flags = flags;
@@ -1237,14 +1435,19 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class semaphore
+     * @brief VkSemaphore 的 RAII 封装，用于 GPU 同步
+     */
     class semaphore {
         VkSemaphore handle = VK_NULL_HANDLE;
 
     public:
         // semaphore() = default;
+        /** @brief 从 CreateInfo 创建信号量 */
         semaphore(VkSemaphoreCreateInfo &createInfo) { Create(createInfo); }
 
-        // 默认构造器创建未置位的信号量
+        /** @brief 创建默认信号量 */
         semaphore(/*VkSemaphoreCreateFlags flags*/) { Create(); }
 
         semaphore(semaphore &&other) noexcept { MoveHandle; }
@@ -1256,7 +1459,9 @@ namespace vulkan {
 
         DefineAddressFunction;
 
-        // Non-const Function
+        /** @brief 创建信号量
+         * @param createInfo 创建信息（会被填充 sType）
+         * @return VK_SUCCESS 或错误码 */
         result_t Create(VkSemaphoreCreateInfo &createInfo) {
             createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
             VkResult result = vkCreateSemaphore(graphicsBase::Base().Device(),
@@ -1276,6 +1481,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class commandBuffer
+     * @brief VkCommandBuffer 的 RAII 封装，由 commandPool 分配
+     */
     class commandBuffer {
         friend class
             commandPool; // 封装命令池的 commandPool
@@ -1293,10 +1502,10 @@ namespace vulkan {
         DefineHandleTypeOperator;
         DefineAddressFunction;
 
-        // Const Function
-        // 这里没给 inheritanceInfo 设定默认参数，因为 C++
-        // 标准中规定对空指针解引用是未定义行为（尽管运行期不必发生，且至少 MSVC
-        // 编译器允许这种代码），而我又一定要传引用而非指针，因而形成了两个Begin(...)
+        /** @brief 开始录制命令（带继承信息，用于次级命令缓冲区）
+         * @param usageFlags 使用标志
+         * @param inheritanceInfo 继承信息
+         * @return VK_SUCCESS 或错误码 */
         result_t Begin(VkCommandBufferUsageFlags usageFlags,
                        VkCommandBufferInheritanceInfo &inheritanceInfo) const {
             inheritanceInfo.sType =
@@ -1315,6 +1524,9 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 开始录制命令（主命令缓冲区）
+         * @param usageFlags 使用标志
+         * @return VK_SUCCESS 或错误码 */
         result_t Begin(VkCommandBufferUsageFlags usageFlags = 0) const {
             VkCommandBufferBeginInfo beginInfo {};
             beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1329,6 +1541,8 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 结束录制
+         * @return VK_SUCCESS 或错误码 */
         result_t End() const {
             VkResult result = vkEndCommandBuffer(handle);
             if (result) {
@@ -1340,6 +1554,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class commandPool
+     * @brief VkCommandPool 的 RAII 封装，用于分配命令缓冲区
+     */
     class commandPool {
         VkCommandPool handle = VK_NULL_HANDLE;
 
@@ -1356,7 +1574,10 @@ namespace vulkan {
         DefineHandleTypeOperator;
         DefineAddressFunction;
 
-        // Const Function
+        /** @brief 分配命令缓冲区
+         * @param buffers 目标缓冲区数组
+         * @param level 主/次级
+         * @return VK_SUCCESS 或错误码 */
         result_t AllocateBuffers(arrayRef<VkCommandBuffer> buffers,
                                  VkCommandBufferLevel level =
                                      VK_COMMAND_BUFFER_LEVEL_PRIMARY) const {
@@ -1380,6 +1601,10 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 分配 commandBuffer 封装
+         * @param buffers commandBuffer 数组
+         * @param level 主/次级
+         * @return VK_SUCCESS 或错误码 */
         result_t AllocateBuffers(arrayRef<commandBuffer> buffers,
                                  VkCommandBufferLevel level =
                                      VK_COMMAND_BUFFER_LEVEL_PRIMARY) const {
@@ -1387,6 +1612,8 @@ namespace vulkan {
                                    level);
         }
 
+        /** @brief 释放命令缓冲区
+         * @param buffers 要释放的缓冲区数组 */
         void FreeBuffers(arrayRef<VkCommandBuffer> buffers) const {
 
             vkFreeCommandBuffers(graphicsBase::Base().Device(), handle,
@@ -1396,15 +1623,19 @@ namespace vulkan {
                    buffers.Count() * sizeof(VkCommandBuffer));
         }
 
+        /** @brief 释放 commandBuffer 封装 */
         void FreeBuffers(arrayRef<commandBuffer> buffers) const {
             FreeBuffers({ &buffers[0].handle, buffers.Count() });
         }
 
+        /** @brief 回收命令池中未使用的内存 */
         void Trim(/*VkCommandPoolTrimFlags flags*/) const {
             vkTrimCommandPool(graphicsBase::Base().Device(), handle, 0);
         }
 
-        // Non-const Function
+        /** @brief 创建命令池
+         * @param createInfo 创建信息（会被填充 sType）
+         * @return VK_SUCCESS 或错误码 */
         result_t Create(VkCommandPoolCreateInfo &createInfo) {
 
             createInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1421,6 +1652,10 @@ namespace vulkan {
             return result;
         }
 
+        /** @brief 创建命令池
+         * @param queueFamilyIndex 队列族索引
+         * @param flags 创建标志
+         * @return VK_SUCCESS 或错误码 */
         result_t Create(uint32_t queueFamilyIndex,
                         VkCommandPoolCreateFlags flags = 0) {
 
@@ -1433,6 +1668,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class renderPass
+     * @brief VkRenderPass 的 RAII 封装
+     */
     class renderPass {
         VkRenderPass handle = VK_NULL_HANDLE;
 
@@ -1498,6 +1737,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class framebuffer
+     * @brief VkFramebuffer 的 RAII 封装
+     */
     class framebuffer {
         VkFramebuffer handle = VK_NULL_HANDLE;
 
@@ -1529,6 +1772,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class pipelineLayout
+     * @brief VkPipelineLayout 的 RAII 封装
+     */
     class pipelineLayout {
         VkPipelineLayout handle = VK_NULL_HANDLE;
 
@@ -1561,6 +1808,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class pipeline
+     * @brief VkPipeline 的 RAII 封装，支持图形和计算管线
+     */
     class pipeline {
         VkPipeline handle = VK_NULL_HANDLE;
 
@@ -1611,6 +1862,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class shaderModule
+     * @brief VkShaderModule 的 RAII 封装，支持从文件或字节码创建
+     */
     class shaderModule {
         VkShaderModule handle = VK_NULL_HANDLE;
 
@@ -1692,6 +1947,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class event
+     * @brief VkEvent 的 RAII 封装，用于命令缓冲区间细粒度同步
+     */
     class event {
         VkEvent handle = VK_NULL_HANDLE;
 
@@ -1798,6 +2057,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class deviceMemory
+     * @brief VkDeviceMemory 的 RAII 封装，支持映射、写入和取回数据
+     */
     class deviceMemory {
 
         VkDeviceMemory handle = VK_NULL_HANDLE;
@@ -2000,6 +2263,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class buffer
+     * @brief VkBuffer 的 RAII 封装，提供内存需求和绑定接口
+     */
     class buffer {
         VkBuffer handle = VK_NULL_HANDLE;
 
@@ -2074,6 +2341,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class bufferMemory
+     * @brief buffer 与 deviceMemory 的组合，创建时自动分配并绑定
+     */
     class bufferMemory : buffer, deviceMemory {
     public:
         bufferMemory() = default;
@@ -2155,6 +2426,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class bufferView
+     * @brief VkBufferView 的 RAII 封装，用于 texel buffer 等
+     */
     class bufferView {
         VkBufferView handle = VK_NULL_HANDLE;
 
@@ -2200,6 +2475,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class image
+     * @brief VkImage 的 RAII 封装，提供内存需求和绑定接口
+     */
     class image {
 
         VkImage handle = VK_NULL_HANDLE;
@@ -2292,6 +2571,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class imageMemory
+     * @brief image 与 deviceMemory 的组合，创建时自动分配并绑定
+     */
     class imageMemory : image, deviceMemory {
     public:
         imageMemory() = default;
@@ -2363,6 +2646,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class imageView
+     * @brief VkImageView 的 RAII 封装
+     */
     class imageView {
         VkImageView handle = VK_NULL_HANDLE;
 
@@ -2412,6 +2699,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class descriptorSetLayout
+     * @brief VkDescriptorSetLayout 的 RAII 封装
+     */
     class descriptorSetLayout {
         VkDescriptorSetLayout handle = VK_NULL_HANDLE;
 
@@ -2450,6 +2741,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class descriptorSet
+     * @brief VkDescriptorSet 的 RAII 封装，由 descriptorPool 分配
+     */
     class descriptorSet {
         friend class descriptorPool;
 
@@ -2531,6 +2826,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class descriptorPool
+     * @brief VkDescriptorPool 的 RAII 封装，用于分配 descriptorSet
+     */
     class descriptorPool {
         VkDescriptorPool handle = VK_NULL_HANDLE;
 
@@ -2658,6 +2957,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class sampler
+     * @brief VkSampler 的 RAII 封装
+     */
     class sampler {
         VkSampler handle = VK_NULL_HANDLE;
 
@@ -2688,6 +2991,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class queryPool
+     * @brief VkQueryPool 的 RAII 封装，支持遮挡、管线统计、时间戳等查询类型
+     */
     class queryPool {
         VkQueryPool handle = VK_NULL_HANDLE;
 
@@ -2796,6 +3103,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class occlusionQueries
+     * @brief 遮挡查询封装，基于 queryPool 的 VK_QUERY_TYPE_OCCLUSION
+     */
     class occlusionQueries {
     protected:
         queryPool queryPool;
@@ -2864,6 +3175,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class pipelineStatisticQuery
+     * @brief 管线统计查询封装，获取顶点数、图元数、着色器调用次数等
+     */
     class pipelineStatisticQuery {
     protected:
         enum statisticName {
@@ -2947,6 +3262,10 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class timestampQueries
+     * @brief 时间戳查询封装，用于 GPU 性能分析
+     */
     class timestampQueries {
     protected:
         queryPool queryPool;

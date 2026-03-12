@@ -1,19 +1,30 @@
+/**
+ * @file VKFormat.h
+ * @brief Vulkan 格式信息查询表，VK_VERSION_1_0 所有格式的元数据
+ */
+
 #pragma once
 #include "EasyVKStart.h"
 
+/**
+ * @struct formatInfo
+ * @brief 描述单个 Vulkan 格式的通道数、字节大小和数据类型
+ */
 struct formatInfo {
+    /** @brief 底层数据类型枚举 */
     enum rawDataType : uint8_t {
-        other,        // 0，没数据或各个通道不同
-        integer,      // 1，数据类型为整型
-        floatingPoint // 1，数据类型为浮点数
+        other,        /**< 0：无数据或各通道不同 */
+        integer,      /**< 1：整型 */
+        floatingPoint /**< 2：浮点型 */
     };
 
-    uint8_t componentCount;   // 通道数
-    uint8_t sizePerComponent; // 每个通道的大小，0意味着压缩，或不均等，或少于1
-    uint8_t sizePerPixel;     // 每个像素的大小，0意味着压缩
-    uint8_t rawDataType;      // 底层数据类型
+    uint8_t componentCount;   /**< 通道数 */
+    uint8_t sizePerComponent; /**< 每通道字节数，0 表示压缩/不均等 */
+    uint8_t sizePerPixel;     /**< 每像素字节数，0 表示压缩格式 */
+    uint8_t rawDataType;      /**< 底层数据类型 rawDataType */
 };
 
+/** @brief VK_VERSION_1_0 所有 Vulkan 格式的 formatInfo 查询表 */
 constexpr formatInfo formatInfos_v1_0[] = {
     
     { 0, 0, 0, 0 }, // VK_FORMAT_UNDEFINED = 0,

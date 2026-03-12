@@ -1,3 +1,8 @@
+/**
+ * @file EasyVulkan.hpp
+ * @brief EasyVulkan 便捷封装，提供渲染通道与帧缓冲的快速创建
+ */
+
 #pragma once
 
 #include "VKBase+.h"
@@ -5,17 +10,26 @@
 
 using namespace vulkan;
 
+/** @brief 当前窗口/交换链尺寸的引用 */
 const VkExtent2D &windowSize =
     graphicsBase::Base().SwapchainCreateInfo().imageExtent;
 
 namespace easyVulkan {
     using namespace vulkan;
 
+    /**
+     * @struct renderPassWithFramebuffers
+     * @brief 渲染通道与对应帧缓冲的绑定组合
+     */
     struct renderPassWithFramebuffers {
         renderPass renderPass;
         std::vector<framebuffer> framebuffers;
     };
 
+    /**
+     * @brief 创建用于屏幕输出的渲染通道和帧缓冲
+     * @return 静态缓存的 renderPassWithFramebuffers 引用
+     */
     const auto &CreateRpwf_Screen() {
         static renderPassWithFramebuffers rpwf;
 

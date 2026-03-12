@@ -1,3 +1,8 @@
+/**
+ * @file main.cpp
+ * @brief EasyVulkan 示例程序入口，渲染一个红色三角形
+ */
+
 #include "EasyVulkan.hpp"
 #include "GlfwGeneral.hpp"
 #include "VKBase.h"
@@ -6,24 +11,29 @@ using namespace vulkan;
 
 using namespace vulkan; // 上一节中在main.cpp中全局范围内使用了命名空间
 
-pipelineLayout pipelineLayout_triangle; // 管线布局
-pipeline pipeline_triangle;             // 管线
+pipelineLayout pipelineLayout_triangle; /**< 管线布局 */
+pipeline pipeline_triangle;             /**< 图形管线 */
 
-// 该函数调用easyVulkan::CreateRpwf_Screen()并存储返回的引用到静态变量
-// 获取并缓存屏幕渲染通道和帧缓冲（静态缓存避免重复创建）
+/**
+ * @brief 获取屏幕渲染通道和帧缓冲（静态缓存，避免重复创建）
+ * @return 渲染通道与帧缓冲组合的常量引用
+ */
 const auto &RenderPassAndFramebuffers() {
     static const auto &rpwf = easyVulkan::CreateRpwf_Screen();
     return rpwf;
 }
-// 该函数用于创建管线布局
-// 创建管线布局（此处无描述符集/推送常量）
+
+/**
+ * @brief 创建管线布局（此处无描述符集/推送常量）
+ */
 void CreateLayout() {
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {};
     pipelineLayout_triangle.Create(pipelineLayoutCreateInfo);
 }
 
-// 该函数用于创建管线
-// 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
+/**
+ * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
+ */
 void CreatePipeline() {
     static shaderModule vert("shaders/glsl/FirstTriangle.vert.spv");
     static shaderModule frag("shaders/glsl/FirstTriangle.frag.spv");
@@ -63,6 +73,10 @@ void CreatePipeline() {
     Create();
 }
 
+/**
+ * @brief 程序入口，初始化窗口与 Vulkan，渲染三角形主循环
+ * @return 0 正常退出，-1 初始化失败
+ */
 int main() {
     if (!InitializeWindow({ 1280, 720 })) {
         return -1;

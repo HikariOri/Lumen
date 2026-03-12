@@ -4,7 +4,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
 
-enum struct LightType : std::uint8_t { Point, Spot, Directional, Area };
+namespace lumen { 
+    enum struct LightType : std::uint8_t { Point, Spot, Directional, Area };
 
 struct Light {
     LightType type;
@@ -74,3 +75,4 @@ struct Light {
         return att;
     }
 };
+}
