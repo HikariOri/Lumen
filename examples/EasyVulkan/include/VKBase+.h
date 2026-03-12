@@ -953,4 +953,248 @@ namespace vulkan {
         }
     };
 
+    /**
+     * @class texture
+     * @brief Vulkan
+     * 纹理基类，封装图像内存和图像视图，支持从文件或内存加载图像数据
+     *
+     * 提供 transfer/sampled
+     * 用途的图像创建、图像加载（stb_image）及描述符信息生成。
+     * 派生类需实现具体纹理类型（如 2D、立方体贴图等）的创建逻辑。
+     */
+    class texture {
+    protected:
+        imageView imageView;     ///< 图像视图
+        imageMemory imageMemory; ///< 图像内存
+        //--------------------
+        texture() = default;
+
+        /**
+         * @brief 创建图像内存（含 transfer/sampled 用途）
+         * @param imageType 图像类型
+         * @param format 像素格式
+         * @param extent 图像尺寸
+         * @param mipLevelCount  mip 级数
+         * @param arrayLayerCount 数组层数
+         * @param flags 图像创建标志
+         */
+        void CreateImageMemory(VkImageType imageType, VkFormat format,
+                               VkExtent3D extent, uint32_t mipLevelCount,
+                               uint32_t arrayLayerCount,
+                               VkImageCreateFlags flags = 0) {
+            VkImageCreateInfo imageCreateInfo {};
+
+            imageCreateInfo.flags = flags;
+            imageCreateInfo.imageType = imageType;
+            imageCreateInfo.format = format;
+            imageCreateInfo.extent = extent;
+            imageCreateInfo.mipLevels = mipLevelCount;
+            imageCreateInfo.arrayLayers = arrayLayerCount;
+            imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+            imageCreateInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                    VK_IMAGE_USAGE_SAMPLED_BIT;
+
+            imageMemory.Create(imageCreateInfo,
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        }
+
+        /**
+         * @brief 创建图像视图
+         * @param viewType 视图类型
+         * @param format 像素格式
+         * @param mipLevelCount mip 级数
+         * @param arrayLayer数组层数Count 
+         * @param flags 视图创建标志
+         */
+        void CreateImageView(VkImageViewType viewType, VkFormat format,
+                             uint32_t mipLevelCount, uint32_t arrayLayerCount,
+                             VkImageViewCreateFlags flags = 0) {
+            imageView.Create(imageMemory.Image(), viewType, format,
+                             { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevelCount, 0,
+                               arrayLayerCount },
+                             flags);
+        }
+
+        /**
+         * @brief 从文件路径或内存加载图像数据（内部实现）
+         * @param address 文件路径字符串或指向图像二进制的指针
+         * @param fileSize 图像数据大小（从内存加载时有效，从文件加载时忽略）
+         * @param extent 输出图像宽高
+         * @param requiredFormatInfo 所需格式信息（浮点 32 位或整型 8/16 位）
+         * @return 加载的图像数据，失败返回空 unique_ptr
+         */
+        static std::unique_ptr<uint8_t[]>
+        LoadFile_Internal(const auto *address, size_t fileSize,
+                          VkExtent2D &extent, formatInfo requiredFormatInfo) {
+#ifndef NDEBUG
+            if (!(requiredFormatInfo.rawDataType == formatInfo::floatingPoint &&
+                  requiredFormatInfo.sizePerComponent == 4) &&
+                !(requiredFormatInfo.rawDataType == formatInfo::integer &&
+                  Between_Closed<int32_t>(
+                      1, requiredFormatInfo.sizePerComponent, 2))) {
+                std::println("[ texture ] ERROR\nRequired format is not "
+                             "available for source image data!\n");
+                abort();
+            }
+#endif
+
+            int &width = reinterpret_cast<int &>(extent.width);
+            int &height = reinterpret_cast<int &>(extent.height);
+            int channelCount = 0;
+            void *pImageData = nullptr;
+            if constexpr (std::same_as<decltype(address), const uint8_t *>) {
+                if (fileSize > INT32_MAX) {
+                    std::println(
+                        "[ texture ] ERROR\nFailed to load image data from the "
+                        "given address! Data size must be less than 2G!\n");
+                    return {};
+                }
+                constexpr int desired_channels = 4;
+                if (requiredFormatInfo.rawDataType == formatInfo::integer) {
+                    if (requiredFormatInfo.sizePerComponent == 1) {
+                        pImageData = stbi_load_from_memory(
+                            address, static_cast<int>(fileSize), &width,
+                            &height, &channelCount, desired_channels);
+                    } else {
+                        pImageData = stbi_load_16_from_memory(
+                            address, static_cast<int>(fileSize), &width,
+                            &height, &channelCount, desired_channels);
+                    }
+                } else {
+                    pImageData = stbi_loadf_from_memory(
+                        address, static_cast<int>(fileSize), &width, &height,
+                        &channelCount, desired_channels);
+                }
+                if (!pImageData) {
+                    std::println("[ texture ] ERROR\nFailed to load image data "
+                                 "from the given address!\n");
+                }
+            } else {
+                if (requiredFormatInfo.rawDataType == formatInfo::integer) {
+                    if (requiredFormatInfo.sizePerComponent == 1) {
+                        pImageData =
+                            stbi_load(address, &width, &height, &channelCount,
+                                      requiredFormatInfo.componentCount);
+                    } else {
+                        pImageData = stbi_load_16(
+                            address, &width, &height, &channelCount,
+                            requiredFormatInfo.componentCount);
+                    }
+                } else {
+                    pImageData =
+                        stbi_loadf(address, &width, &height, &channelCount,
+                                   requiredFormatInfo.componentCount);
+                }
+                if (!pImageData) {
+                    std::println("[ texture ] ERROR\nFailed to load the file: "
+                                 "{}\n",
+                                 address);
+                }
+            }
+            return std::unique_ptr<uint8_t[]>(
+                static_cast<uint8_t *>(pImageData));
+        }
+
+    public:
+        /** @brief 获取图像视图句柄 */
+        VkImageView ImageView() const { return imageView; }
+
+        /** @brief 获取图像句柄 */
+        VkImage Image() const { return imageMemory.Image(); }
+
+        /** @brief 获取图像视图指针（用于 VkWriteDescriptorSet 等） */
+        const VkImageView *AddressOfImageView() const {
+            return imageView.Address();
+        }
+
+        /** @brief 获取图像指针 */
+        const VkImage *AddressOfImage() const {
+            return imageMemory.AddressOfImage();
+        }
+
+        /**
+         * @brief 获取描述符图像信息（用于写入描述符集）
+         * @param sampler 采样器句柄
+         * @return VkDescriptorImageInfo 结构体
+         */
+        VkDescriptorImageInfo DescriptorImageInfo(VkSampler sampler) const {
+            return { sampler, imageView,
+                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        }
+
+        /**
+         * @brief 从文件路径加载图像
+         * @param filepath 图像文件路径
+         * @param extent 输出图像宽高
+         * @param requiredFormatInfo 所需格式信息
+         * @return 图像像素数据，失败返回空
+         */
+        [[nodiscard]]
+        static std::unique_ptr<uint8_t[]>
+        LoadFile(const char *filepath, VkExtent2D &extent,
+                 formatInfo requiredFormatInfo) {
+            return LoadFile_Internal(filepath, 0, extent, requiredFormatInfo);
+        }
+
+        /**
+         * @brief 从内存加载图像
+         * @param fileBinaries 图像二进制数据指针
+         * @param fileSize 数据大小（需小于 2GB）
+         * @param extent 输出图像宽高
+         * @param requiredFormatInfo 所需格式信息
+         * @return 图像像素数据，失败返回空
+         */
+        [[nodiscard]]
+        static std::unique_ptr<uint8_t[]>
+        LoadFile(const uint8_t *fileBinaries, size_t fileSize,
+                 VkExtent2D &extent, formatInfo requiredFormatInfo) {
+            return LoadFile_Internal(fileBinaries, fileSize, extent,
+                                     requiredFormatInfo);
+        }
+
+        /**
+         * @brief 根据 2D 尺寸计算 mip 级数
+         * @param extent 图像尺寸
+         * @return mip 级数（待实现）
+         */
+        static uint32_t CalculateMipLevelCount(VkExtent2D extent) {
+            /*涉及生成mipmap，待填充*/
+        }
+
+        /**
+         * @brief 从缓冲区拷贝到图像并执行 blit 生成 mipmap
+         * @param buffer_copyFrom 源缓冲区
+         * @param image_copyTo 拷贝目标图像
+         * @param image_blitTo blit 目标图像
+         * @param imageExtent 图像尺寸
+         * @param mipLevelCount mip 级数
+         * @param layerCount 数组层数
+         * @param minFilter blit 滤波器（待实现）
+         */
+        static void CopyBlitAndGenerateMipmap2d(
+            VkBuffer buffer_copyFrom, VkImage image_copyTo,
+            VkImage image_blitTo, VkExtent2D imageExtent,
+            uint32_t mipLevelCount = 1, uint32_t layerCount = 1,
+            VkFilter minFilter = VK_FILTER_LINEAR) {
+            /*涉及生成mipmap，待填充*/
+        }
+
+        /**
+         * @brief 对已初始化的图像执行 blit 生成 mipmap
+         * @param image_preinitialized 已包含 base level 数据的图像
+         * @param image_final 最终目标图像
+         * @param imageExtent 图像尺寸
+         * @param mipLevelCount mip 级数
+         * @param layerCount 数组层数
+         * @param minFilter blit 滤波器（待实现）
+         */
+        static void BlitAndGenerateMipmap2d(
+            VkImage image_preinitialized, VkImage image_final,
+            VkExtent2D imageExtent, uint32_t mipLevelCount = 1,
+            uint32_t layerCount = 1, VkFilter minFilter = VK_FILTER_LINEAR) {
+            /*涉及生成mipmap，待填充*/
+        }
+    };
+
 } // namespace vulkan
