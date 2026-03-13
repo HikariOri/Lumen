@@ -954,6 +954,286 @@ namespace vulkan {
     };
 
     /**
+     * @struct imageOperation
+     * @brief 图像操作工具类，封装 buffer→image 拷贝、图像 blit 和 mipmap 生成
+     *
+     * 提供带自动内存屏障的 vkCmdCopyBufferToImage、vkCmdBlitImage 封装，
+     * 以及 2D 图像 mipmap 链生成。所有操作需在已开始的命令缓冲区内调用。
+     */
+    struct imageOperation {
+
+        /**
+         * @struct imageMemoryBarrierParameterPack
+         * @brief 图像内存屏障参数包，用于指定操作前后布局/访问/阶段
+         *
+         * 默认构造表示不需要对应屏障；带参数构造表示需要该方向的屏障。
+         */
+        struct imageMemoryBarrierParameterPack {
+            const bool isNeeded = false;          ///< 是否需要执行该屏障
+            const VkPipelineStageFlags stage = 0; ///< 管道阶段
+            const VkAccessFlags access = 0;       ///< 访问掩码
+            const VkImageLayout layout =
+                VK_IMAGE_LAYOUT_UNDEFINED; ///< 目标布局
+            constexpr imageMemoryBarrierParameterPack() = default;
+
+            /**
+             * @brief 构造需要执行的屏障参数
+             * @param stage 管道阶段
+             * @param access 访问掩码
+             * @param layout 目标布局
+             */
+            constexpr imageMemoryBarrierParameterPack(
+                VkPipelineStageFlags stage, VkAccessFlags access,
+                VkImageLayout layout)
+                : isNeeded(true), stage(stage), access(access), layout(layout) {
+            }
+        };
+
+        /**
+         * @brief 将缓冲区数据拷贝到图像（带可选的转换前后屏障）
+         * @param commandBuffer 命令缓冲区
+         * @param buffer 源缓冲区
+         * @param image 目标图像
+         * @param region 拷贝区域
+         * @param imb_from 拷贝前屏障参数（源布局→TRANSFER_DST）
+         * @param imb_to 拷贝后屏障参数（TRANSFER_DST→目标布局）
+         */
+        static void
+        CmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer buffer,
+                             VkImage image, const VkBufferImageCopy &region,
+                             imageMemoryBarrierParameterPack imb_from,
+                             imageMemoryBarrierParameterPack imb_to) {
+            // Pre-copy barrier
+            VkImageMemoryBarrier imageMemoryBarrier = {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                imb_from.access,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                imb_from.layout,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED, // No ownership transfer
+                VK_QUEUE_FAMILY_IGNORED,
+                image,
+                { region.imageSubresource.aspectMask,
+                  region.imageSubresource.mipLevel, 1,
+                  region.imageSubresource.baseArrayLayer,
+                  region.imageSubresource.layerCount }
+            };
+
+            if (imb_from.isNeeded) {
+                vkCmdPipelineBarrier(commandBuffer, imb_from.stage,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                                     nullptr, 0, nullptr, 1,
+                                     &imageMemoryBarrier);
+            }
+
+            // Copy
+            vkCmdCopyBufferToImage(commandBuffer, buffer, image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                   &region);
+
+            // Post-copy barrier
+            if (imb_to.isNeeded) {
+                imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                imageMemoryBarrier.oldLayout =
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                imageMemoryBarrier.dstAccessMask = imb_to.access;
+                imageMemoryBarrier.newLayout = imb_to.layout;
+                vkCmdPipelineBarrier(
+                    commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, imb_to.stage,
+                    0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+            }
+        }
+
+        /**
+         * @brief 执行图像 blit（带可选的转换前后屏障）
+         * @param commandBuffer 命令缓冲区
+         * @param image_src 源图像（需已为 TRANSFER_SRC_OPTIMAL）
+         * @param image_dst 目标图像
+         * @param region blit 区域
+         * @param imb_dst_from 拷贝前目标图像屏障（源布局→TRANSFER_DST）
+         * @param imb_dst_to 拷贝后目标图像屏障（TRANSFER_DST→目标布局）
+         * @param filter 缩放滤波（默认 LINEAR）
+         */
+        static void CmdBlitImage(VkCommandBuffer commandBuffer,
+                                 VkImage image_src, VkImage image_dst,
+                                 const VkImageBlit &region,
+                                 imageMemoryBarrierParameterPack imb_dst_from,
+                                 imageMemoryBarrierParameterPack imb_dst_to,
+                                 VkFilter filter = VK_FILTER_LINEAR) {
+            // Pre-blit barrier
+            VkImageMemoryBarrier imageMemoryBarrier = {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                imb_dst_from.access,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                imb_dst_from.layout,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                image_dst,
+                { region.dstSubresource.aspectMask,
+                  region.dstSubresource.mipLevel, 1,
+                  region.dstSubresource.baseArrayLayer,
+                  region.dstSubresource.layerCount }
+            };
+
+            if (imb_dst_from.isNeeded) {
+                vkCmdPipelineBarrier(commandBuffer, imb_dst_from.stage,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                                     nullptr, 0, nullptr, 1,
+                                     &imageMemoryBarrier);
+            }
+
+            // Blit
+            vkCmdBlitImage(commandBuffer, image_src,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image_dst,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                           filter);
+
+            // Post-blit barrier
+            if (imb_dst_to.isNeeded) {
+                imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                imageMemoryBarrier.oldLayout =
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                imageMemoryBarrier.dstAccessMask = imb_dst_to.access;
+                imageMemoryBarrier.newLayout = imb_dst_to.layout;
+                vkCmdPipelineBarrier(commandBuffer,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                     imb_dst_to.stage, 0, 0, nullptr, 0,
+                                     nullptr, 1, &imageMemoryBarrier);
+            }
+        }
+
+        /**
+         * @brief 为 2D 图像生成 mipmap 链（从 mip0 blit 到各级）
+         * @param commandBuffer 命令缓冲区
+         * @param image 目标图像（mip0 需已为 TRANSFER_SRC_OPTIMAL）
+         * @param imageExtent 图像尺寸
+         * @param mipLevelCount mip 级数
+         * @param layerCount 数组层数
+         * @param imb_to 完成后整幅图像的屏障（TRANSFER_SRC→目标布局）
+         * @param minFilter blit 使用的滤波（默认 LINEAR）
+         */
+        static void CmdGenerateMipmap2d(VkCommandBuffer commandBuffer,
+                                        VkImage image, VkExtent2D imageExtent,
+                                        uint32_t mipLevelCount,
+                                        uint32_t layerCount,
+                                        imageMemoryBarrierParameterPack imb_to,
+                                        VkFilter minFilter = VK_FILTER_LINEAR) {
+
+            auto MipmapExtent = [](VkExtent2D imageExtent, uint32_t mipLevel) {
+                VkOffset3D extent = { int32_t(imageExtent.width >> mipLevel),
+                                      int32_t(imageExtent.height >> mipLevel),
+                                      1 };
+                extent.x += !extent.x;
+                extent.y += !extent.y;
+                return extent;
+            };
+
+            // Blit
+            if (layerCount > 1) {
+                std::unique_ptr<VkImageBlit[]> regions =
+                    std::make_unique<VkImageBlit[]>(layerCount);
+                for (uint32_t i = 1; i < mipLevelCount; i++) {
+                    VkOffset3D mipmapExtent_src =
+                        MipmapExtent(imageExtent, i - 1);
+                    VkOffset3D mipmapExtent_dst = MipmapExtent(imageExtent, i);
+                    for (uint32_t j = 0; j < layerCount; j++) {
+                        regions[j] = {
+                            { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, j,
+                              1 },                    // srcSubresource
+                            { {}, mipmapExtent_src }, // srcOffsets
+                            { VK_IMAGE_ASPECT_COLOR_BIT, i, j,
+                              1 },                   // dstSubresource
+                            { {}, mipmapExtent_dst } // dstOffsets
+                        };
+                    }
+
+                    // Pre-blit barrier
+                    VkImageMemoryBarrier imageMemoryBarrier {
+                        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        0,
+                        VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        image,
+                        { VK_IMAGE_ASPECT_COLOR_BIT, i, 1, 0, layerCount }
+                    };
+
+                    vkCmdPipelineBarrier(
+                        commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 1, &imageMemoryBarrier);
+
+                    // Blit
+                    vkCmdBlitImage(commandBuffer, image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                   layerCount, regions.get(), minFilter);
+
+                    // Post-blit barrier
+                    imageMemoryBarrier.srcAccessMask =
+                        VK_ACCESS_TRANSFER_WRITE_BIT;
+                    imageMemoryBarrier.oldLayout =
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                    imageMemoryBarrier.dstAccessMask =
+                        VK_ACCESS_TRANSFER_READ_BIT;
+                    imageMemoryBarrier.newLayout =
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                    vkCmdPipelineBarrier(
+                        commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 1, &imageMemoryBarrier);
+                }
+            } else {
+                for (uint32_t i = 1; i < mipLevelCount; i++) {
+                    VkImageBlit region {
+                        { VK_IMAGE_ASPECT_COLOR_BIT, i - 1, 0,
+                          layerCount }, // srcSubresource
+                        { {}, MipmapExtent(imageExtent, i - 1) }, // srcOffsets
+                        { VK_IMAGE_ASPECT_COLOR_BIT, i, 0,
+                          layerCount },                      // dstSubresource
+                        { {}, MipmapExtent(imageExtent, i) } // dstOffsets
+                    };
+
+                    CmdBlitImage(commandBuffer, image, image, region,
+                                 { VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                                   VK_IMAGE_LAYOUT_UNDEFINED },
+                                 { VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                   VK_ACCESS_TRANSFER_READ_BIT,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL },
+                                 minFilter);
+                }
+            }
+
+            // Post-blit barrier
+            if (imb_to.isNeeded) {
+                VkImageMemoryBarrier imageMemoryBarrier = {
+                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    nullptr,
+                    0,
+                    imb_to.access,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    imb_to.layout,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    image,
+                    { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevelCount, 0,
+                      layerCount }
+                };
+
+                vkCmdPipelineBarrier(
+                    commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, imb_to.stage,
+                    0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+            }
+        }
+    };
+
+    /**
      * @class texture
      * @brief Vulkan
      * 纹理基类，封装图像内存和图像视图，支持从文件或内存加载图像数据
@@ -982,6 +1262,7 @@ namespace vulkan {
                                VkExtent3D extent, uint32_t mipLevelCount,
                                uint32_t arrayLayerCount,
                                VkImageCreateFlags flags = 0) {
+
             VkImageCreateInfo imageCreateInfo {};
 
             imageCreateInfo.flags = flags;
@@ -1004,12 +1285,13 @@ namespace vulkan {
          * @param viewType 视图类型
          * @param format 像素格式
          * @param mipLevelCount mip 级数
-         * @param arrayLayer数组层数Count 
+         * @param arrayLayer数组层数Count
          * @param flags 视图创建标志
          */
         void CreateImageView(VkImageViewType viewType, VkFormat format,
                              uint32_t mipLevelCount, uint32_t arrayLayerCount,
                              VkImageViewCreateFlags flags = 0) {
+
             imageView.Create(imageMemory.Image(), viewType, format,
                              { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevelCount, 0,
                                arrayLayerCount },
@@ -1159,7 +1441,9 @@ namespace vulkan {
          * @return mip 级数（待实现）
          */
         static uint32_t CalculateMipLevelCount(VkExtent2D extent) {
-            /*涉及生成mipmap，待填充*/
+            return static_cast<uint32_t>(
+                       std::floor(std::max(extent.width, extent.height))) +
+                   1;
         }
 
         /**
@@ -1177,7 +1461,58 @@ namespace vulkan {
             VkImage image_blitTo, VkExtent2D imageExtent,
             uint32_t mipLevelCount = 1, uint32_t layerCount = 1,
             VkFilter minFilter = VK_FILTER_LINEAR) {
-            /*涉及生成mipmap，待填充*/
+            static constexpr imageOperation::imageMemoryBarrierParameterPack
+                imbs[2] = { { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_ACCESS_SHADER_READ_BIT,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                            { VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_READ_BIT,
+                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL } };
+            bool generateMipmap = mipLevelCount > 1;
+            bool blitMipLevel0 = image_copyTo != image_blitTo;
+            auto &commandBuffer = graphicsBase::Plus().CommandBuffer_Transfer();
+            commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+            VkBufferImageCopy region = {
+                .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+                                      layerCount },
+                .imageExtent = { imageExtent.width, imageExtent.height, 1 }
+            };
+            imageOperation::CmdCopyBufferToImage(
+                commandBuffer, buffer_copyFrom, image_copyTo, region,
+                { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+                  VK_IMAGE_LAYOUT_UNDEFINED },
+                imbs[generateMipmap || blitMipLevel0]);
+
+            if (blitMipLevel0) {
+                VkImageBlit region = {
+                    { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layerCount },
+                    { {},
+                      { int32_t(imageExtent.width), int32_t(imageExtent.height),
+                        1 } },
+                    { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layerCount },
+                    { {},
+                      { int32_t(imageExtent.width), int32_t(imageExtent.height),
+                        1 } }
+                };
+                imageOperation::CmdBlitImage(
+                    commandBuffer, image_copyTo, image_blitTo, region,
+                    { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+                      VK_IMAGE_LAYOUT_UNDEFINED },
+                    imbs[generateMipmap], minFilter);
+            }
+
+            if (generateMipmap)
+                imageOperation::CmdGenerateMipmap2d(
+                    commandBuffer, image_blitTo, imageExtent, mipLevelCount,
+                    layerCount,
+                    { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                      VK_ACCESS_SHADER_READ_BIT,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                    minFilter);
+
+            commandBuffer.End();
+            graphicsBase::Plus().ExecuteCommandBuffer_Graphics(commandBuffer);
         }
 
         /**
@@ -1193,7 +1528,220 @@ namespace vulkan {
             VkImage image_preinitialized, VkImage image_final,
             VkExtent2D imageExtent, uint32_t mipLevelCount = 1,
             uint32_t layerCount = 1, VkFilter minFilter = VK_FILTER_LINEAR) {
-            /*涉及生成mipmap，待填充*/
+            static constexpr imageOperation::imageMemoryBarrierParameterPack
+                imbs[2] = { { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                              VK_ACCESS_SHADER_READ_BIT,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                            { VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_READ_BIT,
+                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL } };
+            bool generateMipmap = mipLevelCount > 1;
+            bool blitMipLevel0 = image_preinitialized != image_final;
+            if (generateMipmap || blitMipLevel0) {
+                auto &commandBuffer =
+                    graphicsBase::Plus().CommandBuffer_Transfer();
+                commandBuffer.Begin(
+                    VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+                if (blitMipLevel0) {
+                    VkImageMemoryBarrier imageMemoryBarrier = {
+                        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        0,
+                        VK_ACCESS_TRANSFER_READ_BIT,
+                        VK_IMAGE_LAYOUT_PREINITIALIZED,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        image_preinitialized,
+                        { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layerCount }
+                    };
+                    vkCmdPipelineBarrier(
+                        commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 1, &imageMemoryBarrier);
+                    VkImageBlit region = {
+                        { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layerCount },
+                        { {},
+                          { int32_t(imageExtent.width),
+                            int32_t(imageExtent.height), 1 } },
+                        { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, layerCount },
+                        { {},
+                          { int32_t(imageExtent.width),
+                            int32_t(imageExtent.height), 1 } }
+                    };
+                    imageOperation::CmdBlitImage(
+                        commandBuffer, image_preinitialized, image_final,
+                        region,
+                        { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+                          VK_IMAGE_LAYOUT_UNDEFINED },
+                        imbs[generateMipmap], minFilter);
+                }
+
+                if (generateMipmap)
+                    imageOperation::CmdGenerateMipmap2d(
+                        commandBuffer, image_final, imageExtent, mipLevelCount,
+                        layerCount,
+                        { VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_SHADER_READ_BIT,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                        minFilter);
+
+                commandBuffer.End();
+                graphicsBase::Plus().ExecuteCommandBuffer_Graphics(
+                    commandBuffer);
+            }
+        }
+    };
+
+    /**
+     * @class texture2d
+     * @brief 2D 纹理类，从文件或内存加载图像并创建 Vulkan 2D 纹理
+     *
+     * 继承自 texture，实现 2D 图像的内存分配、视图创建及可选的 mipmap 生成。
+     * 支持格式转换（format_initial -> format_final）及暂存缓冲区的数据拷贝。
+     */
+    class texture2d : public texture {
+    protected:
+        VkExtent2D extent {}; ///< 2D 纹理的宽高
+
+        /**
+         * @brief 内部创建逻辑：分配图像内存、创建视图并传输数据
+         * @param format_initial 源数据格式（与 stb 加载结果匹配）
+         * @param format_final 目标 Vulkan 格式
+         * @param generateMipmap 是否生成 mipmap
+         */
+        void Create_Internal(VkFormat format_initial, VkFormat format_final,
+                             bool generateMipmap) {
+            uint32_t mipLevelCount =
+                generateMipmap ? CalculateMipLevelCount(extent) : 1;
+            // 创建图像并分配内存
+            CreateImageMemory(VK_IMAGE_TYPE_2D, format_final,
+                              { extent.width, extent.height, 1 }, mipLevelCount,
+                              1);
+            // 创建图像视图
+            CreateImageView(VK_IMAGE_VIEW_TYPE_2D, format_final, mipLevelCount,
+                            1);
+            // Blit数据到图像，并生成 mipmap
+            if (format_initial == format_final) {
+                CopyBlitAndGenerateMipmap2d(
+                    stagingBuffer::Buffer_MainThread(), imageMemory.Image(),
+                    imageMemory.Image(), extent, mipLevelCount, 1);
+            } else {
+                if (VkImage image_conversion =
+                        stagingBuffer::AliasedImage2d_MainThread(format_initial,
+                                                                 extent)) {
+                    // 若需要格式转换，但是能为暂存缓冲区创建混叠图像，则直接
+                    // blit
+                    BlitAndGenerateMipmap2d(image_conversion,
+                                            imageMemory.Image(), extent,
+                                            mipLevelCount, 1);
+                } else {
+                    // 否则，创建新的暂存图像用于中转
+                    VkImageCreateInfo imageCreateInfo = {
+                        .imageType = VK_IMAGE_TYPE_2D,
+                        .format = format_initial,
+                        .extent = { extent.width, extent.height, 1 },
+                        .mipLevels = 1,
+                        .arrayLayers = 1,
+                        .samples = VK_SAMPLE_COUNT_1_BIT,
+                        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                    };
+                    vulkan::imageMemory imageMemory_conversion(
+                        imageCreateInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+                    // 从暂存缓冲区拷贝到图像，然后再 blit
+                    CopyBlitAndGenerateMipmap2d(
+                        stagingBuffer::Buffer_MainThread(),
+                        imageMemory_conversion.Image(), imageMemory.Image(),
+                        extent, mipLevelCount, 1);
+                }
+            }
+        }
+
+    public:
+        texture2d() = default;
+
+        /**
+         * @brief 从文件路径创建 2D 纹理
+         * @param filepath 图像文件路径
+         * @param format_initial 源格式（需与文件格式兼容）
+         * @param format_final 目标 Vulkan 格式
+         * @param generateMipmap 是否生成 mipmap，默认 true
+         */
+        texture2d(const char *filepath, VkFormat format_initial,
+                  VkFormat format_final, bool generateMipmap = true) {
+            Create(filepath, format_initial, format_final, generateMipmap);
+        }
+
+        /**
+         * @brief 从内存数据创建 2D 纹理
+         * @param pImageData 图像像素数据指针
+         * @param extent 图像宽高
+         * @param format_initial 源格式
+         * @param format_final 目标 Vulkan 格式
+         * @param generateMipmap 是否生成 mipmap，默认 true
+         */
+        texture2d(const uint8_t *pImageData, VkExtent2D extent,
+                  VkFormat format_initial, VkFormat format_final,
+                  bool generateMipmap = true) {
+            Create(pImageData, extent, format_initial, format_final,
+                   generateMipmap);
+        }
+
+        /** @brief 获取纹理尺寸（宽高） */
+        VkExtent2D Extent() const { return extent; }
+
+        /** @brief 获取纹理宽度 */
+        uint32_t Width() const { return extent.width; }
+
+        /** @brief 获取纹理高度 */
+        uint32_t Height() const { return extent.height; }
+
+        /**
+         * @brief 从文件路径加载并创建 2D 纹理
+         * @param filepath 图像文件路径
+         * @param format_initial 源格式
+         * @param format_final 目标 Vulkan 格式
+         * @param generateMipmap 是否生成 mipmap，默认 true
+         */
+        void Create(const char *filepath, VkFormat format_initial,
+                    VkFormat format_final, bool generateMipmap = true) {
+            VkExtent2D extent;
+
+            formatInfo formatInfo = FormatInfo(
+                format_initial); // 根据指定的 format_initial 取得格式信息
+
+            std::unique_ptr<uint8_t[]> pImageData =
+                LoadFile(filepath, extent, formatInfo);
+
+            if (pImageData) {
+                Create(pImageData.get(), extent, format_initial, format_final,
+                       generateMipmap);
+            }
+        }
+
+        /**
+         * @brief 从内存数据加载并创建 2D 纹理
+         * @param pImageData 图像像素数据指针
+         * @param extent 图像宽高
+         * @param format_initial 源格式
+         * @param format_final 目标 Vulkan 格式
+         * @param generateMipmap 是否生成 mipmap，默认 true
+         */
+        void Create(const uint8_t *pImageData, VkExtent2D extent,
+                    VkFormat format_initial, VkFormat format_final,
+                    bool generateMipmap = true) {
+            this->extent = extent;
+
+            size_t imageDataSize =
+                size_t(FormatInfo(format_initial).sizePerPixel) * extent.width *
+                extent.height;
+
+            stagingBuffer::BufferData_MainThread(
+                pImageData, imageDataSize); // 拷贝数据到暂存缓冲区
+
+            Create_Internal(format_initial, format_final, generateMipmap);
         }
     };
 
