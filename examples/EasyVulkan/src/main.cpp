@@ -6,6 +6,8 @@
 #include "EasyVulkan.hpp"
 #include "GlfwGeneral.hpp"
 #include "VKBase.h"
+#include <chrono>
+#include <thread>
 
 using namespace vulkan;
 
@@ -81,6 +83,10 @@ int main() {
     if (!InitializeWindow({ 1280, 720 })) {
         return -1;
     }
+
+    easyVulkan ::BootScreen("./assets/textures/wallhaven-gjm6q3_1920x1080.png",
+                            VK_FORMAT_R8G8B8A8_UNORM);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     const auto &[renderPass, framebuffers] = RenderPassAndFramebuffers();
     CreateLayout();

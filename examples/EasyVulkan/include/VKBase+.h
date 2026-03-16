@@ -1325,6 +1325,7 @@ namespace vulkan {
             int &height = reinterpret_cast<int &>(extent.height);
             int channelCount = 0;
             void *pImageData = nullptr;
+
             if constexpr (std::same_as<decltype(address), const uint8_t *>) {
                 if (fileSize > INT32_MAX) {
                     std::println(
@@ -1332,6 +1333,7 @@ namespace vulkan {
                         "given address! Data size must be less than 2G!\n");
                     return {};
                 }
+
                 constexpr int desired_channels = 4;
                 if (requiredFormatInfo.rawDataType == formatInfo::integer) {
                     if (requiredFormatInfo.sizePerComponent == 1) {

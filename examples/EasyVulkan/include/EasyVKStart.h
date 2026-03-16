@@ -30,6 +30,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 // stb_image.h
+#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include "vk_enum_string_helper.h" //用于将枚举项转为对应的字符串，方便输出错误信息等
