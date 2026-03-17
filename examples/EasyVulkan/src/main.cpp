@@ -15,8 +15,8 @@ struct vertex {
 
 using namespace vulkan;
 
-descriptorSetLayout descriptorSetLayout_texture;
-pipelineLayout pipelineLayout_texture;
+descriptorSetLayout descriptorSetLayout_triangle;
+pipelineLayout pipelineLayout_triangle;
 pipeline pipeline_texture;
 
 /**
@@ -32,39 +32,36 @@ const auto &RenderPassAndFramebuffers() {
  * @brief 创建管线布局（此处无描述符集/推送常量）
  */
 void CreateLayout() {
-    VkPushConstantRange pushConstantRange {
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0, // offset,
-        24 // 范围大小，3 个 vec2 是 24
-    };
-
-    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding_texture {
-        .binding = 0, // 描述符被绑定到 0 号 binding
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding_trianglePosition = {
+        .binding = 0, // 描述符被绑定到0号binding
         .descriptorType =
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, // 类型为带采样器的图像
-        .descriptorCount = 1,                          // 个数是 1 个
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT // 在片段着色器阶段采样图像
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // 类型为uniform缓冲区
+        .descriptorCount = 1,                  // 个数是1个
+        .stageFlags =
+            VK_SHADER_STAGE_VERTEX_BIT // 在顶点着色器阶段读取uniform缓冲区
     };
 
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo_texture {
-        .bindingCount = 1, .pBindings = &descriptorSetLayoutBinding_texture
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo_triangle = {
+        .bindingCount = 1,
+        .pBindings = &descriptorSetLayoutBinding_trianglePosition
     };
 
-    descriptorSetLayout_texture.Create(descriptorSetLayoutCreateInfo_texture);
+    descriptorSetLayout_triangle.Create(descriptorSetLayoutCreateInfo_triangle);
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
-        .pushConstantRangeCount = 1, .pPushConstantRanges = &pushConstantRange
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
+        .setLayoutCount = 1,
+        .pSetLayouts = descriptorSetLayout_triangle.Address()
     };
 
-    pipelineLayout_texture.Create(pipelineLayoutCreateInfo);
+    pipelineLayout_triangle.Create(pipelineLayoutCreateInfo);
 }
 
 /**
  * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
  */
 void CreatePipeline() {
-    static shaderModule vert("shaders/glsl/PushConstant.vert.spv");
-    static shaderModule frag("shaders/glsl/PushConstant.frag.spv");
+    static shaderModule vert("shaders/glsl/UniformBuffer.vert.spv");
+    static shaderModule frag("shaders/glsl/UniformBuffer.frag.spv");
 
     static VkPipelineShaderStageCreateInfo
         shaderStageCreateInfos_triangle[2] = {
@@ -74,7 +71,7 @@ void CreatePipeline() {
 
     auto Create = [] {
         graphicsPipelineCreateInfoPack pipelineCiPack;
-        pipelineCiPack.createInfo.layout = pipelineLayout_texture;
+        pipelineCiPack.createInfo.layout = pipelineLayout_triangle;
         pipelineCiPack.createInfo.renderPass =
             RenderPassAndFramebuffers().renderPass;
 
@@ -155,14 +152,17 @@ int main() {
     sampler sampler(samplerCreateInfo);
     // Create descriptor
     VkDescriptorPoolSize descriptorPoolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
     };
+
     descriptorPool descriptorPool(1, descriptorPoolSizes);
-    descriptorSet descriptorSet_texture;
-    descriptorPool.AllocateSets(descriptorSet_texture,
-                                descriptorSetLayout_texture);
-    descriptorSet_texture.Write(texture.DescriptorImageInfo(sampler),
-                                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
+    descriptorSet descriptorSet_trianglePosition;
+    descriptorPool.AllocateSets(descriptorSet_trianglePosition,
+                                descriptorSetLayout_triangle);
+
+    // descriptorSet_texture.Write(texture.DescriptorImageInfo(sampler),
+    //                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     // 矩形需两个三角形（6 个顶点），TRIANGLE_LIST 每 3 顶点一个三角形
     vertex vertices[] { { { .0f, -.5f }, { 1, 0, 0, 1 } },
@@ -171,11 +171,19 @@ int main() {
     vertexBuffer vertexBuffer(sizeof vertices);
     vertexBuffer.TransferData(vertices);
 
-    glm::vec2 pushConstants[] = {
-        { .0f, .0f },
-        { -.5f, .0f },
-        { .5f, .0f },
+    glm::vec2 uniform_positions[] = { { .0f, .0f }, {},           { -.5f, .0f },
+                                      {},           { .5f, .0f }, {} };
+    uniformBuffer uniformBuffer(sizeof uniform_positions);
+    uniformBuffer.TransferData(uniform_positions);
+
+    VkDescriptorBufferInfo bufferInfo {
+        .buffer = uniformBuffer,
+        .offset = 0,
+        .range = sizeof uniform_positions // 或 VK_WHOLE_SIZE
     };
+
+    descriptorSet_trianglePosition.Write(bufferInfo,
+                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
     VkClearValue clearColor = { .color = { 0.2f, 0.3f, 0.3f, 1.0f } };
 
@@ -214,9 +222,14 @@ int main() {
         //                         pipelineLayout_texture, 0, 1,
         //                         descriptorSet_texture.Address(), 0, nullptr);
 
-        vkCmdPushConstants(commandBuffer, pipelineLayout_texture,
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pushConstants,
-                           &pushConstants);
+        // vkCmdPushConstants(commandBuffer, pipelineLayout_triangle,
+        //                    VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof
+        //                    pushConstants, &pushConstants);
+
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout_triangle, 0, 1,
+                                descriptorSet_trianglePosition.Address(), 0,
+                                nullptr);
 
         vkCmdDraw(commandBuffer, 3, 3, 0, 0);
 
