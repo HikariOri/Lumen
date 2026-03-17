@@ -1767,4 +1767,288 @@ namespace vulkan {
         }
     };
 
+    class texture2dArray : public texture {
+    protected:
+        VkExtent2D extent {};
+        uint32_t layerCount {};
+        //--------------------
+        void Create_Internal(VkFormat format_initial, VkFormat format_final,
+                             bool generateMipmap) {
+            uint32_t mipLevelCount =
+                generateMipmap ? CalculateMipLevelCount(extent) : 1;
+
+            CreateImageMemory(VK_IMAGE_TYPE_2D, format_final,
+                              { extent.width, extent.height, 1 }, mipLevelCount,
+                              layerCount);
+
+            CreateImageView(VK_IMAGE_VIEW_TYPE_2D_ARRAY, format_final,
+                            mipLevelCount, layerCount);
+
+            if (format_initial == format_final) {
+                CopyBlitAndGenerateMipmap2d(
+                    stagingBuffer::Buffer_MainThread(), imageMemory.Image(),
+                    imageMemory.Image(), extent, mipLevelCount, layerCount);
+            } else {
+                VkImageCreateInfo imageCreateInfo = {
+                    .imageType = VK_IMAGE_TYPE_2D,
+                    .format = format_initial,
+                    .extent = { extent.width, extent.height, 1 },
+                    .mipLevels = 1,
+                    .arrayLayers = layerCount,
+                    .samples = VK_SAMPLE_COUNT_1_BIT,
+                    .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                };
+
+                vulkan::imageMemory imageMemory_conversion(
+                    imageCreateInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+                CopyBlitAndGenerateMipmap2d(stagingBuffer::Buffer_MainThread(),
+                                            imageMemory_conversion.Image(),
+                                            imageMemory.Image(), extent,
+                                            mipLevelCount, layerCount);
+            }
+        }
+
+    public:
+        texture2dArray() = default;
+
+        texture2dArray(const char *filepath, VkExtent2D extentInTiles,
+                       VkFormat format_initial, VkFormat format_final,
+                       bool generateMipmap = true) {
+            Create(filepath, extentInTiles, format_initial, format_final,
+                   generateMipmap);
+        }
+
+        texture2dArray(const uint8_t *pImageData, VkExtent2D fullExtent,
+                       VkExtent2D extentInTiles, VkFormat format_initial,
+                       VkFormat format_final, bool generateMipmap = true) {
+            Create(pImageData, fullExtent, extentInTiles, format_initial,
+                   format_final, generateMipmap);
+        }
+
+        texture2dArray(arrayRef<const char *const> filepaths,
+                       VkFormat format_initial, VkFormat format_final,
+                       bool generateMipmap = true) {
+            Create(filepaths, format_initial, format_final, generateMipmap);
+        }
+
+        texture2dArray(arrayRef<const uint8_t *const> psImageData,
+                       VkExtent2D extent, VkFormat format_initial,
+                       VkFormat format_final, bool generateMipmap = true) {
+            Create(psImageData, extent, format_initial, format_final,
+                   generateMipmap);
+        }
+
+        // Getter
+        VkExtent2D Extent() const { return extent; }
+
+        uint32_t Width() const { return extent.width; }
+
+        uint32_t Height() const { return extent.height; }
+
+        uint32_t LayerCount() const { return layerCount; }
+
+        // Non-const Function
+        // 从硬盘读取贴图集，并切割
+        void Create(const char *filepath,     // 贴图集图像文件的路径
+                    VkExtent2D extentInTiles, // 贴图集纵横两方向的单元数
+                    VkFormat format_initial,  // 初始图像格式
+                    VkFormat format_final,    // 目标图像格式
+                    bool generateMipmap = true) {
+
+            // 判定图层数是否超过硬件容许的最大值
+            if (extentInTiles.width * extentInTiles.height >
+                graphicsBase::Base()
+                    .PhysicalDeviceProperties()
+                    .limits.maxImageArrayLayers) {
+                std::println("[ texture2dArray ] ERROR\nLayer count is out of "
+                             "limit! Must be less than: {}\nFile: {}\n",
+                             graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers,
+                             filepath);
+                return;
+            }
+
+            VkExtent2D fullExtent;
+            formatInfo formatInfo = FormatInfo(format_initial);
+
+            std::unique_ptr<uint8_t[]> pImageData =
+                LoadFile(filepath, fullExtent, formatInfo);
+
+            if (pImageData) {
+                if (fullExtent.width % extentInTiles.width ||
+                    fullExtent.height % extentInTiles.height) {
+                    std::println(
+                        "[ texture2dArray ] ERROR\nImage not available!\nFile: "
+                        "{}\nImage width must be in multiples of {}\nImage "
+                        "height must be in multiples of {}\n",
+                        filepath, extentInTiles.width, extentInTiles.height);
+                } else {
+                    Create(pImageData.get(), fullExtent, extentInTiles,
+                           format_initial, format_final, generateMipmap);
+                }
+            }
+        }
+
+        // 从内存读取贴图集的文件数据，并切割
+        void Create(const uint8_t *pImageData, VkExtent2D fullExtent,
+                    VkExtent2D extentInTiles, VkFormat format_initial,
+                    VkFormat format_final, bool generateMipmap = true) {
+
+            layerCount = extentInTiles.width * extentInTiles.height;
+
+            if (layerCount > graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers) {
+                std::println("[ texture2dArray ] ERROR\nLayer count is out of "
+                             "limit! Must be less than: {}\n",
+                             graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers);
+                return;
+            }
+
+            if (fullExtent.width % extentInTiles.width ||
+                fullExtent.height % extentInTiles.height) {
+                std::println("[ texture2dArray ] ERROR\nImage not "
+                             "available!\nImage width must be in multiples of "
+                             "{}\nImage height must be in multiples of {}\n",
+                             extentInTiles.width, extentInTiles.height);
+            }
+
+            extent.width = fullExtent.width / extentInTiles.width;
+
+            extent.height = fullExtent.height / extentInTiles.height;
+
+            size_t dataSizePerPixel = FormatInfo(format_initial).sizePerPixel;
+
+            size_t imageDataSize =
+                dataSizePerPixel * fullExtent.width * fullExtent.height;
+
+            if (extentInTiles.width == 1) {
+                stagingBuffer::BufferData_MainThread(pImageData, imageDataSize);
+            } else {
+                auto *pData_dst = static_cast<uint8_t *>(
+                    stagingBuffer::MapMemory_MainThread(imageDataSize));
+
+                size_t dataSizePerRow = dataSizePerPixel * extent.width;
+                for (size_t j = 0; j < extentInTiles.height; j++) {
+                    for (size_t i = 0; i < extentInTiles.width; i++) {
+                        for (size_t k = 0; k < extent.height; k++) {
+                            memcpy(pData_dst,
+                                   pImageData + (i * extent.width +
+                                                 (k + j * extent.height) *
+                                                     fullExtent.width) *
+                                                    dataSizePerPixel,
+                                   dataSizePerRow),
+                                pData_dst += dataSizePerRow;
+                        }
+                    }
+                }
+
+                stagingBuffer::UnmapMemory_MainThread();
+            }
+
+            Create_Internal(format_initial, format_final, generateMipmap);
+        }
+
+        // 从硬盘读取多个大小相同的图像文件
+        void Create(arrayRef<const char *const> filepaths,
+                    VkFormat format_initial, VkFormat format_final,
+                    bool generateMipmap = true) {
+
+            // 验证图层数是否满足硬件限制
+            if (filepaths.Count() > graphicsBase::Base()
+                                        .PhysicalDeviceProperties()
+                                        .limits.maxImageArrayLayers) {
+                std::println("[ texture2dArray ] ERROR\nLayer count is out of "
+                             "limit! Must be less than: {}\nFile: {}\n",
+                             graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers,
+                             filepaths);
+                return;
+            }
+
+            formatInfo formatInfo = FormatInfo(format_initial);
+
+            auto psImageData = std::make_unique<std::unique_ptr<uint8_t[]>[]>(
+                filepaths.Count());
+
+            // 遍历文件路径读图
+            for (size_t i = 0; i < filepaths.Count(); i++) {
+                VkExtent2D extent_currentLayer;
+                psImageData[i] =
+                    LoadFile(filepaths[i], extent_currentLayer, formatInfo);
+                // 读图成功时进这个if分支
+                if (psImageData[i]) {
+                    // 记录首张图的大小
+                    if (i == 0) {
+                        extent = extent_currentLayer;
+                    }
+                    // 如果本图与首张图大小一致，继续读下一张图
+                    if (extent.width == extent_currentLayer.width &&
+                        extent.height == extent_currentLayer.height) {
+                        continue;
+                    } else { // 否则，抛出错误信息并返回
+                        std::println(
+                            "[ texture2dArray ] ERROR\nImage not "
+                            "available!\nFile: {}\nAll the images must be in "
+                            "same size!\n",
+                            filepaths[i]);
+                    }
+                }
+                // 读图失败（错误信息已在 LoadeFile(...)
+                // 中写明），或图像大小与首张图像不一致时返回
+                return;
+            }
+
+            // 调用后一个 Create(...)
+            Create(
+                { reinterpret_cast<const uint8_t *const *>(psImageData.get()),
+                  filepaths.Count() },
+                extent, format_initial, format_final, generateMipmap);
+        }
+
+        // 从内存读取多个大小相同的图像文件的数据
+        void Create(arrayRef<const uint8_t *const> psImageData,
+                    VkExtent2D extent, VkFormat format_initial,
+                    VkFormat format_final, bool generateMipmap = true) {
+
+            layerCount = psImageData.Count();
+
+            if (layerCount > graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers) {
+                std::println("[ texture2dArray ] ERROR\nLayer count is out of "
+                             "limit! Must be less than: {}\n",
+                             graphicsBase::Base()
+                                 .PhysicalDeviceProperties()
+                                 .limits.maxImageArrayLayers);
+                return;
+            }
+
+            this->extent = extent;
+
+            size_t dataSizePerImage =
+                size_t(FormatInfo(format_initial).sizePerPixel) * extent.width *
+                extent.height;
+
+            size_t imageDataSize = dataSizePerImage * layerCount;
+
+            uint8_t *pData_dst = static_cast<uint8_t *>(
+                stagingBuffer::MapMemory_MainThread(imageDataSize));
+            for (size_t i = 0; i < layerCount; i++)
+                memcpy(pData_dst, psImageData[i], dataSizePerImage),
+                    pData_dst += dataSizePerImage;
+            stagingBuffer::UnmapMemory_MainThread();
+
+            // Create image and allocate memory, create image view, then copy
+            // data from staging buffer to image
+            Create_Internal(format_initial, format_final, generateMipmap);
+        }
+    };
+
 } // namespace vulkan
