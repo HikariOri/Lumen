@@ -39,6 +39,12 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/Texture2DArray.frag.shader"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/Texture2DArray.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/InstancedRendering.vert.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/InstancedRendering.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/InstancedRendering.frag.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/InstancedRendering.frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
