@@ -124,7 +124,13 @@ int main() {
 
     fence fence;
     semaphore semaphore_imageIsAvailable;
-    semaphore semaphore_renderingIsOver;
+    std::vector<semaphore> semaphores_renderingIsOver;
+    {
+        uint32_t n = graphicsBase::Base().SwapchainImageCount();
+        semaphores_renderingIsOver.reserve(n);
+        for (uint32_t k = 0; k < n; k++)
+            semaphores_renderingIsOver.emplace_back();
+    }
 
     commandBuffer commandBuffer;
     commandPool commandPool(graphicsBase::Base().QueueFamilyIndex_Graphics(),
@@ -165,6 +171,14 @@ int main() {
         while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED))
             glfwWaitEvents();
 
+        uint32_t n = graphicsBase::Base().SwapchainImageCount();
+        if (semaphores_renderingIsOver.size() != n) {
+            semaphores_renderingIsOver.clear();
+            semaphores_renderingIsOver.reserve(n);
+            for (uint32_t k = 0; k < n; k++)
+                semaphores_renderingIsOver.emplace_back();
+        }
+
         graphicsBase::Base().SwapImage(semaphore_imageIsAvailable);
         auto i = graphicsBase::Base().CurrentImageIndex();
 
@@ -185,8 +199,8 @@ int main() {
 
         graphicsBase::Base().SubmitCommandBuffer_Graphics(
             commandBuffer, semaphore_imageIsAvailable,
-            semaphore_renderingIsOver, fence);
-        graphicsBase::Base().PresentImage(semaphore_renderingIsOver);
+            semaphores_renderingIsOver[i], fence);
+        graphicsBase::Base().PresentImage(semaphores_renderingIsOver[i]);
 
         glfwPollEvents();
         TitleFps();
