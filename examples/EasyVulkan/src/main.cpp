@@ -10,7 +10,7 @@
 
 struct vertex {
     glm::vec2 position;
-    glm::vec2 texCoord;
+    glm::vec4 color;
 };
 
 using namespace vulkan;
@@ -58,8 +58,8 @@ void CreateLayout() {
  * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
  */
 void CreatePipeline() {
-    static shaderModule vert("shaders/glsl/Texture.vert.spv");
-    static shaderModule frag("shaders/glsl/Texture.frag.spv");
+    static shaderModule vert("shaders/glsl/VertexBuffer.vert.spv");
+    static shaderModule frag("shaders/glsl/VertexBuffer.frag.spv");
 
     static VkPipelineShaderStageCreateInfo
         shaderStageCreateInfos_triangle[2] = {
@@ -73,15 +73,15 @@ void CreatePipeline() {
         pipelineCiPack.createInfo.renderPass =
             RenderPassAndFramebuffers().renderPass;
         // 数据来自 0 号顶点缓冲区，输入频率是逐顶点输入
+        // 数据来自0号顶点缓冲区，输入频率是逐顶点输入
         pipelineCiPack.vertexInputBindings.emplace_back(
             0, sizeof(vertex), VK_VERTEX_INPUT_RATE_VERTEX);
-        // location 为 0，数据来自 0 号顶点缓冲区，vec2 对应
-        // VK_FORMAT_R32G32_SFLOAT，用 offsetof 计算 position 在 vertex
-        // 中的起始位置
+        // location为0，数据来自0号顶点缓冲区，vec2对应VK_FORMAT_R32G32_SFLOAT，用offsetof计算position在vertex中的起始位置
         pipelineCiPack.vertexInputAttributes.emplace_back(
             0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, position));
+        // location为1，数据来自0号顶点缓冲区，vec4对应VK_FORMAT_R32G32B32A32_SFLOAT，用offsetof计算color在vertex中的起始位置
         pipelineCiPack.vertexInputAttributes.emplace_back(
-            1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, texCoord));
+            1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(vertex, color));
         pipelineCiPack.inputAssemblyStateCi.topology =
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         pipelineCiPack.viewports.emplace_back(
@@ -149,15 +149,16 @@ int main() {
                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     // 矩形需两个三角形（6 个顶点），TRIANGLE_LIST 每 3 顶点一个三角形
-    vertex vertices[] = {
-        { { -.5f, -.5f }, { 0, 0 } }, { { .5f, -.5f }, { 1, 0 } },
-        { { -.5f, .5f }, { 0, 1 } }, // 三角形 1: 左下、右下、左上
-        { { -.5f, .5f }, { 0, 1 } },  { { .5f, -.5f }, { 1, 0 } },
-        { { .5f, .5f }, { 1, 1 } } // 三角形 2: 左上、右下、右上
-    };
-
+    vertex vertices[] { { { -.5f, -.5f }, { 1, 1, 0, 1 } },
+                        { { .5f, -.5f }, { 1, 0, 0, 1 } },
+                        { { -.5f, .5f }, { 0, 1, 0, 1 } },
+                        { { .5f, .5f }, { 0, 0, 1, 1 } } };
     vertexBuffer vertexBuffer(sizeof vertices);
     vertexBuffer.TransferData(vertices);
+
+    uint16_t indices[] = { 0, 1, 2, 1, 2, 3 };
+    indexBuffer indexBuffer(sizeof indices);
+    indexBuffer.TransferData(indices);
 
     VkClearValue clearColor = { .color = { 0.2f, 0.3f, 0.3f, 1.0f } };
 
@@ -174,12 +175,21 @@ int main() {
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffer.Address(),
                                &offset);
+
+        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0,
+                             VK_INDEX_TYPE_UINT16);
+
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipeline_texture);
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout_texture, 0, 1,
-                                descriptorSet_texture.Address(), 0, nullptr);
-        vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+
+        // vkCmdBindDescriptorSets(commandBuffer,
+        // VK_PIPELINE_BIND_POINT_GRAPHICS,
+        //                         pipelineLayout_texture, 0, 1,
+        //                         descriptorSet_texture.Address(), 0, nullptr);
+
+        // vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, 6, 1, 0, 0, 0);
+
         renderPass.CmdEnd(commandBuffer);
         commandBuffer.End();
 
