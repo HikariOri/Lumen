@@ -2750,6 +2750,7 @@ namespace vulkan {
 
         VkDescriptorSet handle = VK_NULL_HANDLE;
 
+    public:
         descriptorSet() = default;
 
         descriptorSet(descriptorSet &&other) noexcept { MoveHandle; }

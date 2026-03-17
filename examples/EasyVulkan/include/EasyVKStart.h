@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -20,6 +21,7 @@
 #include <span>
 #include <sstream>
 #include <stack>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -50,7 +52,6 @@ inline glm::mat4 FlipVertical(const glm::mat4 &projection) {
     return _projection;
 }
 
-
 /**
  * @defgroup MathUtils 数学工具
  * 符号、区间判断等数学相关工具函数
@@ -65,7 +66,7 @@ inline glm::mat4 FlipVertical(const glm::mat4 &projection) {
  * @param num 待判断的数值
  * @return 1 为正数，-1 为负数，0 为零
  */
-template<std::signed_integral T>
+template <std::signed_integral T>
 constexpr int GetSign(T num) {
     return (num > 0) - (num < 0);
 }
@@ -78,7 +79,7 @@ constexpr int GetSign(T num) {
  * @param num1 第二个数值
  * @return 同号返回 true，否则返回 false
  */
-template<std::signed_integral T>
+template <std::signed_integral T>
 constexpr bool SameSign(T num0, T num1) {
     return num0 == num1 || !(num0 >= 0 && num1 <= 0 || num0 <= 0 && num1 >= 0);
 }
@@ -91,7 +92,7 @@ constexpr bool SameSign(T num0, T num1) {
  * @param num1 第二个数值
  * @return 同号返回 true，否则返回 false
  */
-template<std::signed_integral T>
+template <std::signed_integral T>
 constexpr bool SameSign_Weak(T num0, T num1) {
     return (num0 ^ num1) >= 0;
 }
@@ -105,7 +106,7 @@ constexpr bool SameSign_Weak(T num0, T num1) {
  * @param max 区间上界（不包含）
  * @return 在开区间内返回 true，否则返回 false
  */
-template<std::signed_integral T>
+template <std::signed_integral T>
 constexpr bool Between_Open(T min, T num, T max) {
     return ((min - num) & (num - max)) < 0;
 }
@@ -119,7 +120,7 @@ constexpr bool Between_Open(T min, T num, T max) {
  * @param max 区间上界（包含）
  * @return 在闭区间内返回 true，否则返回 false
  */
-template<std::signed_integral T>
+template <std::signed_integral T>
 constexpr bool Between_Closed(T min, T num, T max) {
     return ((num - min) | (max - num)) >= 0;
 }

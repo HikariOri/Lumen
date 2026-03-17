@@ -1440,14 +1440,13 @@ namespace vulkan {
         /**
          * @brief 根据 2D 尺寸计算 mip 级数
          * @param extent 图像尺寸
-         * @return mip 级数（待实现）
+         * @return mip 级数，公式为 floor(log2(max(w,h))) + 1
          */
         static uint32_t CalculateMipLevelCount(VkExtent2D extent) {
-            return static_cast<uint32_t>(
-                       std::floor(std::max(extent.width, extent.height))) +
+            return uint32_t(std::floor(
+                       std::log2(std::max(extent.width, extent.height)))) +
                    1;
         }
-
         /**
          * @brief 从缓冲区拷贝到图像并执行 blit 生成 mipmap
          * @param buffer_copyFrom 源缓冲区
@@ -1593,6 +1592,27 @@ namespace vulkan {
                 graphicsBase::Plus().ExecuteCommandBuffer_Graphics(
                     commandBuffer);
             }
+        }
+
+        static VkSamplerCreateInfo SamplerCreateInfo() {
+            return { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                     .magFilter = VK_FILTER_LINEAR,
+                     .minFilter = VK_FILTER_LINEAR,
+                     .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                     .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                     .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                     .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                     .mipLodBias = 0.F,
+                     .anisotropyEnable = VK_TRUE,
+                     .maxAnisotropy = graphicsBase::Base()
+                                          .PhysicalDeviceProperties()
+                                          .limits.maxSamplerAnisotropy,
+                     .compareEnable = VK_FALSE,
+                     .compareOp = VK_COMPARE_OP_ALWAYS,
+                     .minLod = 0.F,
+                     .maxLod = VK_LOD_CLAMP_NONE,
+                     .borderColor = {},
+                     .unnormalizedCoordinates = VK_FALSE };
         }
     };
 
