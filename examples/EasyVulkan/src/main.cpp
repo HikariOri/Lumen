@@ -32,6 +32,12 @@ const auto &RenderPassAndFramebuffers() {
  * @brief 创建管线布局（此处无描述符集/推送常量）
  */
 void CreateLayout() {
+    VkPushConstantRange pushConstantRange {
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0, // offset,
+        24 // 范围大小，3 个 vec2 是 24
+    };
+
     VkDescriptorSetLayoutBinding descriptorSetLayoutBinding_texture {
         .binding = 0, // 描述符被绑定到 0 号 binding
         .descriptorType =
@@ -47,8 +53,7 @@ void CreateLayout() {
     descriptorSetLayout_texture.Create(descriptorSetLayoutCreateInfo_texture);
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
-        .setLayoutCount = 1,
-        .pSetLayouts = descriptorSetLayout_texture.Address()
+        .pushConstantRangeCount = 1, .pPushConstantRanges = &pushConstantRange
     };
 
     pipelineLayout_texture.Create(pipelineLayoutCreateInfo);
@@ -58,8 +63,8 @@ void CreateLayout() {
  * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
  */
 void CreatePipeline() {
-    static shaderModule vert("shaders/glsl/InstancedRendering.vert.spv");
-    static shaderModule frag("shaders/glsl/InstancedRendering.frag.spv");
+    static shaderModule vert("shaders/glsl/PushConstant.vert.spv");
+    static shaderModule frag("shaders/glsl/PushConstant.frag.spv");
 
     static VkPipelineShaderStageCreateInfo
         shaderStageCreateInfos_triangle[2] = {
@@ -121,8 +126,9 @@ void CreatePipeline() {
  * @return 0 正常退出，-1 初始化失败
  */
 int main() {
-    if (!InitializeWindow({ 1280, 720 }))
+    if (!InitializeWindow({ 1280, 720 })) {
         return -1;
+    }
 
     easyVulkan ::BootScreen("./assets/textures/wallhaven-gjm6q3_1920x1080.png",
                             VK_FORMAT_R8G8B8A8_UNORM);
@@ -159,24 +165,24 @@ int main() {
                                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
     // 矩形需两个三角形（6 个顶点），TRIANGLE_LIST 每 3 顶点一个三角形
-    vertex vertices[] {
-        { { .0f, -.5f }, { 1, 0, 0, 1 } }, // 红色
-        { { -.5f, .5f }, { 0, 1, 0, 1 } }, // 绿色
-        { { .5f, .5f }, { 0, 0, 1, 1 } }   // 蓝色
+    vertex vertices[] { { { .0f, -.5f }, { 1, 0, 0, 1 } },
+                        { { -.5f, .5f }, { 0, 1, 0, 1 } },
+                        { { .5f, .5f }, { 0, 0, 1, 1 } } };
+    vertexBuffer vertexBuffer(sizeof vertices);
+    vertexBuffer.TransferData(vertices);
+
+    glm::vec2 pushConstants[] = {
+        { .0f, .0f },
+        { -.5f, .0f },
+        { .5f, .0f },
     };
-
-    glm::vec2 offsets[] = { { .0f, .0f }, { -.5f, .0f }, { .5f, .0f } };
-
-    vertexBuffer vertexBuffer_perVertex(sizeof vertices);
-    vertexBuffer_perVertex.TransferData(vertices);
-    vertexBuffer vertexBuffer_perInstance(sizeof offsets);
-    vertexBuffer_perInstance.TransferData(offsets);
 
     VkClearValue clearColor = { .color = { 0.2f, 0.3f, 0.3f, 1.0f } };
 
     while (!glfwWindowShouldClose(pWindow)) {
-        while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED))
+        while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED)) {
             glfwWaitEvents();
+        }
 
         graphicsBase::Base().SwapImage(semaphore_imageIsAvailable);
         auto i = graphicsBase::Base().CurrentImageIndex();
@@ -184,7 +190,7 @@ int main() {
         commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         renderPass.CmdBegin(commandBuffer, framebuffers[i], { {}, windowSize },
                             clearColor);
-        VkDeviceSize offset = 0;
+        VkDeviceSize offset {};
 
         // vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffer.Address(),
         //                        &offset);
@@ -193,11 +199,12 @@ int main() {
         // vkCmdBindVertexBuffers(commandBuffer, 1, 1,
         //                        vertexBuffer_perInstance.Address(), &offset);
 
-        VkBuffer buffers[2] { vertexBuffer_perVertex,
-                              vertexBuffer_perInstance };
-        VkDeviceSize offsets[2] {};
+        // VkBuffer buffers[1] { vertexBuffer,
+        //  };
+        // VkDeviceSize offset {};
 
-        vkCmdBindVertexBuffers(commandBuffer, 0, 2, buffers, offsets);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffer.Address(),
+                               &offset);
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           pipeline_texture);
@@ -206,6 +213,10 @@ int main() {
         // VK_PIPELINE_BIND_POINT_GRAPHICS,
         //                         pipelineLayout_texture, 0, 1,
         //                         descriptorSet_texture.Address(), 0, nullptr);
+
+        vkCmdPushConstants(commandBuffer, pipelineLayout_texture,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof pushConstants,
+                           &pushConstants);
 
         vkCmdDraw(commandBuffer, 3, 3, 0, 0);
 

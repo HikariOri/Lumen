@@ -45,6 +45,12 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/InstancedRendering.frag.shader"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/InstancedRendering.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/PushConstant.vert.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/PushConstant.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/PushConstant.frag.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/PushConstant.frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
