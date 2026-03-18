@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include <vulkan/vulkan_core.h>
-
 #include "EasyVKStart.h"
 #include "VKFormat.h"
 #include "arrayRef.hpp"
@@ -59,11 +57,13 @@ namespace vulkan {
 
     /**
      * @class graphicsBase
-     * @brief Vulkan 核心单例，管理实例、物理/逻辑设备、交换链、队列及回调
+     * @brief Vulkan 核心基础封装，管理实例、物理/逻辑设备、队列、表面和交换链
+     *
+     * 负责创建与销毁 Vulkan 实例和逻辑设备，选择物理设备与队列族，\n
+     * 查询物理设备特性/属性及表面能力，创建与重建交换链，并提供\n
+     * 图形 / 计算 / 呈现队列提交和呈现的便捷函数，是整个引擎的核心单例入口。
      */
     class graphicsBase {
-        /** @brief 过程地址封装，用于获取 vkGetInstanceProcAddr 等返回的函数指针
-         */
         struct procedureAddress {
             PFN_vkVoidFunction value;
             procedureAddress(PFN_vkVoidFunction value) : value(value) {}
@@ -76,14 +76,20 @@ namespace vulkan {
             operator bool() const { return value; }
         };
 
-        graphicsBasePlus *pPlus =
-            nullptr; //=nullptr可以省略，因为是单例类的成员，自动零初始化
-
         uint32_t apiVersion = VK_API_VERSION_1_0;
         VkInstance instance;
         VkPhysicalDevice physicalDevice;
-        VkPhysicalDeviceProperties physicalDeviceProperties;
-        VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties;
+        VkPhysicalDeviceFeatures2 physicalDeviceFeatures;
+        VkPhysicalDeviceVulkan11Features
+            physicalDeviceVulkan11Features; // Provided by VK_API_VERSION_1_2
+        VkPhysicalDeviceVulkan12Features physicalDeviceVulkan12Features;
+        VkPhysicalDeviceVulkan13Features physicalDeviceVulkan13Features;
+        VkPhysicalDeviceProperties2 physicalDeviceProperties;
+        VkPhysicalDeviceVulkan11Properties
+            physicalDeviceVulkan11Properties; // Provided by VK_API_VERSION_1_2
+        VkPhysicalDeviceVulkan12Properties physicalDeviceVulkan12Properties;
+        VkPhysicalDeviceVulkan13Properties physicalDeviceVulkan13Properties;
+        VkPhysicalDeviceMemoryProperties2 physicalDeviceMemoryProperties;
         std::vector<VkPhysicalDevice> availablePhysicalDevices;
 
         VkDevice device;
@@ -107,17 +113,29 @@ namespace vulkan {
         std::vector<const char *> instanceExtensions;
         std::vector<const char *> deviceExtensions;
 
+        void *pNext_instanceCreateInfo;
+        void *pNext_deviceCreateInfo;
+        void *pNext_physicalDeviceFeatures;
+        void *pNext_physicalDeviceProperties;
+        void *pNext_physicalDeviceMemoryProperties;
+
         VkDebugUtilsMessengerEXT debugMessenger;
 
         std::vector<void (*)()> callbacks_createSwapchain;
         std::vector<void (*)()> callbacks_destroySwapchain;
         std::vector<void (*)()> callbacks_createDevice;
         std::vector<void (*)()> callbacks_destroyDevice;
+
+        graphicsBasePlus *pPlus = nullptr; // Pimpl
+
         // Static
         static graphicsBase singleton;
+
         //--------------------
         graphicsBase() = default;
+
         graphicsBase(graphicsBase &&) = delete;
+
         ~graphicsBase() {
             if (!instance)
                 return;
@@ -146,6 +164,138 @@ namespace vulkan {
             vkDestroyInstance(instance, nullptr);
         }
         // Non-const Function
+        result_t GetQueueFamilyIndices(VkPhysicalDevice physicalDevice,
+                                       bool enableGraphicsQueue,
+                                       bool enableComputeQueue,
+                                       uint32_t (&queueFamilyIndices)[3]) {
+            uint32_t queueFamilyCount = 0;
+            vkGetPhysicalDeviceQueueFamilyProperties(
+                physicalDevice, &queueFamilyCount, nullptr);
+            if (!queueFamilyCount)
+                return VK_RESULT_MAX_ENUM;
+            std::vector<VkQueueFamilyProperties> queueFamilyPropertieses(
+                queueFamilyCount);
+            vkGetPhysicalDeviceQueueFamilyProperties(
+                physicalDevice, &queueFamilyCount,
+                queueFamilyPropertieses.data());
+            auto &[ig, ip, ic] = queueFamilyIndices;
+            ig = ip = ic = VK_QUEUE_FAMILY_IGNORED;
+            for (uint32_t i = 0; i < queueFamilyCount; i++) {
+                VkBool32 supportGraphics =
+                             enableGraphicsQueue &&
+                             queueFamilyPropertieses[i].queueFlags &
+                                 VK_QUEUE_GRAPHICS_BIT,
+                         supportPresentation = false,
+                         supportCompute =
+                             enableComputeQueue &&
+                             queueFamilyPropertieses[i].queueFlags &
+                                 VK_QUEUE_COMPUTE_BIT;
+                if (surface)
+                    if (VkResult result = vkGetPhysicalDeviceSurfaceSupportKHR(
+                            physicalDevice, i, surface, &supportPresentation)) {
+                        std::println("[ graphicsBase ] ERROR\nFailed to "
+                                     "determine if the queue family supports "
+                                     "presentation!\nError code: {}\n",
+                                     string_VkResult(result));
+                        return result;
+                    }
+                if (supportGraphics && supportCompute) {
+                    if (supportPresentation) {
+                        ig = ip = ic = i;
+                        break;
+                    }
+                    if (ig != ic || ig == VK_QUEUE_FAMILY_IGNORED)
+                        ig = ic = i;
+                    if (!surface)
+                        break;
+                }
+                if (supportGraphics && ig == VK_QUEUE_FAMILY_IGNORED)
+                    ig = i;
+                if (supportPresentation && ip == VK_QUEUE_FAMILY_IGNORED)
+                    ip = i;
+                if (supportCompute && ic == VK_QUEUE_FAMILY_IGNORED)
+                    ic = i;
+            }
+            if (ig == VK_QUEUE_FAMILY_IGNORED && enableGraphicsQueue ||
+                ip == VK_QUEUE_FAMILY_IGNORED && surface ||
+                ic == VK_QUEUE_FAMILY_IGNORED && enableComputeQueue)
+                return VK_RESULT_MAX_ENUM;
+            queueFamilyIndex_graphics = ig;
+            queueFamilyIndex_presentation = ip;
+            queueFamilyIndex_compute = ic;
+            return VK_SUCCESS;
+        }
+        void GetPhysicalDeviceFeatures() {
+            if (apiVersion >= VK_API_VERSION_1_1) {
+                physicalDeviceFeatures = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+                };
+                physicalDeviceVulkan11Features = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES
+                };
+                physicalDeviceVulkan12Features = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+                };
+                physicalDeviceVulkan13Features = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
+                };
+                if (apiVersion >= VK_API_VERSION_1_2) {
+                    physicalDeviceFeatures.pNext =
+                        &physicalDeviceVulkan11Features;
+                    physicalDeviceVulkan11Features.pNext =
+                        &physicalDeviceVulkan12Features;
+                    if (apiVersion >= VK_API_VERSION_1_3)
+                        physicalDeviceVulkan12Features.pNext =
+                            &physicalDeviceVulkan13Features;
+                }
+                SetPNext(physicalDeviceFeatures.pNext,
+                         pNext_physicalDeviceFeatures);
+                vkGetPhysicalDeviceFeatures2(physicalDevice,
+                                             &physicalDeviceFeatures);
+            } else
+                vkGetPhysicalDeviceFeatures(physicalDevice,
+                                            &physicalDeviceFeatures.features);
+        }
+        void GetPhysicalDeviceProperties() {
+            if (apiVersion >= VK_API_VERSION_1_1) {
+                physicalDeviceProperties = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
+                };
+                physicalDeviceVulkan11Properties = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES
+                };
+                physicalDeviceVulkan12Properties = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES
+                };
+                physicalDeviceVulkan13Properties = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES
+                };
+                if (apiVersion >= VK_API_VERSION_1_2) {
+                    physicalDeviceProperties.pNext =
+                        &physicalDeviceVulkan11Properties;
+                    physicalDeviceVulkan11Properties.pNext =
+                        &physicalDeviceVulkan12Properties;
+                    if (apiVersion >= VK_API_VERSION_1_3)
+                        physicalDeviceVulkan12Properties.pNext =
+                            &physicalDeviceVulkan13Properties;
+                }
+                SetPNext(physicalDeviceProperties.pNext,
+                         pNext_physicalDeviceProperties);
+                vkGetPhysicalDeviceProperties2(physicalDevice,
+                                               &physicalDeviceProperties);
+                physicalDeviceMemoryProperties = {
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+                    pNext_physicalDeviceMemoryProperties
+                };
+                vkGetPhysicalDeviceMemoryProperties2(
+                    physicalDevice, &physicalDeviceMemoryProperties);
+            } else
+                vkGetPhysicalDeviceProperties(
+                    physicalDevice, &physicalDeviceProperties.properties),
+                    vkGetPhysicalDeviceMemoryProperties(
+                        physicalDevice,
+                        &physicalDeviceMemoryProperties.memoryProperties);
+        }
         result_t CreateSwapchain_Internal() {
             if (VkResult result = vkCreateSwapchainKHR(
                     device, &swapchainCreateInfo, nullptr, &swapchain)) {
@@ -186,79 +336,14 @@ namespace vulkan {
                 if (VkResult result =
                         vkCreateImageView(device, &imageViewCreateInfo, nullptr,
                                           &swapchainImageViews[i])) {
-                    std::println(
-                        "[ graphicsBase ] ERROR\nFailed to create a swapchain "
-                        "image view!\nError code: {}\n",
-                        string_VkResult(result));
+                    std::println("[ graphicsBase ] ERROR\nFailed to create a "
+                                 "swapchain image view!\nError code: {}\n",
+                                 string_VkResult(result));
                     return result;
                 }
             }
             return VK_SUCCESS;
         }
-
-        result_t GetQueueFamilyIndices(VkPhysicalDevice physicalDevice,
-                                       bool enableGraphicsQueue,
-                                       bool enableComputeQueue,
-                                       uint32_t (&queueFamilyIndices)[3]) {
-            uint32_t queueFamilyCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(
-                physicalDevice, &queueFamilyCount, nullptr);
-            if (!queueFamilyCount)
-                return VK_RESULT_MAX_ENUM;
-            std::vector<VkQueueFamilyProperties> queueFamilyPropertieses(
-                queueFamilyCount);
-            vkGetPhysicalDeviceQueueFamilyProperties(
-                physicalDevice, &queueFamilyCount,
-                queueFamilyPropertieses.data());
-            auto &[ig, ip, ic] = queueFamilyIndices;
-            ig = ip = ic = VK_QUEUE_FAMILY_IGNORED;
-            for (uint32_t i = 0; i < queueFamilyCount; i++) {
-                VkBool32 supportGraphics =
-                             enableGraphicsQueue &&
-                             queueFamilyPropertieses[i].queueFlags &
-                                 VK_QUEUE_GRAPHICS_BIT,
-                         supportPresentation = false,
-                         supportCompute =
-                             enableComputeQueue &&
-                             queueFamilyPropertieses[i].queueFlags &
-                                 VK_QUEUE_COMPUTE_BIT;
-                if (surface)
-                    if (VkResult result = vkGetPhysicalDeviceSurfaceSupportKHR(
-                            physicalDevice, i, surface, &supportPresentation)) {
-                        std::println(
-                            "[ graphicsBase ] ERROR\nFailed to determine if "
-                            "the queue family supports presentation!\nError "
-                            "code: {}\n",
-                            string_VkResult(result));
-                        return result;
-                    }
-                if (supportGraphics && supportCompute) {
-                    if (supportPresentation) {
-                        ig = ip = ic = i;
-                        break;
-                    }
-                    if (ig != ic || ig == VK_QUEUE_FAMILY_IGNORED)
-                        ig = ic = i;
-                    if (!surface)
-                        break;
-                }
-                if (supportGraphics && ig == VK_QUEUE_FAMILY_IGNORED)
-                    ig = i;
-                if (supportPresentation && ip == VK_QUEUE_FAMILY_IGNORED)
-                    ip = i;
-                if (supportCompute && ic == VK_QUEUE_FAMILY_IGNORED)
-                    ic = i;
-            }
-            if (ig == VK_QUEUE_FAMILY_IGNORED && enableGraphicsQueue ||
-                ip == VK_QUEUE_FAMILY_IGNORED && surface ||
-                ic == VK_QUEUE_FAMILY_IGNORED && enableComputeQueue)
-                return VK_RESULT_MAX_ENUM;
-            queueFamilyIndex_graphics = ig;
-            queueFamilyIndex_presentation = ip;
-            queueFamilyIndex_compute = ic;
-            return VK_SUCCESS;
-        }
-
         result_t CreateDebugMessenger() {
             static PFN_vkDebugUtilsMessengerCallbackEXT
                 DebugUtilsMessengerCallback =
@@ -288,19 +373,43 @@ namespace vulkan {
                     instance, &debugUtilsMessengerCreateInfo, nullptr,
                     &debugMessenger);
                 if (result)
-                    std::println(
-                        "[ graphicsBase ] ERROR\nFailed to create a debug "
-                        "messenger!\nError code: {}\n",
-                        string_VkResult(result));
+                    std::println("[ graphicsBase ] ERROR\nFailed to create a "
+                                 "debug messenger!\nError code: {}\n",
+                                 string_VkResult(result));
                 return result;
             }
-            std::println(
-                "[ graphicsBase ] ERROR\nFailed to get the function pointer of "
-                "vkCreateDebugUtilsMessengerEXT!\n");
+            std::println("[ graphicsBase ] ERROR\nFailed to get the function "
+                         "pointer of vkCreateDebugUtilsMessengerEXT!\n");
             return VK_RESULT_MAX_ENUM;
         }
-
         // Static Function
+        static void **SetPNext(void *&pBegin, void *pNext,
+                               bool allowDuplicate = false) {
+            struct vkStructureHead {
+                VkStructureType sType;
+                void *pNext;
+            };
+            if (!pNext)
+                return nullptr;
+            auto SetPNext_Internal = [](this auto &&self, void *&pBegin,
+                                        void *pNext,
+                                        bool allowDuplicate) -> void ** {
+                if (pBegin == pNext)
+                    return nullptr;
+                if (pBegin)
+                    if (!allowDuplicate &&
+                        reinterpret_cast<vkStructureHead *>(pBegin)->sType ==
+                            reinterpret_cast<vkStructureHead *>(pNext)->sType)
+                        return nullptr;
+                    else
+                        return self(
+                            reinterpret_cast<vkStructureHead *>(pBegin)->pNext,
+                            pNext, allowDuplicate);
+                else
+                    return &(pBegin = pNext);
+            };
+            return SetPNext_Internal(pBegin, pNext, allowDuplicate);
+        }
         static void AddLayerOrExtension(std::vector<const char *> &container,
                                         const char *name) {
             for (auto &i : container)
@@ -308,7 +417,6 @@ namespace vulkan {
                     return;
             container.push_back(name);
         }
-
         static void ExecuteCallbacks(std::vector<void (*)()> &callbacks) {
             for (size_t size = callbacks.size(), i = 0; i < size; i++)
                 callbacks[i]();
@@ -317,121 +425,89 @@ namespace vulkan {
         }
 
     public:
-        /*其他成员函数略*/
-        /** @brief 获取 graphicsBasePlus 扩展单例引用 */
-        static graphicsBasePlus &Plus() { return *singleton.pPlus; }
-
-        /** @brief 设置 graphicsBasePlus（仅允许设置一次） */
-        static void Plus(graphicsBasePlus &plus) {
-            if (!singleton.pPlus)
-                singleton.pPlus = &plus;
-        }
-
-        /** @brief 获取 Vulkan API 版本
-         * @return API 版本号 */
+        // Getter
         uint32_t ApiVersion() const { return apiVersion; }
-
-        /** @brief 获取 Vulkan 实例句柄 */
         VkInstance Instance() const { return instance; }
-
-        /** @brief 获取当前物理设备 */
         VkPhysicalDevice PhysicalDevice() const { return physicalDevice; }
-        /** @brief 获取物理设备属性 */
+        constexpr const VkPhysicalDeviceFeatures &
+        PhysicalDeviceFeatures() const {
+            return physicalDeviceFeatures.features;
+        }
+        constexpr const VkPhysicalDeviceVulkan11Features &
+        PhysicalDeviceVulkan11Features() const {
+            return physicalDeviceVulkan11Features;
+        }
+        constexpr const VkPhysicalDeviceVulkan12Features &
+        PhysicalDeviceVulkan12Features() const {
+            return physicalDeviceVulkan12Features;
+        }
+        constexpr const VkPhysicalDeviceVulkan13Features &
+        PhysicalDeviceVulkan13Features() const {
+            return physicalDeviceVulkan13Features;
+        }
         constexpr const VkPhysicalDeviceProperties &
         PhysicalDeviceProperties() const {
-            return physicalDeviceProperties;
+            return physicalDeviceProperties.properties;
         }
-
-        /** @brief 获取物理设备内存属性 */
+        constexpr const VkPhysicalDeviceVulkan11Properties &
+        PhysicalDeviceVulkan11Properties() const {
+            return physicalDeviceVulkan11Properties;
+        }
+        constexpr const VkPhysicalDeviceVulkan12Properties &
+        PhysicalDeviceVulkan12Properties() const {
+            return physicalDeviceVulkan12Properties;
+        }
+        constexpr const VkPhysicalDeviceVulkan13Properties &
+        PhysicalDeviceVulkan13Properties() const {
+            return physicalDeviceVulkan13Properties;
+        }
         constexpr const VkPhysicalDeviceMemoryProperties &
         PhysicalDeviceMemoryProperties() const {
-            return physicalDeviceMemoryProperties;
+            return physicalDeviceMemoryProperties.memoryProperties;
         }
-
-        /** @brief 获取可用物理设备
-         * @param index 设备索引
-         * @return 物理设备句柄 */
         VkPhysicalDevice AvailablePhysicalDevice(uint32_t index) const {
             return availablePhysicalDevices[index];
         }
-
-        /** @brief 获取可用物理设备数量 */
         uint32_t AvailablePhysicalDeviceCount() const {
             return uint32_t(availablePhysicalDevices.size());
         }
 
-        /** @brief 获取逻辑设备句柄 */
         VkDevice Device() const { return device; }
-
-        /** @brief 获取图形队列族索引 */
         uint32_t QueueFamilyIndex_Graphics() const {
             return queueFamilyIndex_graphics;
         }
-
-        /** @brief 获取呈现队列族索引 */
         uint32_t QueueFamilyIndex_Presentation() const {
             return queueFamilyIndex_presentation;
         }
-
-        /** @brief 获取计算队列族索引 */
         uint32_t QueueFamilyIndex_Compute() const {
             return queueFamilyIndex_compute;
         }
-
-        /** @brief 获取图形队列 */
         VkQueue Queue_Graphics() const { return queue_graphics; }
-
-        /** @brief 获取呈现队列 */
         VkQueue Queue_Presentation() const { return queue_presentation; }
-
-        /** @brief 获取计算队列 */
         VkQueue Queue_Compute() const { return queue_compute; }
 
-        /** @brief 获取窗口 Surface */
         VkSurfaceKHR Surface() const { return surface; }
-
-        /** @brief 获取可用 Surface 格式
-         * @param index 格式索引
-         * @return VkFormat */
         VkFormat AvailableSurfaceFormat(uint32_t index) const {
             return availableSurfaceFormats[index].format;
         }
-
-        /** @brief 获取可用 Surface 色彩空间
-         * @param index 格式索引 */
         VkColorSpaceKHR AvailableSurfaceColorSpace(uint32_t index) const {
             return availableSurfaceFormats[index].colorSpace;
         }
-
-        /** @brief 获取可用 Surface 格式数量 */
         uint32_t AvailableSurfaceFormatCount() const {
             return uint32_t(availableSurfaceFormats.size());
         }
 
-        /** @brief 获取交换链句柄 */
         VkSwapchainKHR Swapchain() const { return swapchain; }
-
-        /** @brief 获取交换链图像
-         * @param index 图像索引 */
         VkImage SwapchainImage(uint32_t index) const {
             return swapchainImages[index];
         }
-
-        /** @brief 获取交换链图像视图
-         * @param index 图像索引 */
         VkImageView SwapchainImageView(uint32_t index) const {
             return swapchainImageViews[index];
         }
-
-        /** @brief 获取交换链图像数量 */
         uint32_t SwapchainImageCount() const {
             return uint32_t(swapchainImages.size());
         }
-
-        /** @brief 获取当前帧图像索引 */
         uint32_t CurrentImageIndex() const { return currentImageIndex; }
-
-        /** @brief 获取交换链创建信息 */
         constexpr const VkSwapchainCreateInfoKHR &SwapchainCreateInfo() const {
             return swapchainCreateInfo;
         }
@@ -446,62 +522,45 @@ namespace vulkan {
             return deviceExtensions;
         }
 
-        /** @brief 获取实例级过程地址
-         * @param functionName 函数名
-         * @return 函数指针或 nullptr */
+        // Const Function
         procedureAddress
         InstanceProcedureAddress(const char *functionName) const {
             return vkGetInstanceProcAddr(instance, functionName);
         }
-
-        /** @brief 获取设备级过程地址
-         * @param functionName 函数名
-         * @return 函数指针或 nullptr */
         procedureAddress
         DeviceProcedureAddress(const char *functionName) const {
             return vkGetDeviceProcAddr(device, functionName);
         }
 
-        /** @brief 注册交换链创建后的回调
-         * @param function 回调函数 */
+        // Const & Non-const Function
         void AddCallback_CreateSwapchain(void (*function)()) {
             callbacks_createSwapchain.push_back(function);
         }
-        /** @brief 注册交换链销毁前的回调
-         * @param function 回调函数 */
         void AddCallback_DestroySwapchain(void (*function)()) {
             callbacks_destroySwapchain.push_back(function);
         }
-        /** @brief 注册逻辑设备创建后的回调
-         * @param function 回调函数 */
         void AddCallback_CreateDevice(void (*function)()) {
             callbacks_createDevice.push_back(function);
         }
-        /** @brief 注册逻辑设备销毁前的回调
-         * @param function 回调函数 */
         void AddCallback_DestroyDevice(void (*function)()) {
             callbacks_destroyDevice.push_back(function);
         }
-        /** @brief 添加实例层
-         * @param layerName 层名称 */
+        //                    Create Instance
         void AddInstanceLayer(const char *layerName) {
             AddLayerOrExtension(instanceLayers, layerName);
         }
-        /** @brief 添加实例扩展
-         * @param extensionName 扩展名称 */
         void AddInstanceExtension(const char *extensionName) {
             AddLayerOrExtension(instanceExtensions, extensionName);
         }
-        /** @brief 使用可用的最新 Vulkan API 版本
-         * @return VK_SUCCESS 或错误码 */
         result_t UseLatestApiVersion() {
             if (InstanceProcedureAddress("vkEnumerateInstanceVersion"))
                 return vkEnumerateInstanceVersion(&apiVersion);
             return VK_SUCCESS;
         }
-        /** @brief 创建 Vulkan 实例
-         * @param flags 创建标志
-         * @return VK_SUCCESS 或错误码 */
+        void AddNextStructure_InstanceCreateInfo(auto &next,
+                                                 bool allowDuplicate = false) {
+            SetPNext(pNext_instanceCreateInfo, &next, allowDuplicate);
+        }
         result_t CreateInstance(VkInstanceCreateFlags flags = 0) {
             if constexpr (ENABLE_DEBUG_MESSENGER)
                 AddInstanceLayer("VK_LAYER_KHRONOS_validation"),
@@ -521,42 +580,36 @@ namespace vulkan {
             };
             if (VkResult result =
                     vkCreateInstance(&instanceCreateInfo, nullptr, &instance)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to create a vulkan "
-                    "instance!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to create a "
+                             "vulkan instance!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
-            std::format("Vulkan API Version: {}.{}.{}\n",
-                        VK_API_VERSION_MAJOR(apiVersion),
-                        VK_API_VERSION_MINOR(apiVersion),
-                        VK_API_VERSION_PATCH(apiVersion));
+            std::println("Vulkan API Version: {}.{}.{}\n",
+                         VK_API_VERSION_MAJOR(apiVersion),
+                         VK_API_VERSION_MINOR(apiVersion),
+                         VK_API_VERSION_PATCH(apiVersion));
             if constexpr (ENABLE_DEBUG_MESSENGER)
                 CreateDebugMessenger();
             return VK_SUCCESS;
         }
-
-        /** @brief 检查实例层是否可用，不可用则置为 nullptr
-         * @param layersToCheck 要检查的层名称数组（会被修改）
-         * @return VK_SUCCESS 或错误码 */
         result_t
         CheckInstanceLayers(arrayRef<const char *> layersToCheck) const {
             uint32_t layerCount;
             std::vector<VkLayerProperties> availableLayers;
             if (VkResult result =
                     vkEnumerateInstanceLayerProperties(&layerCount, nullptr)) {
-                std::println("[ graphicsBase ] ERROR\nFailed to "
-                             "get the count of instance layers!\n");
+                std::println("[ graphicsBase ] ERROR\nFailed to get the count "
+                             "of instance layers!\n");
                 return result;
             }
             if (layerCount) {
                 availableLayers.resize(layerCount);
                 if (VkResult result = vkEnumerateInstanceLayerProperties(
                         &layerCount, availableLayers.data())) {
-                    std::println(
-                        "[ graphicsBase ] ERROR\nFailed to enumerate instance "
-                        "layer properties!\nError code: {}\n",
-                        string_VkResult(result));
+                    std::println("[ graphicsBase ] ERROR\nFailed to enumerate "
+                                 "instance layer properties!\nError code: {}\n",
+                                 string_VkResult(result));
                     return result;
                 }
                 for (auto &i : layersToCheck) {
@@ -574,11 +627,6 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
-
-        /** @brief 检查实例扩展是否可用，不可用则置为 nullptr
-         * @param extensionsToCheck 要检查的扩展名数组（会被修改）
-         * @param layerName 可为 nullptr 表示不限定层
-         * @return VK_SUCCESS 或错误码 */
         result_t
         CheckInstanceExtensions(arrayRef<const char *> extensionsToCheck,
                                 const char *layerName) const {
@@ -591,9 +639,8 @@ namespace vulkan {
                           "[ graphicsBase ] ERROR\nFailed to get the count of "
                           "instance extensions!\nLayer name: {}\n",
                           layerName)
-                    : std::println(
-                          "[ graphicsBase ] ERROR\nFailed to get the count of "
-                          "instance extensions!\n");
+                    : std::println("[ graphicsBase ] ERROR\nFailed to get the "
+                                   "count of instance extensions!\n");
                 return result;
             }
             if (extensionCount) {
@@ -622,62 +669,57 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
-
-        /** @brief 设置实例层列表（覆盖原有）
-         * @param layerNames 层名称列表 */
         void InstanceLayers(const std::vector<const char *> &layerNames) {
             instanceLayers = layerNames;
         }
-
-        /** @brief 设置实例扩展列表（覆盖原有）
-         * @param extensionNames 扩展名列表 */
         void
         InstanceExtensions(const std::vector<const char *> &extensionNames) {
             instanceExtensions = extensionNames;
         }
-        /** @brief 设置窗口 Surface（仅允许设置一次）
-         * @param surface 窗口 Surface 句柄 */
+        //                    Set Window Surface
         void Surface(VkSurfaceKHR surface) {
             if (!this->surface)
                 this->surface = surface;
         }
-        /** @brief 添加设备扩展
-         * @param extensionName 扩展名称 */
+        //                    Create Logical Device
         void AddDeviceExtension(const char *extensionName) {
             AddLayerOrExtension(deviceExtensions, extensionName);
         }
-        /** @brief 枚举并缓存所有物理设备
-         * @return VK_SUCCESS 或错误码 */
+        void AddNextStructure_DeviceCreateInfo(auto &next,
+                                               bool allowDuplicate = false) {
+            SetPNext(pNext_deviceCreateInfo, &next, allowDuplicate);
+        }
+        void AddNextStructure_PhysicalDeviceFeatures(auto &next) {
+            SetPNext(pNext_physicalDeviceFeatures, &next);
+        }
+        void AddNextStructure_PhysicalDeviceProperties(auto &next) {
+            SetPNext(pNext_physicalDeviceProperties, &next);
+        }
+        void AddNextStructure_PhysicalDeviceMemoryProperties(auto &next) {
+            SetPNext(pNext_physicalDeviceMemoryProperties, &next);
+        }
         result_t GetPhysicalDevices() {
             uint32_t deviceCount;
             if (VkResult result = vkEnumeratePhysicalDevices(
                     instance, &deviceCount, nullptr)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get the count of "
-                    "physical devices!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get the count "
+                             "of physical devices!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             if (!deviceCount)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to find any physical "
-                    "device supports vulkan!\n"),
+                std::println("[ graphicsBase ] ERROR\nFailed to find any "
+                             "physical device supports vulkan!\n"),
                     abort();
             availablePhysicalDevices.resize(deviceCount);
             VkResult result = vkEnumeratePhysicalDevices(
                 instance, &deviceCount, availablePhysicalDevices.data());
             if (result)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to enumerate physical "
-                    "devices!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to enumerate "
+                             "physical devices!\nError code: {}\n",
+                             string_VkResult(result));
             return result;
         }
-        /** @brief 选择物理设备并确定队列族索引
-         * @param deviceIndex 设备列表中的索引
-         * @param enableGraphicsQueue 是否启用图形队列
-         * @param enableComputeQueue 是否启用计算队列
-         * @return VK_SUCCESS 或错误码 */
         result_t DeterminePhysicalDevice(uint32_t deviceIndex = 0,
                                          bool enableGraphicsQueue = true,
                                          bool enableComputeQueue = true) {
@@ -723,9 +765,6 @@ namespace vulkan {
             physicalDevice = availablePhysicalDevices[deviceIndex];
             return VK_SUCCESS;
         }
-        /** @brief 创建逻辑设备
-         * @param flags 创建标志
-         * @return VK_SUCCESS 或错误码 */
         result_t CreateDevice(VkDeviceCreateFlags flags = 0) {
             float queuePriority = 1.f;
             VkDeviceQueueCreateInfo queueCreateInfos[3] = {
@@ -752,9 +791,7 @@ namespace vulkan {
                 queueFamilyIndex_compute != queueFamilyIndex_presentation)
                 queueCreateInfos[queueCreateInfoCount++].queueFamilyIndex =
                     queueFamilyIndex_compute;
-            VkPhysicalDeviceFeatures physicalDeviceFeatures;
-            vkGetPhysicalDeviceFeatures(physicalDevice,
-                                        &physicalDeviceFeatures);
+            GetPhysicalDeviceFeatures();
             VkDeviceCreateInfo deviceCreateInfo = {
                 .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                 .flags = flags,
@@ -762,14 +799,23 @@ namespace vulkan {
                 .pQueueCreateInfos = queueCreateInfos,
                 .enabledExtensionCount = uint32_t(deviceExtensions.size()),
                 .ppEnabledExtensionNames = deviceExtensions.data(),
-                .pEnabledFeatures = &physicalDeviceFeatures
             };
-            if (VkResult result = vkCreateDevice(
-                    physicalDevice, &deviceCreateInfo, nullptr, &device)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to create a vulkan logical "
-                    "device!\nError code: {}\n",
-                    string_VkResult(result));
+            void **ppNext = nullptr;
+            if (apiVersion >= VK_API_VERSION_1_1)
+                ppNext =
+                    SetPNext(pNext_deviceCreateInfo, &physicalDeviceFeatures);
+            else
+                deviceCreateInfo.pEnabledFeatures =
+                    &physicalDeviceFeatures.features;
+            deviceCreateInfo.pNext = pNext_deviceCreateInfo;
+            VkResult result = vkCreateDevice(physicalDevice, &deviceCreateInfo,
+                                             nullptr, &device);
+            if (ppNext)
+                *ppNext = nullptr; // Unset &physicalDeviceFeatures
+            if (result) {
+                std::println("[ graphicsBase ] ERROR\nFailed to create a "
+                             "logical device!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             if (queueFamilyIndex_graphics != VK_QUEUE_FAMILY_IGNORED)
@@ -781,19 +827,12 @@ namespace vulkan {
             if (queueFamilyIndex_compute != VK_QUEUE_FAMILY_IGNORED)
                 vkGetDeviceQueue(device, queueFamilyIndex_compute, 0,
                                  &queue_compute);
-            vkGetPhysicalDeviceProperties(physicalDevice,
-                                          &physicalDeviceProperties);
-            vkGetPhysicalDeviceMemoryProperties(
-                physicalDevice, &physicalDeviceMemoryProperties);
-            std::println("Renderer: {}\n", physicalDeviceProperties.deviceName);
+            GetPhysicalDeviceProperties();
+            std::println("Renderer: {}\n",
+                         physicalDeviceProperties.properties.deviceName);
             ExecuteCallbacks(callbacks_createDevice);
             return VK_SUCCESS;
         }
-
-        /** @brief 检查设备扩展是否可用，不可用则置为 nullptr
-         * @param extensionsToCheck 要检查的扩展名数组（会被修改）
-         * @param layerName 可为 nullptr 表示不限定层
-         * @return VK_SUCCESS 或错误码 */
         result_t CheckDeviceExtensions(arrayRef<const char *> extensionsToCheck,
                                        const char *layerName = nullptr) const {
             uint32_t extensionCount;
@@ -802,8 +841,8 @@ namespace vulkan {
                     physicalDevice, layerName, &extensionCount, nullptr)) {
                 layerName
                     ? std::println(
-                          "[ graphicsBase ] ERROR\nFailed to get the "
-                          "count of device extensions!\nLayer name: {}\n",
+                          "[ graphicsBase ] ERROR\nFailed to get the count of "
+                          "device extensions!\nLayer name: {}\n",
                           layerName)
                     : std::println("[ graphicsBase ] ERROR\nFailed to get the "
                                    "count of device extensions!\n");
@@ -836,29 +875,25 @@ namespace vulkan {
                     i = nullptr;
             return VK_SUCCESS;
         }
-
-        /** @brief 设置设备扩展列表（覆盖原有）
-         * @param extensionNames 扩展名列表 */
         void DeviceExtensions(const std::vector<const char *> &extensionNames) {
             deviceExtensions = extensionNames;
         }
-
-        /** @brief 获取 Surface 支持的格式列表
-         * @return VK_SUCCESS 或错误码 */
+        //                    Create Swapchain
+        void AddNextStructure_SwapchainCreateInfo(auto &next) {
+            SetPNext(const_cast<void *&>(swapchainCreateInfo.pNext), &next);
+        }
         result_t GetSurfaceFormats() {
             uint32_t surfaceFormatCount;
             if (VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(
                     physicalDevice, surface, &surfaceFormatCount, nullptr)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get the count of "
-                    "surface formats!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get the count "
+                             "of surface formats!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             if (!surfaceFormatCount)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to find any supported "
-                    "surface format!\n"),
+                std::println("[ graphicsBase ] ERROR\nFailed to find any "
+                             "supported surface format!\n"),
                     abort();
             availableSurfaceFormats.resize(surfaceFormatCount);
             VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -870,10 +905,6 @@ namespace vulkan {
                              string_VkResult(result));
             return result;
         }
-
-        /** @brief 设置交换链 Surface 格式
-         * @param surfaceFormat 格式与色彩空间，format 为 0 时自动选择
-         * @return VK_SUCCESS、VK_ERROR_FORMAT_NOT_SUPPORTED 或错误码 */
         result_t SetSurfaceFormat(VkSurfaceFormatKHR surfaceFormat) {
             bool formatIsAvailable = false;
             if (!surfaceFormat.format) {
@@ -899,20 +930,15 @@ namespace vulkan {
                 return RecreateSwapchain();
             return VK_SUCCESS;
         }
-        /** @brief 创建交换链
-         * @param limitFrameRate true 使用 FIFO，false 优先使用 MAILBOX
-         * @param flags 创建标志
-         * @return VK_SUCCESS 或错误码 */
         result_t CreateSwapchain(bool limitFrameRate = true,
                                  VkSwapchainCreateFlagsKHR flags = 0) {
             // Get surface capabilities
             VkSurfaceCapabilitiesKHR surfaceCapabilities = {};
             if (VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
                     physicalDevice, surface, &surfaceCapabilities)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get physical device "
-                    "surface capabilities!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get physical "
+                             "device surface capabilities!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             // Set image count
@@ -991,25 +1017,23 @@ namespace vulkan {
             if (VkResult result = vkGetPhysicalDeviceSurfacePresentModesKHR(
                     physicalDevice, surface, &surfacePresentModeCount,
                     nullptr)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get the count of "
-                    "surface present modes!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get the count "
+                             "of surface present modes!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             if (!surfacePresentModeCount)
-                std::println("[ graphicsBase ] ERROR\nFailed to "
-                             "find any surface present mode!\n"),
+                std::println("[ graphicsBase ] ERROR\nFailed to find any "
+                             "surface present mode!\n"),
                     abort();
             std::vector<VkPresentModeKHR> surfacePresentModes(
                 surfacePresentModeCount);
             if (VkResult result = vkGetPhysicalDeviceSurfacePresentModesKHR(
                     physicalDevice, surface, &surfacePresentModeCount,
                     surfacePresentModes.data())) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get surface present "
-                    "modes!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get surface "
+                             "present modes!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             // Set present mode to mailbox if available and necessary
@@ -1036,7 +1060,7 @@ namespace vulkan {
             return VK_SUCCESS;
         }
 
-        /** @brief 终止 Vulkan，清理所有资源（析构后保留句柄可重用） */
+        //                    After Initialization
         void Terminate() {
             this->~graphicsBase();
             instance = VK_NULL_HANDLE;
@@ -1047,10 +1071,6 @@ namespace vulkan {
             swapchainCreateInfo = {};
             debugMessenger = VK_NULL_HANDLE;
         }
-
-        /** @brief 销毁并重新创建逻辑设备
-         * @param flags 创建标志
-         * @return VK_SUCCESS 或错误码 */
         result_t RecreateDevice(VkDeviceCreateFlags flags = 0) {
             if (device) {
                 if (VkResult result = WaitIdle();
@@ -1072,17 +1092,13 @@ namespace vulkan {
             }
             return CreateDevice(flags);
         }
-
-        /** @brief 重建交换链（窗口尺寸变化时调用）
-         * @return VK_SUCCESS、VK_SUBOPTIMAL_KHR 或错误码 */
         result_t RecreateSwapchain() {
             VkSurfaceCapabilitiesKHR surfaceCapabilities = {};
             if (VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
                     physicalDevice, surface, &surfaceCapabilities)) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to get physical device "
-                    "surface capabilities!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to get physical "
+                             "device surface capabilities!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
             if (surfaceCapabilities.currentExtent.width == 0 ||
@@ -1094,10 +1110,9 @@ namespace vulkan {
             if (!result && queue_graphics != queue_presentation)
                 result = vkQueueWaitIdle(queue_presentation);
             if (result) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to wait for the queue to "
-                    "be idle!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to wait for the "
+                             "queue to be idle!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
 
@@ -1111,20 +1126,14 @@ namespace vulkan {
             ExecuteCallbacks(callbacks_createSwapchain);
             return VK_SUCCESS;
         }
-        /** @brief 等待设备所有操作完成
-         * @return VK_SUCCESS 或错误码 */
         result_t WaitIdle() const {
             VkResult result = vkDeviceWaitIdle(device);
             if (result)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to wait for the device to "
-                    "be idle!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to wait for the "
+                             "device to be idle!\nError code: {}\n",
+                             string_VkResult(result));
             return result;
         }
-        /** @brief 获取下一帧交换链图像
-         * @param semaphore_imageIsAvailable 图像就绪时触发的信号量
-         * @return VK_SUCCESS 或错误码 */
         result_t SwapImage(VkSemaphore semaphore_imageIsAvailable) {
             if (swapchainCreateInfo.oldSwapchain &&
                 swapchainCreateInfo.oldSwapchain != swapchain) {
@@ -1143,19 +1152,13 @@ namespace vulkan {
                         return result;
                     break;
                 default:
-                    std::println(
-                        "[ graphicsBase ] ERROR\nFailed to acquire the next "
-                        "image!\nError code: {}\n",
-                        string_VkResult(result));
+                    std::println("[ graphicsBase ] ERROR\nFailed to acquire "
+                                 "the next image!\nError code: {}\n",
+                                 string_VkResult(result));
                     return result;
                 }
             return VK_SUCCESS;
         }
-
-        /** @brief 向图形队列提交 VkSubmitInfo
-         * @param submitInfo 提交信息
-         * @param fence 可选的栅栏
-         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Graphics(VkSubmitInfo &submitInfo,
                                      VkFence fence = VK_NULL_HANDLE) const {
@@ -1163,20 +1166,11 @@ namespace vulkan {
             VkResult result =
                 vkQueueSubmit(queue_graphics, 1, &submitInfo, fence);
             if (result)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to submit the command "
-                    "buffer!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to submit the "
+                             "command buffer!\nError code: {}\n",
+                             string_VkResult(result));
             return result;
         }
-
-        /** @brief 向图形队列提交命令缓冲区（便捷重载）
-         * @param commandBuffer 命令缓冲区
-         * @param semaphore_imageIsAvailable 等待的图像就绪信号量
-         * @param semaphore_renderingIsOver 渲染完成时触发的信号量
-         * @param fence 可选的栅栏
-         * @param waitDstStage_imageIsAvailable 图像就绪等待阶段
-         * @return VK_SUCCESS 或错误码 */
         result_t SubmitCommandBuffer_Graphics(
             VkCommandBuffer commandBuffer,
             VkSemaphore semaphore_imageIsAvailable = VK_NULL_HANDLE,
@@ -1195,11 +1189,6 @@ namespace vulkan {
                 submitInfo.pSignalSemaphores = &semaphore_renderingIsOver;
             return SubmitCommandBuffer_Graphics(submitInfo, fence);
         }
-
-        /** @brief 向图形队列提交命令缓冲区（无信号量）
-         * @param commandBuffer 命令缓冲区
-         * @param fence 可选的栅栏
-         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Graphics(VkCommandBuffer commandBuffer,
                                      VkFence fence = VK_NULL_HANDLE) const {
@@ -1207,11 +1196,6 @@ namespace vulkan {
                                         .pCommandBuffers = &commandBuffer };
             return SubmitCommandBuffer_Graphics(submitInfo, fence);
         }
-
-        /** @brief 向计算队列提交 VkSubmitInfo
-         * @param submitInfo 提交信息
-         * @param fence 可选的栅栏
-         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Compute(VkSubmitInfo &submitInfo,
                                     VkFence fence = VK_NULL_HANDLE) const {
@@ -1219,17 +1203,11 @@ namespace vulkan {
             VkResult result =
                 vkQueueSubmit(queue_compute, 1, &submitInfo, fence);
             if (result)
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to submit the command "
-                    "buffer!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to submit the "
+                             "command buffer!\nError code: {}\n",
+                             string_VkResult(result));
             return result;
         }
-
-        /** @brief 向计算队列提交命令缓冲区
-         * @param commandBuffer 命令缓冲区
-         * @param fence 可选的栅栏
-         * @return VK_SUCCESS 或错误码 */
         result_t
         SubmitCommandBuffer_Compute(VkCommandBuffer commandBuffer,
                                     VkFence fence = VK_NULL_HANDLE) const {
@@ -1237,52 +1215,31 @@ namespace vulkan {
                                         .pCommandBuffers = &commandBuffer };
             return SubmitCommandBuffer_Compute(submitInfo, fence);
         }
-
-        /** @brief 向呈现队列提交命令缓冲区
-         * @param commandBuffer 命令缓冲区
-         * @param semaphore_renderingIsOver 等待的渲染完成信号量
-         * @param semaphore_ownershipIsTransfered 所有权转移完成时触发的信号量
-         * @param fence 可选的栅栏
-         * @return VK_SUCCESS 或错误码 */
         result_t SubmitCommandBuffer_Presentation(
             VkCommandBuffer commandBuffer,
             VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE,
             VkSemaphore semaphore_ownershipIsTransfered = VK_NULL_HANDLE,
             VkFence fence = VK_NULL_HANDLE) const {
-
             static constexpr VkPipelineStageFlags waitDstStage =
                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-
-            VkSubmitInfo submitInfo { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                                      .commandBufferCount = 1,
-                                      .pCommandBuffers = &commandBuffer };
-
-            if (semaphore_renderingIsOver) {
-                submitInfo.waitSemaphoreCount = 1;
-                submitInfo.pWaitSemaphores = &semaphore_renderingIsOver;
+            VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                                        .commandBufferCount = 1,
+                                        .pCommandBuffers = &commandBuffer };
+            if (semaphore_renderingIsOver)
+                submitInfo.waitSemaphoreCount = 1,
+                submitInfo.pWaitSemaphores = &semaphore_renderingIsOver,
                 submitInfo.pWaitDstStageMask = &waitDstStage;
-            }
-
-            if (semaphore_ownershipIsTransfered) {
-                submitInfo.signalSemaphoreCount = 1;
+            if (semaphore_ownershipIsTransfered)
+                submitInfo.signalSemaphoreCount = 1,
                 submitInfo.pSignalSemaphores = &semaphore_ownershipIsTransfered;
-            }
-
             VkResult result =
                 vkQueueSubmit(queue_presentation, 1, &submitInfo, fence);
-
-            if (result) {
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to submit the presentation "
-                    "command buffer!\nError code: {}\n",
-                    string_VkResult(result));
-            }
-
+            if (result)
+                std::println("[ graphicsBase ] ERROR\nFailed to submit the "
+                             "presentation command buffer!\nError code: {}\n",
+                             string_VkResult(result));
             return result;
         }
-
-        /** @brief 在命令缓冲区中记录交换链图像队列族所有权转移（图形→呈现）
-         * @param commandBuffer 录制中的命令缓冲区 */
         void CmdTransferImageOwnership(VkCommandBuffer commandBuffer) const {
             VkImageMemoryBarrier imageMemoryBarrier_g2p = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1295,16 +1252,11 @@ namespace vulkan {
                 .image = swapchainImages[currentImageIndex],
                 .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
             };
-
             vkCmdPipelineBarrier(
                 commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
                 1, &imageMemoryBarrier_g2p);
         }
-
-        /** @brief 呈现到屏幕（使用 VkPresentInfoKHR）
-         * @param presentInfo 呈现信息
-         * @return VK_SUCCESS 或错误码 */
         result_t PresentImage(VkPresentInfoKHR &presentInfo) {
             presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
             switch (VkResult result =
@@ -1313,17 +1265,12 @@ namespace vulkan {
             case VK_SUBOPTIMAL_KHR:
             case VK_ERROR_OUT_OF_DATE_KHR: return RecreateSwapchain();
             default:
-                std::println(
-                    "[ graphicsBase ] ERROR\nFailed to queue the image for "
-                    "presentation!\nError code: {}\n",
-                    string_VkResult(result));
+                std::println("[ graphicsBase ] ERROR\nFailed to queue the "
+                             "image for presentation!\nError code: {}\n",
+                             string_VkResult(result));
                 return result;
             }
         }
-
-        /** @brief 呈现当前帧到屏幕（便捷重载）
-         * @param semaphore_renderingIsOver 等待的渲染完成信号量
-         * @return VK_SUCCESS 或错误码 */
         result_t
         PresentImage(VkSemaphore semaphore_renderingIsOver = VK_NULL_HANDLE) {
             VkPresentInfoKHR presentInfo = { .swapchainCount = 1,
@@ -1337,8 +1284,12 @@ namespace vulkan {
         }
 
         // Static Function
-        /** @brief 获取 graphicsBase 单例引用 */
         static constexpr graphicsBase &Base() { return singleton; }
+        static graphicsBasePlus &Plus() { return *singleton.pPlus; }
+        static void Plus(graphicsBasePlus &plus) {
+            if (!singleton.pPlus)
+                singleton.pPlus = &plus;
+        }
     };
 
     /**

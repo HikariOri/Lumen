@@ -17,7 +17,7 @@ using namespace vulkan;
 
 descriptorSetLayout descriptorSetLayout_triangle;
 pipelineLayout pipelineLayout_triangle;
-pipeline pipeline_texture;
+pipeline pipeline_triangle;
 
 /**
  * @brief 获取屏幕渲染通道和帧缓冲（静态缓存，避免重复创建）
@@ -60,8 +60,8 @@ void CreateLayout() {
  * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
  */
 void CreatePipeline() {
-    static shaderModule vert("shaders/glsl/UniformBuffer.vert.spv");
-    static shaderModule frag("shaders/glsl/UniformBuffer.frag.spv");
+    static shaderModule vert("shaders/glsl/FirstTriangle.vert.spv");
+    static shaderModule frag("shaders/glsl/FirstTriangle.frag.spv");
 
     static VkPipelineShaderStageCreateInfo
         shaderStageCreateInfos_triangle[2] = {
@@ -72,33 +72,13 @@ void CreatePipeline() {
     auto Create = [] {
         graphicsPipelineCreateInfoPack pipelineCiPack;
         pipelineCiPack.createInfo.layout = pipelineLayout_triangle;
-        pipelineCiPack.createInfo.renderPass =
-            RenderPassAndFramebuffers().renderPass;
-
-        // 照抄Ch7-1
-        // 数据来自0号顶点缓冲区，输入频率是逐顶点输入
-        pipelineCiPack.vertexInputBindings.emplace_back(
-            0, sizeof(vertex), VK_VERTEX_INPUT_RATE_VERTEX);
-        // location为0，数据来自0号顶点缓冲区，vec2对应VK_FORMAT_R32G32_SFLOAT
-        pipelineCiPack.vertexInputAttributes.emplace_back(
-            0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, position));
-        // location为1，数据来自0号顶点缓冲区，vec4对应VK_FORMAT_R32G32B32A32_SFLOAT
-        pipelineCiPack.vertexInputAttributes.emplace_back(
-            1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(vertex, color));
-
-        // 数据来自1号顶点缓冲区，输入频率是逐实例输入
-        pipelineCiPack.vertexInputBindings.emplace_back(
-            1, sizeof(glm::vec2), VK_VERTEX_INPUT_RATE_INSTANCE);
-        // location为 2，数据来自 1 号顶点缓冲区，vec2 对应
-        // VK_FORMAT_R32G32_SFLOAT
-        pipelineCiPack.vertexInputAttributes.emplace_back(
-            2, 1, VK_FORMAT_R32G32_SFLOAT, 0);
-
+        // pipelineCiPack.createInfo.renderPass =
+        // RenderPassAndFramebuffers().renderPass;
         pipelineCiPack.inputAssemblyStateCi.topology =
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        pipelineCiPack.viewports.emplace_back(
-            0.0F, 0.0F, float(windowSize.width), float(windowSize.height), 0.0F,
-            1.0F);
+        pipelineCiPack.viewports.emplace_back(0.F, 0.F, float(windowSize.width),
+                                              float(windowSize.height), 0.f,
+                                              1.f);
         pipelineCiPack.scissors.emplace_back(VkOffset2D {}, windowSize);
         pipelineCiPack.multisampleStateCi.rasterizationSamples =
             VK_SAMPLE_COUNT_1_BIT;
@@ -107,10 +87,11 @@ void CreatePipeline() {
         pipelineCiPack.UpdateAllArrays();
         pipelineCiPack.createInfo.stageCount = 2;
         pipelineCiPack.createInfo.pStages = shaderStageCreateInfos_triangle;
-        pipeline_texture.Create(pipelineCiPack);
+
+        pipeline_triangle.Create(pipelineCiPack);
     };
 
-    auto Destroy = [] { pipeline_texture.~pipeline(); };
+    auto Destroy = [] { pipeline_triangle.~pipeline(); };
 
     graphicsBase::Base().AddCallback_CreateSwapchain(Create);
     graphicsBase::Base().AddCallback_DestroySwapchain(Destroy);
@@ -123,7 +104,37 @@ void CreatePipeline() {
  * @return 0 正常退出，-1 初始化失败
  */
 int main() {
-    if (!InitializeWindow({ 1280, 720 })) {
+    PFN_vkCmdBeginRenderingKHR vkCmdBeginRendering = ::vkCmdBeginRendering;
+    PFN_vkCmdEndRenderingKHR vkCmdEndRendering = ::vkCmdEndRendering;
+
+    graphicsBase::Base().UseLatestApiVersion();
+    if (graphicsBase::Base().ApiVersion() < VK_API_VERSION_1_2) {
+        return -1;
+    }
+
+    if (graphicsBase::Base().ApiVersion() < VK_API_VERSION_1_3) {
+        graphicsBase::Base().AddDeviceExtension(
+            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+        VkPhysicalDeviceDynamicRenderingFeatures
+            physicalDeviceDynamicRenderingFeatures = {
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+            };
+        graphicsBase::Base().AddNextStructure_PhysicalDeviceFeatures(
+            physicalDeviceDynamicRenderingFeatures);
+        if (!InitializeWindow({ 1280, 720 }) ||
+            !physicalDeviceDynamicRenderingFeatures.dynamicRendering) {
+            return -1;
+        }
+        vkCmdBeginRendering =
+            reinterpret_cast<PFN_vkCmdBeginRenderingKHR>(vkGetDeviceProcAddr(
+                graphicsBase::Base().Device(), "vkCmdBeginRenderingKHR"));
+        vkCmdEndRendering =
+            reinterpret_cast<PFN_vkCmdEndRenderingKHR>(vkGetDeviceProcAddr(
+                graphicsBase::Base().Device(), "vkCmdEndRenderingKHR"));
+    } else if (!InitializeWindow({ 1280, 720 }) ||
+               !graphicsBase::Base()
+                    .PhysicalDeviceVulkan13Features()
+                    .dynamicRendering) {
         return -1;
     }
 
@@ -171,8 +182,8 @@ int main() {
     vertexBuffer vertexBuffer(sizeof vertices);
     vertexBuffer.TransferData(vertices);
 
-    glm::vec2 uniform_positions[] = { { .0f, .0f }, {},           { -.5f, .0f },
-                                      {},           { .5f, .0f }, {} };
+    glm::vec2 uniform_positions[] { { .0f, .0f }, {},           { -.5f, .0f },
+                                    {},           { .5f, .0f }, {} };
     uniformBuffer uniformBuffer(sizeof uniform_positions);
     uniformBuffer.TransferData(uniform_positions);
 
@@ -196,44 +207,61 @@ int main() {
         auto i = graphicsBase::Base().CurrentImageIndex();
 
         commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-        renderPass.CmdBegin(commandBuffer, framebuffers[i], { {}, windowSize },
-                            clearColor);
-        VkDeviceSize offset {};
+        // 渲染开始前的内存屏障
+        VkImageMemoryBarrier imageMemoryBarrier {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = graphicsBase::Base().SwapchainImage(i),
+            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
 
-        // vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffer.Address(),
-        //                        &offset);
-        // vkCmdBindVertexBuffers(commandBuffer, 0, 1,
-        //                        vertexBuffer_perVertex.Address(), &offset);
-        // vkCmdBindVertexBuffers(commandBuffer, 1, 1,
-        //                        vertexBuffer_perInstance.Address(), &offset);
+        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0,
+                             nullptr, 1, &imageMemoryBarrier);
 
-        // VkBuffer buffers[1] { vertexBuffer,
-        //  };
-        // VkDeviceSize offset {};
+        VkRenderingAttachmentInfo colorAttachmentInfo = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = graphicsBase::Base().SwapchainImageView(i),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = { .color = { 1.F, 0.F, 0.F, 1.F } }
+        };
 
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffer.Address(),
-                               &offset);
+        VkRenderingInfo renderingInfo { .sType =
+                                            VK_STRUCTURE_TYPE_RENDERING_INFO,
+                                        .renderArea = { {}, windowSize },
+                                        .layerCount = 1,
+                                        .colorAttachmentCount = 1,
+                                        .pColorAttachments =
+                                            &colorAttachmentInfo };
+
+        vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipeline_texture);
+                          pipeline_triangle);
 
-        // vkCmdBindDescriptorSets(commandBuffer,
-        // VK_PIPELINE_BIND_POINT_GRAPHICS,
-        //                         pipelineLayout_texture, 0, 1,
-        //                         descriptorSet_texture.Address(), 0, nullptr);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
-        // vkCmdPushConstants(commandBuffer, pipelineLayout_triangle,
-        //                    VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof
-        //                    pushConstants, &pushConstants);
+        vkCmdEndRendering(commandBuffer);
 
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout_triangle, 0, 1,
-                                descriptorSet_trianglePosition.Address(), 0,
-                                nullptr);
+        // 渲染结束后的内存屏障
+        imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        imageMemoryBarrier.dstAccessMask = 0;
+        imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-        vkCmdDraw(commandBuffer, 3, 3, 0, 0);
-
-        renderPass.CmdEnd(commandBuffer);
+        vkCmdPipelineBarrier(
+            commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_DEPENDENCY_BY_REGION_BIT,
+            0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
         commandBuffer.End();
 
         graphicsBase::Base().SubmitCommandBuffer_Graphics(
