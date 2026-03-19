@@ -68,7 +68,7 @@ int main() {
 
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
-    winConfig.title = "LearnVulkan Sandbox - 三角形";
+    winConfig.title = "LearnVulkan Sandbox - 彩色矩形";
     winConfig.width = 800;
     winConfig.height = 600;
 
@@ -112,7 +112,8 @@ int main() {
         LUMEN_APP_LOG_ERROR("Swapchain 创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("Swapchain 创建成功, {} 张图像", swapchain.image_count());
+    LUMEN_APP_LOG_INFO("Swapchain 创建成功, {} 张图像",
+                       swapchain.image_count());
 
     // RenderPass（无深度，与 Swapchain 格式匹配）
     lumen::render::RenderPassConfig rpConfig;
@@ -146,11 +147,16 @@ int main() {
         return -1;
     }
 
-    const std::array<Vertex, 3> vertices = { {
-        { { 0.0f, -0.5f }, { 1.0f, 0.75f, 0.85f, 1.0f } },   // 珊瑚粉
-        { { -0.5f, 0.5f }, { 1.0f, 0.7f, 0.9f, 1.0f } },    // 玫粉
-        { { 0.5f, 0.5f }, { 0.95f, 0.8f, 0.95f, 1.0f } },   // 薰衣草粉
+    // 矩形 4 个顶点（左下、左上、右上、右下）
+    const std::array<Vertex, 4> vertices = { {
+        { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f, 1.0f } }, // 左下 红
+        { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 左上 绿
+        { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f, 1.0f } },   // 右上 蓝
+        { { 0.5f, -0.5f }, { 1.0f, 1.0f, 0.0f, 1.0f } },  // 右下 黄
     } };
+
+    // 索引：两个三角形组成矩形（0,1,2 和 0,2,3）
+    const std::array<uint16_t, 6> indices = { 0, 1, 2, 0, 2, 3 };
 
     lumen::render::VertexBuffer vertexBuffer;
     if (!vertexBuffer.create(ctx, sizeof(vertices))) {
@@ -158,6 +164,14 @@ int main() {
         return -1;
     }
     vertexBuffer.upload(vertices.data(), sizeof(vertices));
+
+    lumen::render::IndexBuffer indexBuffer;
+    if (!indexBuffer.create(ctx, sizeof(indices))) {
+        LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
+        return -1;
+    }
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    indexBuffer.upload(indices.data(), sizeof(indices));
 
     // Per-frame UniformBuffer（避免多帧并发时覆盖）
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight> uniformBuffers;
@@ -251,8 +265,8 @@ int main() {
     }
 
     LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环");
-    float lastLoggedTime = -10.0f; // 用于限速调试日志
-    uint64_t frameCount = 0;       // 用于限速调试日志
+    float lastLoggedTime = -10.0f;        // 用于限速调试日志
+    uint64_t frameCount = 0;              // 用于限速调试日志
     constexpr uint64_t kLogInterval = 60; // 每 N 帧输出一次阶段日志
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
@@ -305,21 +319,23 @@ int main() {
             window.get_framebuffer_size(&fbWidth, &fbHeight);
             if (fbWidth > 0 && fbHeight > 0 &&
                 swapchain.resize(static_cast<uint32_t>(fbWidth),
-                                static_cast<uint32_t>(fbHeight))) {
-                framebuffers.create(ctx.device(), renderPass.handle(), swapchain,
-                                   VK_NULL_HANDLE);
+                                 static_cast<uint32_t>(fbHeight))) {
+                framebuffers.create(ctx.device(), renderPass.handle(),
+                                    swapchain, VK_NULL_HANDLE);
                 frameSync.create(ctx.device(), swapchain.image_count(),
-                                kMaxFramesInFlight);
-                LUMEN_APP_LOG_DEBUG("Swapchain 已重建 {}x{}", fbWidth, fbHeight);
+                                 kMaxFramesInFlight);
+                LUMEN_APP_LOG_DEBUG("Swapchain 已重建 {}x{}", fbWidth,
+                                    fbHeight);
             }
             needRecreateSwapchain = false;
             continue;
         }
 
-        // 只等待即将复用的 currentFrame 的 fence，避免等待从未被 submit 的 prevFrame
+        // 只等待即将复用的 currentFrame 的 fence，避免等待从未被 submit 的
+        // prevFrame
         if (doLog) {
             LUMEN_APP_LOG_DEBUG("[frame {}] 等待 fence curr={} ...", frameCount,
-                            currentFrame);
+                                currentFrame);
         }
         while (!frameSync.wait_fence(currentFrame, kFenceWaitTimeoutNs)) {
             if (pump_and_check_quit()) {
@@ -337,13 +353,14 @@ int main() {
             kAcquireTimeoutNs);
         if (imageIndex == UINT32_MAX) {
             if (doLog) {
-                LUMEN_APP_LOG_DEBUG("[frame {}] acquire 失败/超时，跳过", frameCount);
+                LUMEN_APP_LOG_DEBUG("[frame {}] acquire 失败/超时，跳过",
+                                    frameCount);
             }
             continue;
         }
         if (doLog) {
             LUMEN_APP_LOG_DEBUG("[frame {}] acquired imageIndex={}", frameCount,
-                            imageIndex);
+                                imageIndex);
         }
 
         vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
@@ -354,7 +371,8 @@ int main() {
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
             VK_SUCCESS) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] vkBeginCommandBuffer 失败", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] vkBeginCommandBuffer 失败",
+                                frameCount);
             continue;
         }
 
@@ -407,12 +425,15 @@ int main() {
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
         vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdDraw(cmdBuffers[currentFrame], 3, 1, 0, 0);
+        vkCmdBindIndexBuffer(cmdBuffers[currentFrame], indexBuffer.handle(), 0,
+                             indexBuffer.vk_index_type());
+        vkCmdDrawIndexed(cmdBuffers[currentFrame], 6, 1, 0, 0, 0);
 
         vkCmdEndRenderPass(cmdBuffers[currentFrame]);
 
         if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] vkEndCommandBuffer 失败", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] vkEndCommandBuffer 失败",
+                                frameCount);
             continue;
         }
 
@@ -448,9 +469,10 @@ int main() {
                               frameSync.render_finished(imageIndex));
         if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
             needRecreateSwapchain = true;
-        } else if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR) {
+        } else if (presentResult != VK_SUCCESS &&
+                   presentResult != VK_SUBOPTIMAL_KHR) {
             LUMEN_APP_LOG_DEBUG("[frame {}] Present 失败 result={}", frameCount,
-                            static_cast<int>(presentResult));
+                                static_cast<int>(presentResult));
         }
 
         if (doLog) {
