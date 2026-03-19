@@ -31,6 +31,10 @@ int main() {
   - 2.3 [用 std::string_view 替代 char*](#23-用-stdstring_view-替代-char)
   - 2.4 [用 optional/expected 替代 int 错误码](#24-用-optionalexpected-替代-int-错误码)
   - 2.5 [RAII 资源管理](#25-raii-资源管理)
+  - 2.6 [emplace_back 就地构造](#26-emplace_back-就地构造)
+  - 2.7 [Ranges 与算法](#27-ranges-与算法)
+  - 2.8 [Range views 惰性视图](#28-range-views-惰性视图)
+  - 2.9 [Concepts 概念约束](#29-concepts-概念约束)
 - 三、配置文件
   - 3.0 [Clang-Format 配置](./clang-format.md)
   - 3.1 [Clang-Tidy 配置](./clang-tidy.md)
@@ -273,6 +277,129 @@ void read_file(std::string_view path) {
 void with_lock() {
     std::mutex m;
     std::lock_guard lock { m };
+}
+```
+
+### 2.6 emplace_back 就地构造
+
+> 使用 `emplace_back` 在容器末尾就地构造元素，避免临时对象拷贝或移动
+
+- **推荐**：构造开销较大的类型；需要多参数构造时
+- **避免**：简单类型（如 `int`）用 `push_back` 即可
+
+```cpp
+#include <vector>
+#include <string>
+
+struct Item {
+    int id;
+    std::string name;
+    Item(int i, std::string n) : id { i }, name { std::move(n) } {}
+};
+
+void example() {
+    std::vector<Item> items;
+    items.emplace_back(1, "foo");           // 就地构造，无临时对象
+    items.emplace_back(2, std::string { "bar" });
+    // 避免: items.push_back(Item { 1, "foo" });  // 产生临时对象
+}
+```
+
+### 2.7 Ranges 与算法
+
+> 使用 `std::ranges` 命名空间下的算法，支持 range 作为整体操作，更简洁
+
+- **推荐**：替代 `std::` 算法时；需要链式、声明式风格时
+- **常用**：`ranges::sort`, `ranges::find_if`, `ranges::transform`, `ranges::copy_if`
+
+```cpp
+#include <algorithm>
+#include <ranges>
+#include <vector>
+
+void example() {
+    std::vector<int> v { 5, 2, 8, 1, 9 };
+    std::ranges::sort(v);
+    auto it = std::ranges::find_if(v, [](int x) { return x > 5; });
+
+    // 投影 (projection)：按成员排序
+    struct Person { std::string name; int age; };
+    std::vector<Person> people { { "Bob", 30 }, { "Alice", 25 } };
+    std::ranges::sort(people, {}, &Person::age);  // 按 age 升序
+}
+```
+
+### 2.8 Range views 惰性视图
+
+> 使用 `std::views` 创建惰性、非拥有的 range 视图，不复制数据，按需计算
+
+- **特点**：零拷贝、惰性求值、可组合
+- **常用**：`views::filter`, `views::transform`, `views::take`, `views::drop`, `views::reverse`
+
+```cpp
+#include <ranges>
+#include <vector>
+#include <print>
+
+namespace v = std::views;
+
+void example() {
+    std::vector<int> nums { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+
+    // 取偶数，平方，取前 3 个
+    auto result = nums
+        | v::filter([](int x) { return x % 2 == 0; })
+        | v::transform([](int x) { return x * x; })
+        | v::take(3);
+
+    for (int x : result) {
+        std::println("{}", x);  // 4, 16, 36
+    }
+
+    // 跳过前 2 个，反转
+    for (int x : nums | v::drop(2) | v::reverse) {
+        // 7, 6, 5, 4, 3
+    }
+}
+```
+
+### 2.9 Concepts 概念约束
+
+> 使用 `concept` 约束模板参数，提升可读性和编译期错误信息
+
+- **推荐**：约束泛型接口；表达「可调用」「可迭代」等语义
+- **常用**：`std::integral`, `std::floating_point`, `std::ranges::range`, `std::invocable`
+
+```cpp
+#include <concepts>
+#include <ranges>
+#include <vector>
+
+// 自定义 concept
+template <typename T>
+concept Addable = requires(T a, T b) {
+    { a + b } -> std::convertible_to<T>;
+};
+
+template <Addable T>
+T sum(T a, T b) {
+    return a + b;
+}
+
+// 约束 range 元素类型
+template <std::ranges::range R>
+    requires std::integral<std::ranges::range_value_t<R>>
+auto sum_range(const R& r) {
+    std::ranges::range_value_t<R> total {};
+    for (auto x : r) total += x;
+    return total;
+}
+
+// std::invocable 约束回调
+template <typename F>
+    requires std::invocable<F, int>
+void apply(int x, F&& f) {
+    std::forward<F>(f)(x);
 }
 ```
 
