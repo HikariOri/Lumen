@@ -1,5 +1,0 @@
-add_subdirectory(vkguide_chapter000)
-add_subdirectory(vkguide_chapter001)
-add_subdirectory(vkguide_chapter002)
-add_subdirectory(vkguide_shared)
-
