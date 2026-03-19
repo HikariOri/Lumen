@@ -15,9 +15,16 @@
 #include "render/swapchain.hpp"
 
 #include <SDL3/SDL.h>
+#include <glm/glm.hpp>
+
+struct Vertex {
+    glm::vec2 position;
+    glm::vec4 color;
+};
 #include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <string>
 
@@ -131,6 +138,19 @@ int main() {
         return -1;
     }
 
+    const std::array<Vertex, 3> vertices = { {
+        { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f, 1.0f } },   // 红
+        { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 绿
+        { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f, 1.0f } },   // 蓝
+    } };
+
+    lumen::render::VertexBuffer vertexBuffer;
+    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+        LUMEN_LOG_ERROR("VertexBuffer 创建失败");
+        return -1;
+    }
+    vertexBuffer.upload(vertices.data(), sizeof(vertices));
+
     // PipelineLayout（无 descriptor/push constant）
     lumen::render::PipelineLayout pipelineLayout;
     if (!pipelineLayout.create(ctx, {}, {})) {
@@ -144,8 +164,12 @@ int main() {
         { vertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
     pipeConfig.stages.push_back(
         { fragShader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
-    pipeConfig.vertexBindings = {};
-    pipeConfig.vertexAttributes = {};
+    pipeConfig.vertexBindings.push_back(
+        { 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX });
+    pipeConfig.vertexAttributes.push_back(
+        { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, position) });
+    pipeConfig.vertexAttributes.push_back(
+        { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, color) });
     pipeConfig.depthTest = false;
     pipeConfig.depthWrite = false;
     pipeConfig.cullMode = VK_CULL_MODE_NONE;
@@ -277,6 +301,9 @@ int main() {
 
         vkCmdBindPipeline(cmdBuffers[currentFrame],
                           VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+        VkBuffer vb = vertexBuffer.handle();
+        VkDeviceSize vbOffset { 0 };
+        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
         vkCmdDraw(cmdBuffers[currentFrame], 3, 1, 0, 0);
 
         vkCmdEndRenderPass(cmdBuffers[currentFrame]);
