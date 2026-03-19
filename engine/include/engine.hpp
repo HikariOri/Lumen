@@ -12,5 +12,8 @@
 #pragma once
 
 #include "core/logger.hpp"
+#include "platform/event.hpp"
+#include "platform/event_pump.hpp"
+#include "platform/input.hpp"
 #include "platform/window.hpp"
 #include "render/render.hpp"

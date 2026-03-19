@@ -69,7 +69,16 @@ int main() {
 
     LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环");
 
-    while (window.poll_events()) {
+    lumen::platform::EventPump pump;
+    lumen::platform::EventList events;
+    lumen::platform::Input input;
+    while (pump.poll(events, input)) {
+        for (const auto& e : events) {
+            if (std::holds_alternative<lumen::platform::EventWindowResize>(e)) {
+                const auto& r = std::get<lumen::platform::EventWindowResize>(e);
+                LUMEN_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
+            }
+        }
         // TODO: 渲染
     }
 

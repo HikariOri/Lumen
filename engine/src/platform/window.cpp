@@ -4,6 +4,7 @@
  */
 
 #include "platform/window.hpp"
+#include "platform/event_pump.hpp"
 #include "core/logger.hpp"
 
 #include <SDL3/SDL.h>
@@ -71,13 +72,10 @@ namespace lumen::platform {
     }
 
     bool Window::poll_events() {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                return false;
-            }
-        }
-        return true;
+        EventPump pump;
+        EventList events;
+        Input input;
+        return pump.poll(events, input);
     }
 
     uint32_t Window::width() const {
