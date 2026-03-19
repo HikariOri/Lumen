@@ -1,6 +1,7 @@
 #version 460
 #pragma shader_stage(fragment)
 
+<<<<<<< HEAD
 layout(location = 0) in vec2 i_TexCoord;
 layout(location = 0) out vec4 o_Color;
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -14,4 +15,10 @@ void main() {
     o_Color = texture(u_Texture, i_TexCoord);
     o_Color.g = texture(u_Texture, i_TexCoord + 8 / canvasSize).r;
     o_Color.b = texture(u_Texture, i_TexCoord - 8 / canvasSize).r;
+=======
+layout(location = 0) out vec4 o_Color;
+
+void main() {
+    o_Color = vec4(0, 0.5, 1, 1);
+>>>>>>> 828fd4f0d2f439a7f0baad72cfb4d0bd293cc720
 }

@@ -49,7 +49,11 @@ namespace easyVulkan {
                          VK_IMAGE_USAGE_SAMPLED_BIT |
                              VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
+<<<<<<< HEAD
         VkAttachmentDescription attachmentDescription {
+=======
+        VkAttachmentDescription attachmentDescription  {
+>>>>>>> 828fd4f0d2f439a7f0baad72cfb4d0bd293cc720
             .format = graphicsBase::Base().SwapchainCreateInfo().imageFormat,
             .samples = VK_SAMPLE_COUNT_1_BIT,
             .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
