@@ -111,6 +111,9 @@ namespace lumen::render {
     bool Framebuffer::create(VkDevice device, VkRenderPass renderPass,
                              const Swapchain &swapchain,
                              VkImageView depthImageView) {
+        if (!framebuffers_.empty()) {
+            destroy_();
+        }
         device_ = device;
         framebuffers_.resize(swapchain.image_count());
 

@@ -88,6 +88,9 @@ namespace lumen::render {
 
     bool FrameSync::create(VkDevice device, uint32_t swapchainImageCount,
                           uint32_t framesInFlight) {
+        if (!imageAvailable_.empty() || !inFlightFences_.empty()) {
+            destroy_();
+        }
         device_ = device;
         imageAvailable_.resize(swapchainImageCount);
         renderFinished_.resize(swapchainImageCount);

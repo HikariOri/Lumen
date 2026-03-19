@@ -58,12 +58,12 @@ namespace {
 int main() {
     lumen::core::LoggerConfig logConfig;
     logConfig.engine.level = spdlog::level::debug;
-    logConfig.app.level = spdlog::level::info;
+    logConfig.app.level = spdlog::level::debug;
     if (!lumen::core::Logger::init(logConfig)) {
         return -1;
     }
 
-    LUMEN_LOG_INFO("Sandbox 启动");
+    LUMEN_APP_LOG_INFO("Sandbox 启动");
     LUMEN_APP_LOG_INFO("应用层日志测试");
 
     lumen::platform::Window window;
@@ -73,10 +73,10 @@ int main() {
     winConfig.height = 600;
 
     if (!window.create(winConfig)) {
-        LUMEN_LOG_ERROR("窗口创建失败");
+        LUMEN_APP_LOG_ERROR("窗口创建失败");
         return -1;
     }
-    LUMEN_LOG_INFO("窗口创建成功: {}x{}", window.width(), window.height());
+    LUMEN_APP_LOG_INFO("窗口创建成功: {}x{}", window.width(), window.height());
 
     auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctxConfig;
@@ -84,24 +84,24 @@ int main() {
 
     lumen::render::Context ctx;
     if (!ctx.init_instance(ctxConfig)) {
-        LUMEN_LOG_ERROR("Vulkan Instance 创建失败");
+        LUMEN_APP_LOG_ERROR("Vulkan Instance 创建失败");
         return -1;
     }
-    LUMEN_LOG_INFO("Vulkan Instance 创建成功");
+    LUMEN_APP_LOG_INFO("Vulkan Instance 创建成功");
 
     lumen::render::Surface surface(
         ctx.instance(), window.create_vulkan_surface(ctx.instance()));
     if (!surface.is_valid()) {
-        LUMEN_LOG_ERROR("Vulkan Surface 创建失败");
+        LUMEN_APP_LOG_ERROR("Vulkan Surface 创建失败");
         return -1;
     }
-    LUMEN_LOG_INFO("Vulkan Surface 创建成功");
+    LUMEN_APP_LOG_INFO("Vulkan Surface 创建成功");
 
     if (!ctx.init_device(surface.handle())) {
-        LUMEN_LOG_ERROR("Vulkan Device 创建失败");
+        LUMEN_APP_LOG_ERROR("Vulkan Device 创建失败");
         return -1;
     }
-    LUMEN_LOG_INFO("Vulkan Device 创建成功");
+    LUMEN_APP_LOG_INFO("Vulkan Device 创建成功");
 
     int w { 0 }, h { 0 };
     window.get_framebuffer_size(&w, &h);
@@ -109,10 +109,10 @@ int main() {
     lumen::render::Swapchain swapchain;
     if (!swapchain.create(ctx, surface.handle(), static_cast<uint32_t>(w),
                           static_cast<uint32_t>(h))) {
-        LUMEN_LOG_ERROR("Swapchain 创建失败");
+        LUMEN_APP_LOG_ERROR("Swapchain 创建失败");
         return -1;
     }
-    LUMEN_LOG_INFO("Swapchain 创建成功, {} 张图像", swapchain.image_count());
+    LUMEN_APP_LOG_INFO("Swapchain 创建成功, {} 张图像", swapchain.image_count());
 
     // RenderPass（无深度，与 Swapchain 格式匹配）
     lumen::render::RenderPassConfig rpConfig;
@@ -120,7 +120,7 @@ int main() {
     rpConfig.colorAttachment.format = swapchain.image_format();
     lumen::render::RenderPass renderPass;
     if (!renderPass.create(ctx.device(), rpConfig)) {
-        LUMEN_LOG_ERROR("RenderPass 创建失败");
+        LUMEN_APP_LOG_ERROR("RenderPass 创建失败");
         return -1;
     }
 
@@ -128,7 +128,7 @@ int main() {
     lumen::render::Framebuffer framebuffers;
     if (!framebuffers.create(ctx.device(), renderPass.handle(), swapchain,
                              VK_NULL_HANDLE)) {
-        LUMEN_LOG_ERROR("Framebuffer 创建失败");
+        LUMEN_APP_LOG_ERROR("Framebuffer 创建失败");
         return -1;
     }
 
@@ -138,11 +138,11 @@ int main() {
     lumen::render::ShaderModule vertShader;
     lumen::render::ShaderModule fragShader;
     if (!vertShader.create_from_file(ctx.device(), vertPath.c_str())) {
-        LUMEN_LOG_ERROR("顶点着色器加载失败: {}", vertPath);
+        LUMEN_APP_LOG_ERROR("顶点着色器加载失败: {}", vertPath);
         return -1;
     }
     if (!fragShader.create_from_file(ctx.device(), fragPath.c_str())) {
-        LUMEN_LOG_ERROR("片段着色器加载失败: {}", fragPath);
+        LUMEN_APP_LOG_ERROR("片段着色器加载失败: {}", fragPath);
         return -1;
     }
 
@@ -154,7 +154,7 @@ int main() {
 
     lumen::render::VertexBuffer vertexBuffer;
     if (!vertexBuffer.create(ctx, sizeof(vertices))) {
-        LUMEN_LOG_ERROR("VertexBuffer 创建失败");
+        LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
     vertexBuffer.upload(vertices.data(), sizeof(vertices));
@@ -163,7 +163,7 @@ int main() {
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight> uniformBuffers;
     for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
         if (!uniformBuffers[i].create(ctx, sizeof(UBO))) {
-            LUMEN_LOG_ERROR("UniformBuffer[{}] 创建失败", i);
+            LUMEN_APP_LOG_ERROR("UniformBuffer[{}] 创建失败", i);
             return -1;
         }
     }
@@ -175,7 +175,7 @@ int main() {
           VK_SHADER_STAGE_FRAGMENT_BIT }
     };
     if (!descLayout.create(ctx, bindings)) {
-        LUMEN_LOG_ERROR("DescriptorSetLayout 创建失败");
+        LUMEN_APP_LOG_ERROR("DescriptorSetLayout 创建失败");
         return -1;
     }
 
@@ -184,14 +184,14 @@ int main() {
     if (!descPool.create(
             ctx, { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight } },
             kMaxFramesInFlight)) {
-        LUMEN_LOG_ERROR("DescriptorPool 创建失败");
+        LUMEN_APP_LOG_ERROR("DescriptorPool 创建失败");
         return -1;
     }
     std::array<VkDescriptorSet, kMaxFramesInFlight> descriptorSets {};
     for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
         if (!descPool.allocate(ctx.device(), descLayout.handle(),
                                descriptorSets[i])) {
-            LUMEN_LOG_ERROR("DescriptorSet[{}] 分配失败", i);
+            LUMEN_APP_LOG_ERROR("DescriptorSet[{}] 分配失败", i);
             return -1;
         }
         lumen::render::write_descriptor_buffer(
@@ -203,7 +203,7 @@ int main() {
     // PipelineLayout（含 descriptor set layout）
     lumen::render::PipelineLayout pipelineLayout;
     if (!pipelineLayout.create(ctx, { descLayout.handle() }, {})) {
-        LUMEN_LOG_ERROR("PipelineLayout 创建失败");
+        LUMEN_APP_LOG_ERROR("PipelineLayout 创建失败");
         return -1;
     }
 
@@ -226,19 +226,19 @@ int main() {
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
                          pipeConfig)) {
-        LUMEN_LOG_ERROR("GraphicsPipeline 创建失败");
+        LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
         return -1;
     }
 
     // CommandPool & CommandBuffers
     lumen::render::CommandPool cmdPool;
     if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
-        LUMEN_LOG_ERROR("CommandPool 创建失败");
+        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
         return -1;
     }
     auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
     if (cmdBuffers.size() != kMaxFramesInFlight) {
-        LUMEN_LOG_ERROR("CommandBuffer 分配失败");
+        LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
         return -1;
     }
 
@@ -246,7 +246,7 @@ int main() {
     lumen::render::FrameSync frameSync;
     if (!frameSync.create(ctx.device(), swapchain.image_count(),
                           kMaxFramesInFlight)) {
-        LUMEN_LOG_ERROR("FrameSync 创建失败");
+        LUMEN_APP_LOG_ERROR("FrameSync 创建失败");
         return -1;
     }
 
@@ -254,6 +254,8 @@ int main() {
     float lastLoggedTime = -10.0f; // 用于限速调试日志
     uint64_t frameCount = 0;       // 用于限速调试日志
     constexpr uint64_t kLogInterval = 60; // 每 N 帧输出一次阶段日志
+    int fbWidth { w }, fbHeight { h };
+    bool needRecreateSwapchain { false };
 
     lumen::platform::EventPump pump;
     lumen::platform::EventList events;
@@ -279,24 +281,44 @@ int main() {
     while (running) {
         bool doLog = (frameCount < 5) || (frameCount % kLogInterval == 0);
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] 循环开始", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] 循环开始", frameCount);
         }
 
         if (pump_and_check_quit()) {
-            LUMEN_LOG_DEBUG("[frame {}] pump 检测到退出", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] pump 检测到退出", frameCount);
             running = false;
             break;
         }
         for (const auto &e : events) {
             if (std::holds_alternative<lumen::platform::EventWindowResize>(e)) {
                 const auto &r = std::get<lumen::platform::EventWindowResize>(e);
-                LUMEN_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
+                fbWidth = r.width;
+                fbHeight = r.height;
+                needRecreateSwapchain = true;
+                LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
             }
+        }
+
+        // 窗口 resize 或 Present 返回 OUT_OF_DATE 时重建 Swapchain
+        if (needRecreateSwapchain) {
+            vkDeviceWaitIdle(ctx.device());
+            window.get_framebuffer_size(&fbWidth, &fbHeight);
+            if (fbWidth > 0 && fbHeight > 0 &&
+                swapchain.resize(static_cast<uint32_t>(fbWidth),
+                                static_cast<uint32_t>(fbHeight))) {
+                framebuffers.create(ctx.device(), renderPass.handle(), swapchain,
+                                   VK_NULL_HANDLE);
+                frameSync.create(ctx.device(), swapchain.image_count(),
+                                kMaxFramesInFlight);
+                LUMEN_APP_LOG_DEBUG("Swapchain 已重建 {}x{}", fbWidth, fbHeight);
+            }
+            needRecreateSwapchain = false;
+            continue;
         }
 
         // 只等待即将复用的 currentFrame 的 fence，避免等待从未被 submit 的 prevFrame
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] 等待 fence curr={} ...", frameCount,
+            LUMEN_APP_LOG_DEBUG("[frame {}] 等待 fence curr={} ...", frameCount,
                             currentFrame);
         }
         while (!frameSync.wait_fence(currentFrame, kFenceWaitTimeoutNs)) {
@@ -307,19 +329,20 @@ int main() {
             SDL_Delay(1);
         }
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] acquire 图像 ...", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] acquire 图像 ...", frameCount);
         }
 
         uint32_t imageIndex = swapchain.acquire_next_image(
-            frameSync.image_available(0), VK_NULL_HANDLE, kAcquireTimeoutNs);
+            frameSync.image_available(currentFrame), VK_NULL_HANDLE,
+            kAcquireTimeoutNs);
         if (imageIndex == UINT32_MAX) {
             if (doLog) {
-                LUMEN_LOG_DEBUG("[frame {}] acquire 失败/超时，跳过", frameCount);
+                LUMEN_APP_LOG_DEBUG("[frame {}] acquire 失败/超时，跳过", frameCount);
             }
             continue;
         }
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] acquired imageIndex={}", frameCount,
+            LUMEN_APP_LOG_DEBUG("[frame {}] acquired imageIndex={}", frameCount,
                             imageIndex);
         }
 
@@ -331,7 +354,7 @@ int main() {
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
             VK_SUCCESS) {
-            LUMEN_LOG_DEBUG("[frame {}] vkBeginCommandBuffer 失败", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] vkBeginCommandBuffer 失败", frameCount);
             continue;
         }
 
@@ -372,7 +395,7 @@ int main() {
         uniformBuffers[currentFrame].update(ubo);
         // 调试：每 2 秒打印一次 time，确认是否递增（调试完可删除）
         if (ubo.time - lastLoggedTime > 2.0f) {
-            LUMEN_LOG_DEBUG("UBO time={}", ubo.time);
+            LUMEN_APP_LOG_DEBUG("UBO time={}", ubo.time);
             lastLoggedTime = ubo.time;
         }
 
@@ -389,14 +412,14 @@ int main() {
         vkCmdEndRenderPass(cmdBuffers[currentFrame]);
 
         if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
-            LUMEN_LOG_DEBUG("[frame {}] vkEndCommandBuffer 失败", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] vkEndCommandBuffer 失败", frameCount);
             continue;
         }
 
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] QueueSubmit ...", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] QueueSubmit ...", frameCount);
         }
-        VkSemaphore waitSem = frameSync.image_available(0);
+        VkSemaphore waitSem = frameSync.image_available(currentFrame);
         VkSemaphore signalSem = frameSync.render_finished(imageIndex);
 
         VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -413,23 +436,25 @@ int main() {
         if (vkQueueSubmit(ctx.graphics_queue(), 1, &submitInfo,
                           frameSync.in_flight_fence(currentFrame)) !=
             VK_SUCCESS) {
-            LUMEN_LOG_DEBUG("[frame {}] vkQueueSubmit 失败", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] vkQueueSubmit 失败", frameCount);
             continue;
         }
 
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] Present ...", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] Present ...", frameCount);
         }
         VkResult presentResult =
             swapchain.present(ctx.present_queue(), imageIndex,
                               frameSync.render_finished(imageIndex));
-        if (presentResult != VK_SUCCESS) {
-            LUMEN_LOG_DEBUG("[frame {}] Present 失败 result={}", frameCount,
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+            needRecreateSwapchain = true;
+        } else if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR) {
+            LUMEN_APP_LOG_DEBUG("[frame {}] Present 失败 result={}", frameCount,
                             static_cast<int>(presentResult));
         }
 
         if (doLog) {
-            LUMEN_LOG_DEBUG("[frame {}] 帧完成", frameCount);
+            LUMEN_APP_LOG_DEBUG("[frame {}] 帧完成", frameCount);
         }
         currentFrame = (currentFrame + 1) % kMaxFramesInFlight;
         ++frameCount;
@@ -438,7 +463,7 @@ exit_loop:
 
     vkDeviceWaitIdle(ctx.device());
 
-    LUMEN_LOG_INFO("Sandbox 退出");
+    LUMEN_APP_LOG_INFO("Sandbox 退出");
     lumen::core::Logger::shutdown();
     return 0;
 }
