@@ -7,6 +7,8 @@
 #include "platform/event_pump.hpp"
 #include "platform/input.hpp"
 
+#include <utility>
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_keyboard.h>
@@ -53,7 +55,7 @@ bool EventPump::poll(EventList& events, Input& input) {
     while (SDL_PollEvent(&e)) {
         switch (static_cast<SDL_EventType>(e.type)) {
         case SDL_EVENT_QUIT:
-            events.push_back(EventQuit {});
+            events.emplace_back(std::in_place_type<EventQuit>);
             return false;
 
         case SDL_EVENT_KEY_DOWN: {
@@ -61,8 +63,8 @@ bool EventPump::poll(EventList& events, Input& input) {
             KeyCode code = static_cast<KeyCode>(k.scancode);
             input.update_key_(code, true);
             input.update_modifiers_(static_cast<uint16_t>(k.mod));
-            events.push_back(
-                EventKeyDown { code, k.repeat, sdl_mods_to_modifier(k.mod) });
+            events.emplace_back(std::in_place_type<EventKeyDown>, code, k.repeat,
+                               sdl_mods_to_modifier(k.mod));
             break;
         }
         case SDL_EVENT_KEY_UP: {
@@ -70,7 +72,8 @@ bool EventPump::poll(EventList& events, Input& input) {
             KeyCode code = static_cast<KeyCode>(k.scancode);
             input.update_key_(code, false);
             input.update_modifiers_(static_cast<uint16_t>(k.mod));
-            events.push_back(EventKeyUp { code, sdl_mods_to_modifier(k.mod) });
+            events.emplace_back(std::in_place_type<EventKeyUp>, code,
+                               sdl_mods_to_modifier(k.mod));
             break;
         }
 
@@ -79,8 +82,8 @@ bool EventPump::poll(EventList& events, Input& input) {
             MouseButton btn = sdl_button_to_mouse_button(b.button);
             input.update_mouse_button_(btn, true);
             input.update_mouse_position_(b.x, b.y);
-            events.push_back(
-                EventMouseButtonDown { btn, b.x, b.y });
+            events.emplace_back(std::in_place_type<EventMouseButtonDown>, btn,
+                               b.x, b.y);
             break;
         }
         case SDL_EVENT_MOUSE_BUTTON_UP: {
@@ -88,7 +91,8 @@ bool EventPump::poll(EventList& events, Input& input) {
             MouseButton btn = sdl_button_to_mouse_button(b.button);
             input.update_mouse_button_(btn, false);
             input.update_mouse_position_(b.x, b.y);
-            events.push_back(EventMouseButtonUp { btn, b.x, b.y });
+            events.emplace_back(std::in_place_type<EventMouseButtonUp>, btn, b.x,
+                               b.y);
             break;
         }
 
@@ -99,7 +103,8 @@ bool EventPump::poll(EventList& events, Input& input) {
             input.mouseY_ = m.y;
             input.deltaX_ += m.xrel;
             input.deltaY_ += m.yrel;
-            events.push_back(EventMouseMove { m.x, m.y, m.xrel, m.yrel });
+            events.emplace_back(std::in_place_type<EventMouseMove>, m.x, m.y,
+                               m.xrel, m.yrel);
             break;
         }
 
@@ -111,19 +116,19 @@ bool EventPump::poll(EventList& events, Input& input) {
                 dx = -dx;
                 dy = -dy;
             }
-            events.push_back(EventMouseWheel { dx, dy });
+            events.emplace_back(std::in_place_type<EventMouseWheel>, dx, dy);
             break;
         }
 
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-            events.push_back(
-                EventWindowResize { e.window.data1, e.window.data2 });
+            events.emplace_back(std::in_place_type<EventWindowResize>,
+                               e.window.data1, e.window.data2);
             break;
         }
 
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-            events.push_back(EventQuit {});
+            events.emplace_back(std::in_place_type<EventQuit>);
             return false;
 
         default:

@@ -50,7 +50,7 @@ namespace lumen::render {
             std::vector<const char *> layers { config.instanceLayers };
             if (std::find(layers.begin(), layers.end(), kValidationLayerName) ==
                 layers.end()) {
-                layers.push_back(kValidationLayerName);
+                layers.emplace_back(kValidationLayerName);
             }
             if (!check_validation_layer_support(layers)) {
                 LUMEN_LOG_WARN("Validation layers requested but not available");
@@ -67,16 +67,16 @@ namespace lumen::render {
 
         std::vector<const char *> extensions { config.instanceExtensions };
         if (validationEnabled_) {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
 
         std::vector<const char *> layers;
         if (validationEnabled_) {
-            layers.push_back(kValidationLayerName);
+            layers.emplace_back(kValidationLayerName);
         }
         for (const char *l : config.instanceLayers) {
             if (l != kValidationLayerName)
-                layers.push_back(l);
+                layers.emplace_back(l);
         }
 
         VkInstanceCreateInfo createInfo {
@@ -161,7 +161,7 @@ namespace lumen::render {
             info.queueFamilyIndex = family;
             info.queueCount = 1;
             info.pQueuePriorities = &queuePriority;
-            queueCreateInfos.push_back(info);
+            queueCreateInfos.emplace_back(info);
         }
 
         std::vector<const char *> deviceExtensions {

@@ -48,11 +48,11 @@ std::shared_ptr<spdlog::logger> create_logger(const char* name,
                                               const LoggerPathConfig& pathCfg) {
     std::vector<spdlog::sink_ptr> sinks;
     if (config.enableConsole) {
-        sinks.push_back(make_console_sink());
+        sinks.emplace_back(make_console_sink());
     }
     if (auto file = make_file_sink(pathCfg)) {
         file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] [%s:%#] %v");
-        sinks.push_back(file);
+        sinks.emplace_back(std::move(file));
     }
     if (sinks.empty()) {
         return nullptr;

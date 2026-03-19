@@ -22,7 +22,7 @@ namespace lumen::render {
         colorAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         colorAtt.initialLayout = config.colorAttachment.initialLayout;
         colorAtt.finalLayout = config.colorAttachment.finalLayout;
-        attachments.push_back(colorAtt);
+        attachments.emplace_back(colorAtt);
 
         uint32_t depthIndex { 0 };
         if (config.useDepth) {
@@ -36,7 +36,7 @@ namespace lumen::render {
             depthAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
             depthAtt.initialLayout = config.depthAttachment.initialLayout;
             depthAtt.finalLayout = config.depthAttachment.finalLayout;
-            attachments.push_back(depthAtt);
+            attachments.emplace_back(depthAtt);
         }
 
         VkAttachmentReference colorRef {
@@ -120,7 +120,7 @@ namespace lumen::render {
         for (size_t i { 0 }; i < framebuffers_.size(); ++i) {
             std::vector<VkImageView> attachments { swapchain.image_view(i) };
             if (depthImageView != VK_NULL_HANDLE) {
-                attachments.push_back(depthImageView);
+                attachments.emplace_back(depthImageView);
             }
 
             VkFramebufferCreateInfo createInfo {
