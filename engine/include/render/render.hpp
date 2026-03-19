@@ -8,6 +8,7 @@
 #pragma once
 
 #include "context.hpp"
+#include "surface.hpp"
 #include "swapchain.hpp"
 #include "result.hpp"
 #include "shader.hpp"

@@ -44,14 +44,15 @@ int main() {
     }
     LUMEN_LOG_INFO("Vulkan Instance 创建成功");
 
-    VkSurfaceKHR surface = window.create_vulkan_surface(ctx.instance());
-    if (surface == VK_NULL_HANDLE) {
+    lumen::render::Surface surface(
+        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    if (!surface.is_valid()) {
         LUMEN_LOG_ERROR("Vulkan Surface 创建失败");
         return -1;
     }
     LUMEN_LOG_INFO("Vulkan Surface 创建成功");
 
-    if (!ctx.init_device(surface)) {
+    if (!ctx.init_device(surface.handle())) {
         LUMEN_LOG_ERROR("Vulkan Device 创建失败");
         return -1;
     }
@@ -59,8 +60,9 @@ int main() {
 
     int w { 0 }, h { 0 };
     window.get_framebuffer_size(&w, &h);
+
     lumen::render::Swapchain swapchain;
-    if (!swapchain.create(ctx, surface, static_cast<uint32_t>(w),
+    if (!swapchain.create(ctx, surface.handle(), static_cast<uint32_t>(w),
                           static_cast<uint32_t>(h))) {
         LUMEN_LOG_ERROR("Swapchain 创建失败");
         return -1;
@@ -73,16 +75,14 @@ int main() {
     lumen::platform::EventList events;
     lumen::platform::Input input;
     while (pump.poll(events, input)) {
-        for (const auto& e : events) {
+        for (const auto &e : events) {
             if (std::holds_alternative<lumen::platform::EventWindowResize>(e)) {
-                const auto& r = std::get<lumen::platform::EventWindowResize>(e);
+                const auto &r = std::get<lumen::platform::EventWindowResize>(e);
                 LUMEN_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
             }
         }
         // TODO: 渲染
     }
-
-    vkDestroySurfaceKHR(ctx.instance(), surface, nullptr);
     LUMEN_LOG_INFO("Sandbox 退出");
     lumen::core::Logger::shutdown();
     return 0;
