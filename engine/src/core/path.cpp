@@ -11,13 +11,17 @@ namespace lumen {
 namespace core {
 
 std::string get_base_path() {
-    char* base = SDL_GetBasePath();
+    static std::string cached;
+    if (!cached.empty()) {
+        return cached;
+    }
+    const char* base = SDL_GetBasePath();
     if (!base) {
         return {};
     }
-    std::string result { base };
-    SDL_free(base);
-    return result;
+    cached = base;
+    // SDL3 遵循 GetStringRule，返回值由 SDL 管理，切勿 SDL_free
+    return cached;
 }
 
 std::string get_resource_path(std::string_view subpath) {
