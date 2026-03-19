@@ -4,15 +4,12 @@
  */
 
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 #include <algorithm>
 #include <cstring>
 #include <set>
 #include <stdexcept>
-
-#ifndef NDEBUG
-#include <iostream>
-#endif
 
 namespace lumen::render {
 
@@ -56,10 +53,7 @@ namespace lumen::render {
                 layers.push_back(kValidationLayerName);
             }
             if (!check_validation_layer_support(layers)) {
-#ifndef NDEBUG
-                std::cerr << "[Context] Validation layers requested but "
-                             "not available\n";
-#endif
+                LUMEN_LOG_WARN("Validation layers requested but not available");
                 validationEnabled_ = false;
             }
         }
@@ -98,10 +92,8 @@ namespace lumen::render {
 
         VkResult result = vkCreateInstance(&createInfo, nullptr, &instance_);
         if (result != VK_SUCCESS) {
-#ifndef NDEBUG
-            std::cerr << "[Context] vkCreateInstance failed: " << result
-                      << "\n";
-#endif
+            LUMEN_LOG_ERROR("vkCreateInstance failed: {}",
+                            static_cast<int>(result));
             return false;
         }
         return true;

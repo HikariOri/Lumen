@@ -1,9 +1,9 @@
 #include "network/file_downloader.h"
+#include "core/logger.hpp"
 
 #include <cpr/cpr.h>
 #include <fstream>
 #include <future>
-#include <print>
 #include <thread>
 
 namespace lumen::network {
@@ -126,12 +126,11 @@ namespace lumen::network {
                 return data;
             }
 
-            std::println(stderr, "Failed to download file. HTTP Status: {}",
-                         response.status_code);
+            LUMEN_LOG_ERROR("Failed to download file. HTTP Status: {}",
+                            static_cast<int>(response.status_code));
             return std::nullopt;
         } catch (const std::exception &e) {
-            std::println(stderr, "Exception while downloading file: {}",
-                         e.what());
+            LUMEN_LOG_ERROR("Exception while downloading file: {}", e.what());
             return std::nullopt;
         }
     }
@@ -147,8 +146,8 @@ namespace lumen::network {
         try {
             std::ofstream file(filepath, std::ios::binary);
             if (!file.is_open()) {
-                std::println(stderr, "Failed to open file for writing: {}",
-                             filepath);
+                LUMEN_LOG_ERROR("Failed to open file for writing: {}",
+                                filepath);
                 return false;
             }
 
@@ -157,7 +156,7 @@ namespace lumen::network {
             file.close();
             return true;
         } catch (const std::exception &e) {
-            std::println(stderr, "Exception while writing file: {}", e.what());
+            LUMEN_LOG_ERROR("Exception while writing file: {}", e.what());
             return false;
         }
     }
@@ -206,12 +205,11 @@ namespace lumen::network {
             if (response.status_code == 200) {
                 return response.text;
             }
-            std::println(stderr, "Failed to download text. HTTP Status: {}",
-                         response.status_code);
+            LUMEN_LOG_ERROR("Failed to download text. HTTP Status: {}",
+                            static_cast<int>(response.status_code));
             return std::nullopt;
         } catch (const std::exception &e) {
-            std::println(stderr, "Exception while downloading text: {}",
-                         e.what());
+            LUMEN_LOG_ERROR("Exception while downloading text: {}", e.what());
             return std::nullopt;
         }
     }
