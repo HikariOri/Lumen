@@ -29,8 +29,6 @@ struct UBO {
     float time;
     float _pad[3]; // std140 对齐到 16 字节
 };
-#include <SDL3/SDL_filesystem.h>
-
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -39,19 +37,6 @@ struct UBO {
 namespace {
 
     constexpr uint32_t kMaxFramesInFlight { 2 };
-
-    std::string get_shader_path(const char *name) {
-        static std::string basePath;
-        if (basePath.empty()) {
-            const char *base = SDL_GetBasePath();
-            if (!base) {
-                return std::string { name };
-            }
-            basePath = base;
-            SDL_free(const_cast<void *>(static_cast<const void *>(base)));
-        }
-        return basePath + "shaders/" + name;
-    }
 
 } // namespace
 
@@ -134,8 +119,10 @@ int main() {
     }
 
     // Shaders
-    std::string vertPath = get_shader_path("triangle.vert.spv");
-    std::string fragPath = get_shader_path("triangle.frag.spv");
+    std::string vertPath =
+        lumen::core::get_resource_path("shaders/triangle.vert.spv");
+    std::string fragPath =
+        lumen::core::get_resource_path("shaders/triangle.frag.spv");
     lumen::render::ShaderModule vertShader;
     lumen::render::ShaderModule fragShader;
     if (!vertShader.create_from_file(ctx.device(), vertPath.c_str())) {
