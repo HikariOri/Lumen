@@ -10,8 +10,6 @@
 #include <cmath>
 #include <limits>
 
-// #include <stb_image.h>
-
 namespace lumen::render {
 
     namespace {
