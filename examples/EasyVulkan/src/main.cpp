@@ -1,82 +1,94 @@
-/**
- * @file main.cpp
- * @brief EasyVulkan 示例程序入口，渲染一个红色三角形
- */
-
 #include "EasyVulkan.hpp"
 #include "GlfwGeneral.hpp"
-#include "VKBase+.h"
-#include "VKBase.h"
-
-struct vertex {
-    glm::vec2 position;
-    glm::vec4 color;
-};
-
 using namespace vulkan;
 
-descriptorSetLayout descriptorSetLayout_triangle;
-pipelineLayout pipelineLayout_triangle;
-pipeline pipeline_triangle;
+pipelineLayout pipelineLayout_line;
+pipeline pipeline_line;
+descriptorSetLayout descriptorSetLayout_texture;
+pipelineLayout pipelineLayout_screen;
+pipeline pipeline_screen;
 
-/**
- * @brief 获取屏幕渲染通道和帧缓冲（静态缓存，避免重复创建）
- * @return 渲染通道与帧缓冲组合的常量引用
- */
-const auto &RenderPassAndFramebuffers() {
+const auto &RenderPassAndFramebuffers_Screen() {
     static const auto &rpwf = easyVulkan::CreateRpwf_Screen();
     return rpwf;
 }
-
-/**
- * @brief 创建管线布局（此处无描述符集/推送常量）
- */
-void CreateLayout() {
-    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding_trianglePosition = {
-        .binding = 0, // 描述符被绑定到0号binding
-        .descriptorType =
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, // 类型为uniform缓冲区
-        .descriptorCount = 1,                  // 个数是1个
-        .stageFlags =
-            VK_SHADER_STAGE_VERTEX_BIT // 在顶点着色器阶段读取uniform缓冲区
-    };
-
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo_triangle = {
-        .bindingCount = 1,
-        .pBindings = &descriptorSetLayoutBinding_trianglePosition
-    };
-
-    descriptorSetLayout_triangle.Create(descriptorSetLayoutCreateInfo_triangle);
-
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
-        .setLayoutCount = 1,
-        .pSetLayouts = descriptorSetLayout_triangle.Address()
-    };
-
-    pipelineLayout_triangle.Create(pipelineLayoutCreateInfo);
+const auto &RenderPassAndFramebuffer_Offscreen(VkExtent2D canvasSize) {
+    static const auto &rpwf = easyVulkan::CreateRpwf_Canvas(canvasSize);
+    return rpwf;
 }
-
-/**
- * @brief 创建图形管线（依赖交换链尺寸，需在交换链创建后执行）
- */
-void CreatePipeline() {
-    static shaderModule vert("shaders/glsl/FirstTriangle.vert.spv");
-    static shaderModule frag("shaders/glsl/FirstTriangle.frag.spv");
-
-    static VkPipelineShaderStageCreateInfo
-        shaderStageCreateInfos_triangle[2] = {
-            vert.StageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT),
-            frag.StageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT)
-        };
-
+void CreateLayout() {
+    // Offscreen
+    VkPushConstantRange pushConstantRange_offscreen = {
+        VK_SHADER_STAGE_VERTEX_BIT, 0, 24
+    };
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange_offscreen,
+    };
+    pipelineLayout_line.Create(pipelineLayoutCreateInfo);
+    // Screen
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBinding_texture = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+    };
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo_texture = {
+        .bindingCount = 1, .pBindings = &descriptorSetLayoutBinding_texture
+    };
+    descriptorSetLayout_texture.Create(descriptorSetLayoutCreateInfo_texture);
+    VkPushConstantRange pushConstantRanges_screen[] = {
+        { VK_SHADER_STAGE_VERTEX_BIT, 0, 16 },
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 8, 8 }
+    };
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 2;
+    pipelineLayoutCreateInfo.pPushConstantRanges = pushConstantRanges_screen;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts =
+        descriptorSetLayout_texture.Address();
+    pipelineLayout_screen.Create(pipelineLayoutCreateInfo);
+}
+void CreatePipeline(VkExtent2D canvasSize) {
+    // Offscreen
+    static shaderModule vert_offscreen("shaders/glsl/Line.vert.spv");
+    static shaderModule frag_offscreen("shaders/glsl/Line.frag.spv");
+    VkPipelineShaderStageCreateInfo shaderStageCreateInfos_line[2] = {
+        vert_offscreen.StageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT),
+        frag_offscreen.StageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT)
+    };
+    graphicsPipelineCreateInfoPack pipelineCiPack;
+    pipelineCiPack.createInfo.layout = pipelineLayout_line;
+    pipelineCiPack.createInfo.renderPass =
+        RenderPassAndFramebuffer_Offscreen(canvasSize).renderPass;
+    pipelineCiPack.inputAssemblyStateCi.topology =
+        VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    pipelineCiPack.viewports.emplace_back(0.f, 0.f, float(canvasSize.width),
+                                          float(canvasSize.height), 0.f, 1.f);
+    pipelineCiPack.scissors.emplace_back(VkOffset2D {}, canvasSize);
+    pipelineCiPack.rasterizationStateCi.lineWidth = 1;
+    pipelineCiPack.multisampleStateCi.rasterizationSamples =
+        VK_SAMPLE_COUNT_1_BIT;
+    pipelineCiPack.colorBlendAttachmentStates.push_back(
+        { .colorWriteMask = 0b1111 });
+    pipelineCiPack.UpdateAllArrays();
+    pipelineCiPack.createInfo.stageCount = 2;
+    pipelineCiPack.createInfo.pStages = shaderStageCreateInfos_line;
+    pipeline_line.Create(pipelineCiPack);
+    // Screen
+    static shaderModule vert_screen("shaders/glsl/CanvasToScreen.vert.spv");
+    static shaderModule frag_screen("shaders/glsl/CanvasToScreen.frag.spv");
+    static VkPipelineShaderStageCreateInfo shaderStageCreateInfos_screen[2] = {
+        vert_screen.StageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT),
+        frag_screen.StageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT)
+    };
     auto Create = [] {
         graphicsPipelineCreateInfoPack pipelineCiPack;
-        pipelineCiPack.createInfo.layout = pipelineLayout_triangle;
-        // pipelineCiPack.createInfo.renderPass =
-        // RenderPassAndFramebuffers().renderPass;
+        pipelineCiPack.createInfo.layout = pipelineLayout_screen;
+        pipelineCiPack.createInfo.renderPass =
+            RenderPassAndFramebuffers_Screen().renderPass;
         pipelineCiPack.inputAssemblyStateCi.topology =
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        pipelineCiPack.viewports.emplace_back(0.F, 0.F, float(windowSize.width),
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        pipelineCiPack.viewports.emplace_back(0.f, 0.f, float(windowSize.width),
                                               float(windowSize.height), 0.f,
                                               1.f);
         pipelineCiPack.scissors.emplace_back(VkOffset2D {}, windowSize);
@@ -86,65 +98,26 @@ void CreatePipeline() {
             { .colorWriteMask = 0b1111 });
         pipelineCiPack.UpdateAllArrays();
         pipelineCiPack.createInfo.stageCount = 2;
-        pipelineCiPack.createInfo.pStages = shaderStageCreateInfos_triangle;
-
-        pipeline_triangle.Create(pipelineCiPack);
+        pipelineCiPack.createInfo.pStages = shaderStageCreateInfos_screen;
+        pipeline_screen.Create(pipelineCiPack);
     };
-
-    auto Destroy = [] { pipeline_triangle.~pipeline(); };
-
+    auto Destroy = [] { pipeline_screen.~pipeline(); };
     graphicsBase::Base().AddCallback_CreateSwapchain(Create);
     graphicsBase::Base().AddCallback_DestroySwapchain(Destroy);
-
     Create();
 }
 
-/**
- * @brief 程序入口，初始化窗口与 Vulkan，渲染三角形主循环
- * @return 0 正常退出，-1 初始化失败
- */
 int main() {
-    PFN_vkCmdBeginRenderingKHR vkCmdBeginRendering = ::vkCmdBeginRendering;
-    PFN_vkCmdEndRenderingKHR vkCmdEndRendering = ::vkCmdEndRendering;
-
-    graphicsBase::Base().UseLatestApiVersion();
-    if (graphicsBase::Base().ApiVersion() < VK_API_VERSION_1_2) {
+    if (!InitializeWindow({ 1280, 720 }))
         return -1;
-    }
 
-    if (graphicsBase::Base().ApiVersion() < VK_API_VERSION_1_3) {
-        graphicsBase::Base().AddDeviceExtension(
-            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
-        VkPhysicalDeviceDynamicRenderingFeatures
-            physicalDeviceDynamicRenderingFeatures = {
-                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-            };
-        graphicsBase::Base().AddNextStructure_PhysicalDeviceFeatures(
-            physicalDeviceDynamicRenderingFeatures);
-        if (!InitializeWindow({ 1280, 720 }) ||
-            !physicalDeviceDynamicRenderingFeatures.dynamicRendering) {
-            return -1;
-        }
-        vkCmdBeginRendering =
-            reinterpret_cast<PFN_vkCmdBeginRenderingKHR>(vkGetDeviceProcAddr(
-                graphicsBase::Base().Device(), "vkCmdBeginRenderingKHR"));
-        vkCmdEndRendering =
-            reinterpret_cast<PFN_vkCmdEndRenderingKHR>(vkGetDeviceProcAddr(
-                graphicsBase::Base().Device(), "vkCmdEndRenderingKHR"));
-    } else if (!InitializeWindow({ 1280, 720 }) ||
-               !graphicsBase::Base()
-                    .PhysicalDeviceVulkan13Features()
-                    .dynamicRendering) {
-        return -1;
-    }
-
-    easyVulkan ::BootScreen("./assets/textures/wallhaven-gjm6q3_1920x1080.png",
-                            VK_FORMAT_R8G8B8A8_UNORM);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
-    const auto &[renderPass, framebuffers] = RenderPassAndFramebuffers();
+    VkExtent2D canvasSize = windowSize;
+    const auto &[renderPass_screen, framebuffers_screen] =
+        RenderPassAndFramebuffers_Screen();
+    const auto &[renderPass_offscreen, framebuffer_offscreen] =
+        RenderPassAndFramebuffer_Offscreen(canvasSize);
     CreateLayout();
-    CreatePipeline();
+    CreatePipeline(canvasSize);
 
     fence fence;
     semaphore semaphore_imageIsAvailable;
@@ -155,113 +128,77 @@ int main() {
                             VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     commandPool.AllocateBuffers(commandBuffer);
 
-    // Load image
-    texture2d texture("assets/textures/ikun2026_happy_new_year.jpg",
-                      VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, true);
     // Create sampler
     VkSamplerCreateInfo samplerCreateInfo = texture::SamplerCreateInfo();
     sampler sampler(samplerCreateInfo);
     // Create descriptor
     VkDescriptorPoolSize descriptorPoolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 }
     };
-
     descriptorPool descriptorPool(1, descriptorPoolSizes);
+    descriptorSet descriptorSet_texture;
+    descriptorPool.AllocateSets(descriptorSet_texture,
+                                descriptorSetLayout_texture);
+    descriptorSet_texture.Write(
+        easyVulkan::ca_canvas.DescriptorImageInfo(sampler),
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-    descriptorSet descriptorSet_trianglePosition;
-    descriptorPool.AllocateSets(descriptorSet_trianglePosition,
-                                descriptorSetLayout_triangle);
+    VkClearValue clearColor = {};
 
-    // descriptorSet_texture.Write(texture.DescriptorImageInfo(sampler),
-    //                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    double mouseX, mouseY;
+    glfwGetCursorPos(pWindow, &mouseX, &mouseY);
+    struct {
+        glm::vec2 viewportSize;
+        glm::vec2 offsets[2];
+    } pushConstants_offscreen = { { canvasSize.width, canvasSize.height },
+                                  { { mouseX, mouseY }, { mouseX, mouseY } } };
 
-    // 矩形需两个三角形（6 个顶点），TRIANGLE_LIST 每 3 顶点一个三角形
-    vertex vertices[] { { { .0f, -.5f }, { 1, 0, 0, 1 } },
-                        { { -.5f, .5f }, { 0, 1, 0, 1 } },
-                        { { .5f, .5f }, { 0, 0, 1, 1 } } };
-    vertexBuffer vertexBuffer(sizeof vertices);
-    vertexBuffer.TransferData(vertices);
-
-    glm::vec2 uniform_positions[] { { .0f, .0f }, {},           { -.5f, .0f },
-                                    {},           { .5f, .0f }, {} };
-    uniformBuffer uniformBuffer(sizeof uniform_positions);
-    uniformBuffer.TransferData(uniform_positions);
-
-    VkDescriptorBufferInfo bufferInfo {
-        .buffer = uniformBuffer,
-        .offset = 0,
-        .range = sizeof uniform_positions // 或 VK_WHOLE_SIZE
-    };
-
-    descriptorSet_trianglePosition.Write(bufferInfo,
-                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-
-    VkClearValue clearColor = { .color = { 0.2f, 0.3f, 0.3f, 1.0f } };
+    bool clearCanvas = true;
+    bool index = 0;
 
     while (!glfwWindowShouldClose(pWindow)) {
-        while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED)) {
+        while (glfwGetWindowAttrib(pWindow, GLFW_ICONIFIED))
             glfwWaitEvents();
-        }
 
         graphicsBase::Base().SwapImage(semaphore_imageIsAvailable);
         auto i = graphicsBase::Base().CurrentImageIndex();
 
         commandBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-        // 渲染开始前的内存屏障
-        VkImageMemoryBarrier imageMemoryBarrier {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = graphicsBase::Base().SwapchainImage(i),
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-        };
 
-        vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                             VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0,
-                             nullptr, 1, &imageMemoryBarrier);
+        if (clearCanvas)
+            easyVulkan::CmdClearCanvas(commandBuffer, VkClearColorValue {}),
+                clearCanvas = false;
 
-        VkRenderingAttachmentInfo colorAttachmentInfo = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = graphicsBase::Base().SwapchainImageView(i),
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = { .color = { 1.F, 0.F, 0.F, 1.F } }
-        };
-
-        VkRenderingInfo renderingInfo { .sType =
-                                            VK_STRUCTURE_TYPE_RENDERING_INFO,
-                                        .renderArea = { {}, windowSize },
-                                        .layerCount = 1,
-                                        .colorAttachmentCount = 1,
-                                        .pColorAttachments =
-                                            &colorAttachmentInfo };
-
-        vkCmdBeginRendering(commandBuffer, &renderingInfo);
-
+        // Offscreen
+        renderPass_offscreen.CmdBegin(commandBuffer, framebuffer_offscreen,
+                                      { {}, canvasSize });
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          pipeline_triangle);
+                          pipeline_line);
+        vkCmdPushConstants(commandBuffer, pipelineLayout_line,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, 24,
+                           &pushConstants_offscreen);
+        vkCmdDraw(commandBuffer, 2, 1, 0, 0);
+        renderPass_offscreen.CmdEnd(commandBuffer);
 
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        // Screen
+        renderPass_screen.CmdBegin(
+            commandBuffer, framebuffers_screen[i], { {}, windowSize },
+            VkClearValue { .color = { 1.f, 1.f, 1.f, 1.f } });
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          pipeline_screen);
+        glm::vec2 windowSize = { ::windowSize.width, ::windowSize.height };
+        vkCmdPushConstants(commandBuffer, pipelineLayout_screen,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, 8, &windowSize);
+        vkCmdPushConstants(commandBuffer, pipelineLayout_screen,
+                           VK_SHADER_STAGE_VERTEX_BIT |
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                           8, 8, &pushConstants_offscreen.viewportSize);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout_screen, 0, 1,
+                                descriptorSet_texture.Address(), 0, nullptr);
+        vkCmdDraw(commandBuffer, 4, 1, 0, 0);
+        renderPass_screen.CmdEnd(commandBuffer);
 
-        vkCmdEndRendering(commandBuffer);
-
-        // 渲染结束后的内存屏障
-        imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        imageMemoryBarrier.dstAccessMask = 0;
-        imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        vkCmdPipelineBarrier(
-            commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_DEPENDENCY_BY_REGION_BIT,
-            0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
         commandBuffer.End();
 
         graphicsBase::Base().SubmitCommandBuffer_Graphics(
@@ -270,6 +207,9 @@ int main() {
         graphicsBase::Base().PresentImage(semaphore_renderingIsOver);
 
         glfwPollEvents();
+        glfwGetCursorPos(pWindow, &mouseX, &mouseY);
+        pushConstants_offscreen.offsets[index = !index] = { mouseX, mouseY };
+        clearCanvas = glfwGetMouseButton(pWindow, GLFW_MOUSE_BUTTON_LEFT);
         TitleFps();
 
         fence.WaitAndReset();

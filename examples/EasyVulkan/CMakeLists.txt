@@ -57,6 +57,18 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/UniformBuffer.frag.shader"
           -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/UniformBuffer.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/Line.vert.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/Line.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/Line.frag.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/Line.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/CanvasToScreen.vert.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/CanvasToScreen.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/glsl/CanvasToScreen.frag.shader"
+          -o "$<TARGET_FILE_DIR:${CUR_TARGET}>/shaders/glsl/CanvasToScreen.frag.spv"
   COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
   VERBATIM
 )
