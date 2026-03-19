@@ -181,10 +181,10 @@ bool Swapchain::create_image_views_() {
 }
 
 uint32_t Swapchain::acquire_next_image(VkSemaphore imageAvailableSemaphore,
-                                       VkFence frameFence) {
+                                       VkFence fence, uint64_t timeoutNs) {
     uint32_t index { 0 };
     VkResult result = vkAcquireNextImageKHR(
-        device_, swapchain_, UINT64_MAX, imageAvailableSemaphore, frameFence,
+        device_, swapchain_, timeoutNs, imageAvailableSemaphore, fence,
         &index);
     return result == VK_SUCCESS ? index : UINT32_MAX;
 }

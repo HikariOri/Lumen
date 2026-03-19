@@ -66,13 +66,15 @@ public:
     bool resize(uint32_t width, uint32_t height);
 
     /**
-     * @brief 获取下一帧图像索引，并等待 Fence
-     * @param imageAvailableSemaphore 图像可用信号量（出参，本帧使用）
-     * @param frameFence 帧 Fence（出参，需在 Present 后 wait）
-     * @return 成功返回图像索引，失败返回 UINT32_MAX
+     * @brief 获取下一帧图像索引
+     * @param imageAvailableSemaphore 图像可用时将被 signal 的 semaphore
+     * @param fence 可选，传入 VK_NULL_HANDLE 表示不使用 fence（推荐，fence 仅用于 vkQueueSubmit）
+     * @param timeoutNs 超时纳秒，避免无限阻塞导致无法处理窗口事件；UINT64_MAX 表示无限等待
+     * @return 成功返回图像索引，失败或超时返回 UINT32_MAX
      */
     uint32_t acquire_next_image(VkSemaphore imageAvailableSemaphore,
-                                VkFence frameFence);
+                                VkFence fence = VK_NULL_HANDLE,
+                                uint64_t timeoutNs = UINT64_MAX);
 
     /**
      * @brief 呈现当前帧

@@ -91,29 +91,43 @@ namespace lumen {
             bool create(VkDevice device, uint32_t framesInFlight);
 
             /**
-             * @brief 等待当前帧的 Fence 并重置
+             * @brief 创建 per-image 的 Semaphore 与 per-frame 的 Fence
+             * 用于 Swapchain：每个 image 独立的 semaphore 避免复用冲突
+             * @param device VkDevice
+             * @param swapchainImageCount swapchain 图像数量
+             * @param framesInFlight 并发帧数（fence 数量）
              */
-            void wait_fence(uint32_t frameIndex);
+            bool create(VkDevice device, uint32_t swapchainImageCount,
+                       uint32_t framesInFlight);
 
             /**
-             * @brief 获取当前帧的 imageAvailable Semaphore
+             * @brief 等待 Fence 并重置
+             * @param frameIndex 帧索引
+             * @param timeoutNs 超时纳秒，UINT64_MAX 表示无限等待
+             * @return true 表示 fence 已 signal 并已 reset；false 表示超时（未 reset，调用方可重试）
+             */
+            bool wait_fence(uint32_t frameIndex,
+                           uint64_t timeoutNs = UINT64_MAX);
+
+            /**
+             * @brief 获取 image 的 imageAvailable Semaphore（按 imageIndex 索引）
              */
             [[nodiscard]] VkSemaphore
-            image_available(uint32_t frameIndex) const;
+            image_available(uint32_t imageIndex) const;
 
             /**
-             * @brief 获取当前帧的 renderFinished Semaphore
+             * @brief 获取 image 的 renderFinished Semaphore（按 imageIndex 索引）
              */
             [[nodiscard]] VkSemaphore
-            render_finished(uint32_t frameIndex) const;
+            render_finished(uint32_t imageIndex) const;
 
             /**
-             * @brief 获取当前帧的 Fence
+             * @brief 获取当前帧的 Fence（按 frameIndex 索引）
              */
             [[nodiscard]] VkFence in_flight_fence(uint32_t frameIndex) const;
 
             [[nodiscard]] uint32_t frame_count() const {
-                return static_cast<uint32_t>(imageAvailable_.size());
+                return static_cast<uint32_t>(inFlightFences_.size());
             }
 
         private:

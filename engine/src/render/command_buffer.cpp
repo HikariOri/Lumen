@@ -83,19 +83,21 @@ namespace lumen::render {
     // --- FrameSync ---
 
     bool FrameSync::create(VkDevice device, uint32_t framesInFlight) {
+        return create(device, framesInFlight, framesInFlight);
+    }
+
+    bool FrameSync::create(VkDevice device, uint32_t swapchainImageCount,
+                          uint32_t framesInFlight) {
         device_ = device;
-        imageAvailable_.resize(framesInFlight);
-        renderFinished_.resize(framesInFlight);
+        imageAvailable_.resize(swapchainImageCount);
+        renderFinished_.resize(swapchainImageCount);
         inFlightFences_.resize(framesInFlight);
 
         VkSemaphoreCreateInfo semaphoreInfo {
             VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
         };
 
-        VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-        for (uint32_t i { 0 }; i < framesInFlight; ++i) {
+        for (uint32_t i { 0 }; i < swapchainImageCount; ++i) {
             if (vkCreateSemaphore(device_, &semaphoreInfo, nullptr,
                                   &imageAvailable_[i]) != VK_SUCCESS) {
                 destroy_();
@@ -106,6 +108,11 @@ namespace lumen::render {
                 destroy_();
                 return false;
             }
+        }
+
+        VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        for (uint32_t i { 0 }; i < framesInFlight; ++i) {
             if (vkCreateFence(device_, &fenceInfo, nullptr,
                               &inFlightFences_[i]) != VK_SUCCESS) {
                 destroy_();
@@ -115,22 +122,31 @@ namespace lumen::render {
         return true;
     }
 
-    void FrameSync::wait_fence(uint32_t frameIndex) {
-        if (frameIndex < inFlightFences_.size()) {
-            vkWaitForFences(device_, 1, &inFlightFences_[frameIndex], VK_TRUE,
-                            UINT64_MAX);
+    bool FrameSync::wait_fence(uint32_t frameIndex, uint64_t timeoutNs) {
+        if (frameIndex >= inFlightFences_.size()) {
+            return false;
+        }
+        VkResult result = vkWaitForFences(
+            device_, 1, &inFlightFences_[frameIndex], VK_TRUE, timeoutNs);
+        if (result == VK_TIMEOUT) {
+            return false;
+        }
+        if (result == VK_SUCCESS) {
             vkResetFences(device_, 1, &inFlightFences_[frameIndex]);
         }
+        return result == VK_SUCCESS;
     }
 
-    VkSemaphore FrameSync::image_available(uint32_t frameIndex) const {
-        return frameIndex < imageAvailable_.size() ? imageAvailable_[frameIndex]
-                                                   : VK_NULL_HANDLE;
+    VkSemaphore FrameSync::image_available(uint32_t imageIndex) const {
+        return imageIndex < imageAvailable_.size()
+                   ? imageAvailable_[imageIndex]
+                   : VK_NULL_HANDLE;
     }
 
-    VkSemaphore FrameSync::render_finished(uint32_t frameIndex) const {
-        return frameIndex < renderFinished_.size() ? renderFinished_[frameIndex]
-                                                   : VK_NULL_HANDLE;
+    VkSemaphore FrameSync::render_finished(uint32_t imageIndex) const {
+        return imageIndex < renderFinished_.size()
+                   ? renderFinished_[imageIndex]
+                   : VK_NULL_HANDLE;
     }
 
     VkFence FrameSync::in_flight_fence(uint32_t frameIndex) const {
