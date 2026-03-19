@@ -149,4 +149,27 @@ namespace lumen::render {
         return *this;
     }
 
+    bool VertexBuffer::create(const Context &ctx, size_t size,
+                             bool hostVisible) {
+        return Buffer::create(ctx, { size, BufferUsage::Vertex, hostVisible });
+    }
+
+    bool IndexBuffer::create(const Context &ctx, size_t size,
+                            bool hostVisible) {
+        return Buffer::create(ctx, { size, BufferUsage::Index, hostVisible });
+    }
+
+    bool UniformBuffer::create(const Context &ctx, size_t size,
+                              bool hostVisible) {
+        return Buffer::create(ctx, { size, BufferUsage::Uniform, hostVisible });
+    }
+
+    void UniformBuffer::update(const void *data, size_t size, size_t offset) {
+        upload(data, size, offset);
+    }
+
+    bool StagingBuffer::create(const Context &ctx, size_t size) {
+        return Buffer::create(ctx, { size, BufferUsage::Staging, true });
+    }
+
 } // namespace lumen::render
