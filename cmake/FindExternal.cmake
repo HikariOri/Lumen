@@ -1,7 +1,6 @@
 # ============================================================================
 # 物理引擎和ECS
 # ============================================================================
-find_package(Bullet CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 
 # ============================================================================
@@ -50,7 +49,6 @@ find_package(SDL3_image CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(volk CONFIG REQUIRED)
-find_package(vk-bootstrap CONFIG REQUIRED)
 
 # ============================================================================
 # 工具库
@@ -65,8 +63,6 @@ find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SqliteOrm CONFIG REQUIRED)
 
 find_package(ZXing CONFIG REQUIRED)
-
-find_package(OpenCV CONFIG REQUIRED)
 
 find_package(cpr CONFIG REQUIRED)
 

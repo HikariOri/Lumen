@@ -76,11 +76,6 @@
       "version>=": "1.4.309.0"
     },
     {
-      "name": "bullet3",
-      "version>=": "3.25#3",
-      "features": ["double-precision", "extras", "multithreading", "opencl"]
-    },
-    {
       "name": "quill",
       "version>=": "10.2.0"
     },
@@ -103,14 +98,6 @@
     {
       "name": "fastgltf",
       "version>=": "0.9.0"
-    },
-    {
-      "name": "vk-bootstrap",
-      "version>=": "1.4.312"
-    },
-    {
-      "name": "vulkan-headers",
-      "version>=": "1.4.309.0"
     },
     {
       "name": "drogon",
@@ -156,10 +143,6 @@
     {
       "name": "nu-book-zxing-cpp",
       "version>=": "2.3.0"
-    },
-    {
-      "name": "opencv",
-      "version>=": "4.11.0"
     },
     {
       "name": "cpr",
