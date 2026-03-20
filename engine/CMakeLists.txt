@@ -27,6 +27,7 @@ target_link_libraries(${ENGINE_TARGET} PRIVATE cpr::cpr)
 target_link_libraries(${ENGINE_TARGET} PRIVATE Vulkan::Headers GPUOpen::VulkanMemoryAllocator)
 target_link_libraries(${ENGINE_TARGET} PRIVATE ghcFilesystem::ghc_filesystem)
 target_link_libraries(${ENGINE_TARGET} PRIVATE EnTT::EnTT)
+target_link_libraries(${ENGINE_TARGET} PRIVATE ${TINYGLTF_INCLUDE_DIRS})
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 

@@ -1,11 +1,12 @@
 /**
  * @file main.cpp
- * @brief Demo3D：进入 3D 世界 - 透视、深度缓冲、纹理立方体
+ * @brief Demo3D：进入 3D 世界 - 透视、深度缓冲、OBJ 模型加载
  */
 
 #include "engine.hpp"
 
 #include "core/logger.hpp"
+#include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "core/time.hpp"
 #include "platform/event_pump.hpp"
@@ -22,74 +23,35 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-struct Vertex {
-    glm::vec3 position;
-    glm::vec2 uv;
-};
+using Vertex = lumen::core::ObjVertex;
 
-/// UBO：mat4 mvp (std140 对齐，64 字节)
+/// UBO：mat4 mvp + mat3 normalMatrix + 4 光源 (std140 对齐)
 struct UBO {
     glm::mat4 mvp;
+    glm::mat3 normalMatrix;
+    glm::vec4 light0;  // xyz=方向 w=强度
+    glm::vec4 light1;
+    glm::vec4 light2;
+    glm::vec4 light3;
 };
 
 namespace {
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
-
-// 立方体：24 顶点（每面 4 个，便于 UV 映射），36 索引
-const std::array<Vertex, 24> kCubeVertices = { {
-    // 前 (+Z)
-    { { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f } },
-    { { -0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f } },
-    { { 0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f } },
-    { { 0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f } },
-    // 后 (-Z)
-    { { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f } },
-    { { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f } },
-    { { -0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f } },
-    { { -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f } },
-    // 右 (+X)
-    { { 0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f } },
-    { { 0.5f, 0.5f, 0.5f }, { 0.0f, 0.0f } },
-    { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f } },
-    { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f } },
-    // 左 (-X)
-    { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f } },
-    { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f } },
-    { { -0.5f, 0.5f, 0.5f }, { 1.0f, 0.0f } },
-    { { -0.5f, -0.5f, 0.5f }, { 1.0f, 1.0f } },
-    // 上 (+Y)
-    { { -0.5f, 0.5f, 0.5f }, { 0.0f, 1.0f } },
-    { { -0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f } },
-    { { 0.5f, 0.5f, -0.5f }, { 1.0f, 0.0f } },
-    { { 0.5f, 0.5f, 0.5f }, { 1.0f, 1.0f } },
-    // 下 (-Y)
-    { { -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f } },
-    { { -0.5f, -0.5f, 0.5f }, { 0.0f, 0.0f } },
-    { { 0.5f, -0.5f, 0.5f }, { 1.0f, 0.0f } },
-    { { 0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f } },
-} };
-
-const std::array<uint16_t, 36> kCubeIndices = {
-    0,  1,  2,  0,  2,  3,   // 前
-    4,  5,  6,  4,  6,  7,   // 后
-    8,  9,  10, 8,  10, 11,  // 右
-    12, 13, 14, 12, 14, 15,  // 左
-    16, 17, 18, 16, 18, 19,  // 上
-    20, 21, 22, 20, 22, 23,  // 下
-};
+constexpr const char* kObjPath { "assets/meshes/monkey/monkey.obj" };
 
 } // namespace
 
 static int run_demo3d() {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
-    winConfig.title = "Demo3D - 纹理立方体";
+    winConfig.title = "Demo3D - OBJ 模型";
     winConfig.width = 1280;
     winConfig.height = 720;
 
@@ -165,16 +127,32 @@ static int run_demo3d() {
         return -1;
     }
 
+    // OBJ 模型加载
+    lumen::core::ObjMesh mesh;
+    std::string objPath = lumen::core::get_resource_path(kObjPath);
+    if (!lumen::core::load_obj(objPath, mesh)) {
+        LUMEN_APP_LOG_ERROR("OBJ 加载失败: {}", objPath);
+        return -1;
+    }
+    if (mesh.vertices.empty() || mesh.indices.empty()) {
+        LUMEN_APP_LOG_ERROR("OBJ 模型为空: {}", objPath);
+        return -1;
+    }
+
     // 顶点 / 索引缓冲
     lumen::render::VertexBuffer vertexBuffer;
     lumen::render::IndexBuffer indexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(kCubeVertices)) ||
-        !indexBuffer.create(ctx, sizeof(kCubeIndices))) {
+    const size_t vertexBytes = mesh.vertices.size() * sizeof(Vertex);
+    const size_t indexBytes = mesh.indices.size() * sizeof(uint32_t);
+    if (!vertexBuffer.create(ctx, vertexBytes) ||
+        !indexBuffer.create(ctx, indexBytes)) {
         return -1;
     }
-    vertexBuffer.upload(kCubeVertices.data(), sizeof(kCubeVertices));
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(kCubeIndices.data(), sizeof(kCubeIndices));
+    vertexBuffer.upload(mesh.vertices.data(), vertexBytes);
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
+    indexBuffer.upload(mesh.indices.data(), indexBytes);
+
+    const uint32_t indexCount = static_cast<uint32_t>(mesh.indices.size());
 
     lumen::render::CommandPool cmdPool;
     if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
@@ -208,7 +186,8 @@ static int run_demo3d() {
     lumen::render::DescriptorSetLayout descLayout;
     descLayout.create(ctx,
                       { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                         VK_SHADER_STAGE_VERTEX_BIT },
+                         VK_SHADER_STAGE_VERTEX_BIT |
+                             VK_SHADER_STAGE_FRAGMENT_BIT },
                         { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
                           VK_SHADER_STAGE_FRAGMENT_BIT } });
 
@@ -229,12 +208,15 @@ static int run_demo3d() {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
             sizeof(UBO));
         lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSets[i], 1, texture.view(),
-            texture.sampler(), texture.descriptor_layout());
+            ctx.device(), descriptorSets[i], 1, texture.view(), texture.sampler());
     }
 
     lumen::render::PipelineLayout pipelineLayout;
-    pipelineLayout.create(ctx, { descLayout.handle() }, {});
+    VkPushConstantRange pushRange {};
+    pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushRange.offset = 0;
+    pushRange.size = sizeof(uint32_t);
+    pipelineLayout.create(ctx, { descLayout.handle() }, { pushRange });
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
     pipeConfig.stages.push_back(
@@ -247,10 +229,12 @@ static int run_demo3d() {
         { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
+    pipeConfig.vertexAttributes.push_back(
+        { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) });
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
     pipeConfig.cullMode = VK_CULL_MODE_BACK_BIT;
-    pipeConfig.frontFace = VK_FRONT_FACE_CLOCKWISE;  // 投影 Y 翻转后需配合
+    pipeConfig.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // Blender OBJ 外表面为 CCW
 
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
@@ -258,16 +242,30 @@ static int run_demo3d() {
         return -1;
     }
 
+    // 线框管线
+    lumen::render::GraphicsPipelineConfig wireframeConfig = pipeConfig;
+    wireframeConfig.polygonMode = VK_POLYGON_MODE_LINE;
+    wireframeConfig.cullMode = VK_CULL_MODE_NONE;
+    lumen::render::GraphicsPipeline wireframePipeline;
+    if (!wireframePipeline.create(ctx, pipelineLayout.handle(),
+                                  renderPass.handle(), 0, wireframeConfig)) {
+        return -1;
+    }
+
     auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
     lumen::render::FrameSync frameSync;
     frameSync.create(ctx.device(), swapchain.image_count(), kMaxFramesInFlight);
 
-    LUMEN_APP_LOG_INFO("Demo3D 启动 [WASD] 旋转 [ESC] 退出");
+    LUMEN_APP_LOG_INFO(
+        "Demo3D 启动 [WASD] 相机 [鼠标拖拽] 模型 [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
+    uint32_t renderMode { 0 };  // 0=lit, 1=wireframe, 2=normal, 3=depth
     float orbitYaw { 0.0f };
     float orbitPitch { 0.3f };
     float orbitRadius { 2.5f };
-    float modelRotation { 0.0f };
+    float modelYaw { 0.0f };
+    float modelPitch { 0.0f };
+    constexpr float kMouseSensitivity { 0.005f };
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
@@ -277,8 +275,17 @@ static int run_demo3d() {
     lumen::platform::EventPump pump;
     pump.on_quit([&] { running = false; });
     pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        if (e.key == lumen::platform::Key::Escape)
+        if (e.key == lumen::platform::Key::Escape) {
             running = false;
+        } else if (e.key == lumen::platform::Key::Num0) {
+            renderMode = 0;
+        } else if (e.key == lumen::platform::Key::Num1) {
+            renderMode = 1;
+        } else if (e.key == lumen::platform::Key::Num2) {
+            renderMode = 2;
+        } else if (e.key == lumen::platform::Key::Num3) {
+            renderMode = 3;
+        }
     });
     pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
         fbWidth = r.width;
@@ -336,7 +343,12 @@ static int run_demo3d() {
         if (inp.is_key_down(lumen::platform::Key::S))
             orbitPitch = glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
 
-        modelRotation += dt * 0.8f;
+        // 鼠标左键拖拽旋转模型
+        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+            modelYaw -= inp.mouse_delta_x() * kMouseSensitivity;
+            modelPitch += inp.mouse_delta_y() * kMouseSensitivity;
+            modelPitch = glm::clamp(modelPitch, -1.5f, 1.5f);
+        }
 
         uint32_t imageIndex = swapchain.acquire_next_image(
             frameSync.image_available(currentFrame), VK_NULL_HANDLE,
@@ -353,26 +365,33 @@ static int run_demo3d() {
         glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0f),
                                      glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 proj = glm::perspective(
-            glm::radians(60.0f),
+            glm::radians(42.0f),
             static_cast<float>(swapchain.extent().width) /
                 static_cast<float>(swapchain.extent().height),
             0.1f, 100.0f);
-        proj[1][1] *= -1.0f;  // Vulkan NDC Y 向下，需配合 frontFace=CW
-        glm::mat4 model =
-            glm::rotate(glm::mat4(1.0f), modelRotation,
-                        glm::vec3(0.4f, 0.6f, 0.2f));
+        proj[1][1] *= -1.0f;  // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::rotate(model, modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        model = glm::rotate(model, modelPitch, glm::vec3(1.0f, 0.0f, 0.0f));
         UBO ubo {};
         ubo.mvp = proj * view * model;
+        ubo.normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
+        // 多光源：主光、填充光、背光、底光
+        ubo.light0 = glm::vec4(0.5f, 1.0f, 0.3f, 0.8f);   // 主光：上前方
+        ubo.light1 = glm::vec4(-0.7f, 0.5f, 0.2f, 0.5f);  // 填充：左侧
+        ubo.light2 = glm::vec4(0.2f, 0.3f, -1.0f, 0.4f);  // 背光：后方
+        ubo.light3 = glm::vec4(0.0f, -0.8f, 0.5f, 0.3f);  // 底光：减少黑影
         uniformBuffers[currentFrame].update(ubo);
 
-        vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
+        VkCommandBuffer cmd = cmdBuffers[currentFrame];
+        vkResetCommandBuffer(cmd, 0);
         VkCommandBufferBeginInfo beginInfo {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
-            VK_SUCCESS)
+        if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
             continue;
+        }
 
         VkRenderPassBeginInfo rpBegin {
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
@@ -386,35 +405,39 @@ static int run_demo3d() {
         rpBegin.clearValueCount = 2;
         rpBegin.pClearValues = clearValues;
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &rpBegin,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
         viewport.width = static_cast<float>(swapchain.extent().width);
         viewport.height = static_cast<float>(swapchain.extent().height);
         viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &viewport);
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
 
         VkRect2D scissor { { 0, 0 }, swapchain.extent() };
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        vkCmdBindPipeline(cmdBuffers[currentFrame],
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuffers[currentFrame],
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout.handle(), 0, 1,
-                                &descriptorSets[currentFrame], 0, nullptr);
+        VkPipeline activePipeline =
+            (renderMode == 1u) ? wireframePipeline.handle() : pipeline.handle();
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
+        vkCmdPushConstants(cmd, pipelineLayout.handle(),
+                           VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(renderMode),
+                           &renderMode);
+        VkDescriptorSet descSet = descriptorSets[currentFrame];
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout.handle(), 0, 1, &descSet, 0,
+                                nullptr);
 
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmdBuffers[currentFrame], indexBuffer.handle(), 0,
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
+        vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuffers[currentFrame], 36, 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
-        if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS)
+        vkCmdEndRenderPass(cmd);
+        if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
             continue;
+        }
 
         VkSemaphore waitSem = frameSync.image_available(currentFrame);
         VkSemaphore signalSem = frameSync.render_finished(imageIndex);
@@ -425,7 +448,7 @@ static int run_demo3d() {
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffers[currentFrame];
+        submitInfo.pCommandBuffers = &cmd;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 
