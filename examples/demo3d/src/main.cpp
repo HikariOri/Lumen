@@ -45,6 +45,13 @@ struct UBO {
     glm::vec4 light3;
 };
 
+/// Push Constants：mode + modelColor
+struct PushConstants {
+    uint32_t mode;
+    float _pad[3];
+    glm::vec4 modelColor;
+};
+
 namespace {
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
@@ -240,7 +247,7 @@ static int run_demo3d() {
     VkPushConstantRange pushRange {};
     pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
-    pushRange.size = sizeof(uint32_t);
+    pushRange.size = sizeof(PushConstants);
     pipelineLayout.create(ctx, { descLayout.handle() }, { pushRange });
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
@@ -295,6 +302,10 @@ static int run_demo3d() {
     bool running { true };
     double lastTime = lumen::core::get_time_seconds();
     float dt { 0.016f };
+    uint32_t nextSceneW { 0 };
+    uint32_t nextSceneH { 0 };
+    glm::vec4 clearColor { 0.1f, 0.12f, 0.18f, 1.0f };
+    glm::vec4 modelColor { 1.0f, 1.0f, 1.0f, 1.0f };
 
     // ImGui 后端
     lumen::ui::ImGuiBackendInitInfo imguiInfo;
@@ -335,7 +346,8 @@ static int run_demo3d() {
                 sceneRpBegin.framebuffer = sceneTarget.framebuffer();
                 sceneRpBegin.renderArea = { { 0, 0 }, sceneExtent };
                 VkClearValue sceneClearValues[2];
-                sceneClearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+                sceneClearValues[0].color = { { clearColor.r, clearColor.g,
+                                                clearColor.b, clearColor.a } };
                 sceneClearValues[1].depthStencil = { 1.0f, 0 };
                 sceneRpBegin.clearValueCount = 2;
                 sceneRpBegin.pClearValues = sceneClearValues;
@@ -355,9 +367,12 @@ static int run_demo3d() {
                                                 : pipeline.handle();
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   activePipeline);
+                PushConstants pushData {};
+                pushData.mode = renderMode;
+                pushData.modelColor = modelColor;
                 vkCmdPushConstants(cmd, pipelineLayout.handle(),
                                    VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(renderMode), &renderMode);
+                                   sizeof(PushConstants), &pushData);
                 VkDescriptorSet descSet = descriptorSets[currentFrame];
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         pipelineLayout.handle(), 0, 1, &descSet,
@@ -385,7 +400,8 @@ static int run_demo3d() {
                 rpBegin.framebuffer = framebuffers.get(swapchainImageIndex);
                 rpBegin.renderArea = { { 0, 0 }, swapchain.extent() };
                 VkClearValue clearValues[2];
-                clearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+                clearValues[0].color = { { clearColor.r, clearColor.g,
+                                           clearColor.b, clearColor.a } };
                 clearValues[1].depthStencil = { 1.0f, 0 };
                 rpBegin.clearValueCount = 2;
                 rpBegin.pClearValues = clearValues;
@@ -401,17 +417,15 @@ static int run_demo3d() {
 
                 ImGuiID dockspaceId =
                     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-
-                const VkExtent2D sceneExtent = sceneTarget.extent();
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 ImGui::Begin("Scene");
                 ImVec2 avail = ImGui::GetContentRegionAvail();
-                auto sw = static_cast<float>(sceneExtent.width);
-                auto sh = static_cast<float>(sceneExtent.height);
-                float scale = (avail.x / sw < avail.y / sh) ? (avail.x / sw)
-                                                            : (avail.y / sh);
-                scale = (scale > 1.0f) ? 1.0f : scale;
-                ImGui::Image(sceneTextureId, ImVec2(sw * scale, sh * scale));
+                ImGui::Image(sceneTextureId, avail);
+
+                // 记录本帧显示尺寸供下一帧调整离屏分辨率（1:1
+                // 像素匹配，省显存）
+                nextSceneW = std::max(1u, static_cast<uint32_t>(avail.x));
+                nextSceneH = std::max(1u, static_cast<uint32_t>(avail.y));
                 ImGui::End();
 
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
@@ -419,7 +433,17 @@ static int run_demo3d() {
                 ImGui::SetNextWindowSize(ImVec2(280, 0),
                                          ImGuiCond_FirstUseEver);
                 ImGui::Begin("Demo3D");
-                ImGui::Text("Render: [0]Lit [1]Wireframe [2]Normal [3]Depth");
+                ImGui::Text("Render Mode");
+                int mode = static_cast<int>(renderMode);
+                ImGui::RadioButton("Lit", &mode, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Wireframe", &mode, 1);
+                ImGui::RadioButton("Normal", &mode, 2);
+                ImGui::SameLine();
+                ImGui::RadioButton("Depth", &mode, 3);
+                renderMode = static_cast<uint32_t>(mode);
+                ImGui::ColorEdit4("Clear Color", glm::value_ptr(clearColor));
+                ImGui::ColorEdit4("Model Color", glm::value_ptr(modelColor));
                 ImGui::Separator();
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
@@ -430,6 +454,39 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
+                ImGui::End();
+
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowPos(ImVec2(10, 300), ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
+                ImGui::Begin("GPU Capabilities");
+                const auto gpuInfo = ctx.physical_device_info();
+                ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "%s",
+                                  gpuInfo.deviceName.c_str());
+                ImGui::Text("Type: %s",
+                           lumen::render::device_type_name(gpuInfo.deviceType));
+                ImGui::Text("Vendor ID: 0x%04X", gpuInfo.vendorId);
+                ImGui::Text("Device ID: 0x%04X", gpuInfo.deviceId);
+                ImGui::Text("API: %u.%u.%u", VK_VERSION_MAJOR(gpuInfo.apiVersion),
+                           VK_VERSION_MINOR(gpuInfo.apiVersion),
+                           VK_VERSION_PATCH(gpuInfo.apiVersion));
+                ImGui::Text("Driver: 0x%08X", gpuInfo.driverVersion);
+                if (gpuInfo.deviceLocalMemoryBytes > 0) {
+                    const double vramMB =
+                        static_cast<double>(gpuInfo.deviceLocalMemoryBytes) /
+                        (1024.0 * 1024.0);
+                    ImGui::Text("VRAM: %.0f MiB", vramMB);
+                }
+                ImGui::Separator();
+                const auto& limits =
+                    ctx.physical_device_properties().limits;
+                ImGui::Text("maxImageDimension2D: %u", limits.maxImageDimension2D);
+                ImGui::Text("maxUniformBufferRange: %u KiB",
+                            limits.maxUniformBufferRange / 1024);
+                ImGui::Text("maxStorageBufferRange: %u KiB",
+                            limits.maxStorageBufferRange / 1024);
+                ImGui::Text("maxPushConstantsSize: %u bytes",
+                            limits.maxPushConstantsSize);
                 ImGui::End();
 
                 lumen::ui::imgui_backend_render(cmd);
@@ -535,6 +592,8 @@ static int run_demo3d() {
                 rgDepth = lumen::render::RGImage::from_texture(
                     sceneTarget.depth_image(), true);
                 rgSwapchain = lumen::render::RGImage::from_swapchain(swapchain);
+                nextSceneW = static_cast<uint32_t>(fbWidth);
+                nextSceneH = static_cast<uint32_t>(fbHeight);
             }
             needRecreateSwapchain = false;
             continue;
@@ -555,6 +614,25 @@ static int run_demo3d() {
         lastTime = now;
 
         lumen::ui::imgui_backend_new_frame();
+
+        // 根据上一帧 UI 计算的显示尺寸调整离屏渲染分辨率（wait_idle
+        // 避免多帧并发时资源冲突）
+        if (nextSceneW > 0 && nextSceneH > 0 &&
+            (sceneTarget.extent().width != nextSceneW ||
+             sceneTarget.extent().height != nextSceneH)) {
+            ctx.wait_idle();
+            sceneTarget.resize(ctx, nextSceneW, nextSceneH);
+            lumen::ui::imgui_backend_remove_texture(
+                reinterpret_cast<void *>(sceneTextureId));
+            sceneTextureId = reinterpret_cast<ImTextureID>(
+                lumen::ui::imgui_backend_add_texture(
+                    sceneSampler.handle(), sceneTarget.color_view(),
+                    sceneTarget.color_sample_layout()));
+            rgColor = lumen::render::RGImage::from_texture(
+                sceneTarget.color_image(), false);
+            rgDepth = lumen::render::RGImage::from_texture(
+                sceneTarget.depth_image(), true);
+        }
 
         const auto &inp = pump.input();
         const bool imguiWantsInput = ImGui::GetIO().WantCaptureMouse ||
@@ -600,10 +678,12 @@ static int run_demo3d() {
                                     std::cos(orbitYaw) * std::cos(orbitPitch));
         glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0f),
                                      glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 proj = glm::perspective(glm::radians(42.0f),
-                                          static_cast<float>(fbWidth) /
-                                              static_cast<float>(fbHeight),
-                                          0.1f, 100.0f);
+        const VkExtent2D sceneExtentForProj = sceneTarget.extent();
+        glm::mat4 proj =
+            glm::perspective(glm::radians(42.0f),
+                             static_cast<float>(sceneExtentForProj.width) /
+                                 static_cast<float>(sceneExtentForProj.height),
+                             0.1f, 100.0f);
         proj[1][1] *= -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::rotate(model, modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));

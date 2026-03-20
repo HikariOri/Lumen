@@ -6,7 +6,8 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants {
-    uint mode;  // 0=lit, 1=wireframe, 2=normal, 3=depth
+    layout(offset = 0) uint mode;       // 0=lit, 1=wireframe, 2=normal, 3=depth
+    layout(offset = 16) vec4 modelColor;
 } pc;
 
 layout(set = 0, binding = 0) uniform UBO {
@@ -23,7 +24,7 @@ layout(set = 0, binding = 1) uniform sampler2D texSampler;
 void main() {
     if (pc.mode == 1u) {
         // 线框模式：线为亮色
-        outColor = vec4(1.0, 1.0, 1.0, 1.0);
+        outColor = vec4(pc.modelColor.rgb, 1.0);
         return;
     }
     if (pc.mode == 2u) {
@@ -38,7 +39,7 @@ void main() {
         outColor = vec4(vec3(d), 1.0);
         return;
     }
-    // mode 0: 多光源
+    // mode 0: 多光源 + 纹理 + modelColor
     vec3 n = normalize(fragNormal);
     float ambient = 0.5;
     float diff = 0.0;
@@ -48,5 +49,6 @@ void main() {
     diff += max(0.0, dot(n, normalize(ubo.light3.xyz))) * ubo.light3.w;
     float lighting = ambient + diff;
     vec4 texColor = texture(texSampler, fragUV);
-    outColor = vec4(texColor.rgb * lighting, texColor.a);
+    outColor = vec4(texColor.rgb * lighting * pc.modelColor.rgb,
+                   texColor.a * pc.modelColor.a);
 }
