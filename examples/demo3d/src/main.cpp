@@ -6,7 +6,6 @@
 #include "engine.hpp"
 
 #include "core/logger.hpp"
-#include "ui/imgui_backend.hpp"
 #include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "core/time.hpp"
@@ -14,6 +13,7 @@
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
+#include "render/pass/render_graph.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
@@ -23,6 +23,7 @@
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
+#include "ui/imgui_backend.hpp"
 
 #include <array>
 #include <string>
@@ -38,7 +39,7 @@ using Vertex = lumen::core::ObjVertex;
 struct UBO {
     glm::mat4 mvp;
     glm::mat3 normalMatrix;
-    glm::vec4 light0;  // xyz=方向 w=强度
+    glm::vec4 light0; // xyz=方向 w=强度
     glm::vec4 light1;
     glm::vec4 light2;
     glm::vec4 light3;
@@ -47,7 +48,9 @@ struct UBO {
 namespace {
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
-constexpr const char* kObjPath { "assets/meshes/monkey/monkey.obj" };
+constexpr const char *kObjPath { "assets/meshes/monkey/monkey.obj" };
+constexpr float kMinOrbitRadius { 0.8f };
+constexpr float kMaxOrbitRadius { 20.0f };
 
 } // namespace
 
@@ -73,8 +76,8 @@ static int run_demo3d() {
         return -1;
     }
 
-    lumen::render::Surface surface(ctx.instance(),
-                                   window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(
+        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Surface 创建失败");
         return -1;
@@ -183,8 +186,8 @@ static int run_demo3d() {
 
     // 纹理
     lumen::render::Texture texture;
-    std::string texPath =
-        lumen::core::get_resource_path("assets/textures/ikun2026_happy_new_year.jpg");
+    std::string texPath = lumen::core::get_resource_path(
+        "assets/textures/ikun2026_happy_new_year.jpg");
     if (!texture.create_from_file(ctx, texPath.c_str(), ctx.graphics_queue(),
                                   cmdPool)) {
         constexpr uint32_t kTexSize = 64;
@@ -201,17 +204,16 @@ static int run_demo3d() {
             }
         }
         texture.create_from_memory(ctx, pixels.data(), pixels.size(), kTexSize,
-                                  kTexSize, ctx.graphics_queue(), cmdPool);
+                                   kTexSize, ctx.graphics_queue(), cmdPool);
     }
 
     // Descriptor
     lumen::render::DescriptorSetLayout descLayout;
-    descLayout.create(ctx,
-                      { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                         VK_SHADER_STAGE_VERTEX_BIT |
-                             VK_SHADER_STAGE_FRAGMENT_BIT },
-                        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                          VK_SHADER_STAGE_FRAGMENT_BIT } });
+    descLayout.create(
+        ctx, { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
+               { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                 VK_SHADER_STAGE_FRAGMENT_BIT } });
 
     lumen::render::DescriptorPool descPool;
     descPool.create(
@@ -229,8 +231,9 @@ static int run_demo3d() {
             ctx.device(), descriptorSets[i], 0,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
             sizeof(UBO));
-        lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSets[i], 1, texture.view(), texture.sampler());
+        lumen::render::write_descriptor_image(ctx.device(), descriptorSets[i],
+                                              1, texture.view(),
+                                              texture.sampler());
     }
 
     lumen::render::PipelineLayout pipelineLayout;
@@ -256,7 +259,8 @@ static int run_demo3d() {
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
     pipeConfig.cullMode = VK_CULL_MODE_BACK_BIT;
-    pipeConfig.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // Blender OBJ 外表面为 CCW
+    pipeConfig.frontFace =
+        VK_FRONT_FACE_COUNTER_CLOCKWISE; // Blender OBJ 外表面为 CCW
 
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout.handle(),
@@ -290,6 +294,7 @@ static int run_demo3d() {
     uint32_t currentFrame { 0 };
     bool running { true };
     double lastTime = lumen::core::get_time_seconds();
+    float dt { 0.016f };
 
     // ImGui 后端
     lumen::ui::ImGuiBackendInitInfo imguiInfo;
@@ -302,13 +307,138 @@ static int run_demo3d() {
         return -1;
     }
 
-    ImTextureID sceneTextureId = reinterpret_cast<ImTextureID>(
-        lumen::ui::imgui_backend_add_texture(
+    auto sceneTextureId =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(), sceneTarget.color_view(),
             sceneTarget.color_sample_layout()));
 
-    pump.on_sdl_event([](const void* ev) {
-        ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event*>(ev));
+    // RenderGraph：声明 reads/writes，自动排序与同步
+    lumen::render::RGImage rgColor =
+        lumen::render::RGImage::from_texture(sceneTarget.color_image(), false);
+    lumen::render::RGImage rgDepth =
+        lumen::render::RGImage::from_texture(sceneTarget.depth_image(), true);
+    lumen::render::RGImage rgSwapchain =
+        lumen::render::RGImage::from_swapchain(swapchain);
+
+    lumen::render::RenderGraph renderGraph(&ctx);
+    renderGraph.add_pass(lumen::render::RGPass {
+        .name = "Scene",
+        .reads = {},
+        .writes = { &rgColor, &rgDepth },
+        .execute =
+            [&](VkCommandBuffer cmd, uint32_t /*swapchainImageIndex*/) {
+                const VkExtent2D sceneExtent = sceneTarget.extent();
+                VkRenderPassBeginInfo sceneRpBegin {
+                    VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+                };
+                sceneRpBegin.renderPass = sceneTarget.render_pass();
+                sceneRpBegin.framebuffer = sceneTarget.framebuffer();
+                sceneRpBegin.renderArea = { { 0, 0 }, sceneExtent };
+                VkClearValue sceneClearValues[2];
+                sceneClearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+                sceneClearValues[1].depthStencil = { 1.0f, 0 };
+                sceneRpBegin.clearValueCount = 2;
+                sceneRpBegin.pClearValues = sceneClearValues;
+                vkCmdBeginRenderPass(cmd, &sceneRpBegin,
+                                     VK_SUBPASS_CONTENTS_INLINE);
+
+                VkViewport sceneViewport {};
+                sceneViewport.width = static_cast<float>(sceneExtent.width);
+                sceneViewport.height = static_cast<float>(sceneExtent.height);
+                sceneViewport.maxDepth = 1.0f;
+                vkCmdSetViewport(cmd, 0, 1, &sceneViewport);
+                VkRect2D sceneScissor { { 0, 0 }, sceneExtent };
+                vkCmdSetScissor(cmd, 0, 1, &sceneScissor);
+
+                VkPipeline activePipeline = (renderMode == 1u)
+                                                ? wireframePipeline.handle()
+                                                : pipeline.handle();
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  activePipeline);
+                vkCmdPushConstants(cmd, pipelineLayout.handle(),
+                                   VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(renderMode), &renderMode);
+                VkDescriptorSet descSet = descriptorSets[currentFrame];
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        pipelineLayout.handle(), 0, 1, &descSet,
+                                        0, nullptr);
+                VkBuffer vb = vertexBuffer.handle();
+                VkDeviceSize vbOffset { 0 };
+                vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
+                vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
+                                     indexBuffer.vk_index_type());
+                vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+                vkCmdEndRenderPass(cmd);
+            },
+    });
+
+    renderGraph.add_pass(lumen::render::RGPass {
+        .name = "UI",
+        .reads = { &rgColor },
+        .writes = { &rgSwapchain },
+        .execute =
+            [&](VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
+                VkRenderPassBeginInfo rpBegin {
+                    VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+                };
+                rpBegin.renderPass = renderPass.handle();
+                rpBegin.framebuffer = framebuffers.get(swapchainImageIndex);
+                rpBegin.renderArea = { { 0, 0 }, swapchain.extent() };
+                VkClearValue clearValues[2];
+                clearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+                clearValues[1].depthStencil = { 1.0f, 0 };
+                rpBegin.clearValueCount = 2;
+                rpBegin.pClearValues = clearValues;
+                vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+                VkViewport viewport {};
+                viewport.width = static_cast<float>(swapchain.extent().width);
+                viewport.height = static_cast<float>(swapchain.extent().height);
+                viewport.maxDepth = 1.0f;
+                vkCmdSetViewport(cmd, 0, 1, &viewport);
+                VkRect2D scissor { { 0, 0 }, swapchain.extent() };
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+                ImGuiID dockspaceId =
+                    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+                const VkExtent2D sceneExtent = sceneTarget.extent();
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::Begin("Scene");
+                ImVec2 avail = ImGui::GetContentRegionAvail();
+                auto sw = static_cast<float>(sceneExtent.width);
+                auto sh = static_cast<float>(sceneExtent.height);
+                float scale = (avail.x / sw < avail.y / sh) ? (avail.x / sw)
+                                                            : (avail.y / sh);
+                scale = (scale > 1.0f) ? 1.0f : scale;
+                ImGui::Image(sceneTextureId, ImVec2(sw * scale, sh * scale));
+                ImGui::End();
+
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+                ImGui::SetNextWindowSize(ImVec2(280, 0),
+                                         ImGuiCond_FirstUseEver);
+                ImGui::Begin("Demo3D");
+                ImGui::Text("Render: [0]Lit [1]Wireframe [2]Normal [3]Depth");
+                ImGui::Separator();
+                ImGui::SliderFloat("Camera Distance", &orbitRadius,
+                                   kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
+                ImGui::SliderFloat("Model Yaw", &modelYaw, -3.14f, 3.14f,
+                                   "%.2f");
+                ImGui::SliderFloat("Model Pitch", &modelPitch, -1.5f, 1.5f,
+                                   "%.2f");
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
+                                   1.0f / (dt > 0.0f ? dt : 0.016f));
+                ImGui::End();
+
+                lumen::ui::imgui_backend_render(cmd);
+                vkCmdEndRenderPass(cmd);
+            },
+    });
+
+    pump.on_sdl_event([](const void *ev) {
+        ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event *>(ev));
     });
 
     LUMEN_APP_LOG_INFO(
@@ -317,8 +447,6 @@ static int run_demo3d() {
 
     constexpr float kMouseSensitivity { 0.007f };
     constexpr float kZoomSpeed { 0.25f };
-    constexpr float kMinOrbitRadius { 0.8f };
-    constexpr float kMaxOrbitRadius { 20.0f };
 
     pump.on_quit([&] { running = false; });
     pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
@@ -340,22 +468,24 @@ static int run_demo3d() {
         needRecreateSwapchain = true;
     });
     // 拖拽时启用相对鼠标模式（ImGui 未占用时）
-    pump.on_mouse_button_down([&](const lumen::platform::EventMouseButtonDown &e) {
-        if (ImGui::GetIO().WantCaptureMouse)
-            return;
-        if (e.button == lumen::platform::MouseButton::Left ||
-            e.button == lumen::platform::MouseButton::Right) {
-            SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
-        }
-    });
+    pump.on_mouse_button_down(
+        [&](const lumen::platform::EventMouseButtonDown &e) {
+            if (ImGui::GetIO().WantCaptureMouse)
+                return;
+            if (e.button == lumen::platform::MouseButton::Left ||
+                e.button == lumen::platform::MouseButton::Right) {
+                SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
+            }
+        });
     pump.on_mouse_button_up([&](const lumen::platform::EventMouseButtonUp &e) {
         if (e.button == lumen::platform::MouseButton::Left ||
             e.button == lumen::platform::MouseButton::Right) {
             const auto &inp = pump.input();
-            bool otherDown =
-                (e.button == lumen::platform::MouseButton::Left
-                     ? inp.is_mouse_button_down(lumen::platform::MouseButton::Right)
-                     : inp.is_mouse_button_down(lumen::platform::MouseButton::Left));
+            bool otherDown = (e.button == lumen::platform::MouseButton::Left
+                                  ? inp.is_mouse_button_down(
+                                        lumen::platform::MouseButton::Right)
+                                  : inp.is_mouse_button_down(
+                                        lumen::platform::MouseButton::Left));
             if (!otherDown) {
                 SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
             }
@@ -364,9 +494,8 @@ static int run_demo3d() {
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
         if (ImGui::GetIO().WantCaptureMouse)
             return;
-        orbitRadius =
-            glm::clamp(orbitRadius - e.deltaY * kZoomSpeed, kMinOrbitRadius,
-                       kMaxOrbitRadius);
+        orbitRadius = glm::clamp(orbitRadius - e.deltaY * kZoomSpeed,
+                                 kMinOrbitRadius, kMaxOrbitRadius);
     });
 
     constexpr float kOrbitSpeed = 1.2f;
@@ -381,18 +510,18 @@ static int run_demo3d() {
             window.get_framebuffer_size(&fbWidth, &fbHeight);
             if (fbWidth > 0 && fbHeight > 0) {
                 lumen::render::Image newDepth;
-                newDepth.create_depth_attachment(ctx,
-                                                 static_cast<uint32_t>(fbWidth),
-                                                 static_cast<uint32_t>(fbHeight));
+                newDepth.create_depth_attachment(
+                    ctx, static_cast<uint32_t>(fbWidth),
+                    static_cast<uint32_t>(fbHeight));
                 depthImage = std::move(newDepth);
                 lumen::render::recreate_swapchain_resources(
-                    ctx, swapchain, framebuffers, frameSync, renderPass.handle(),
-                    static_cast<uint32_t>(fbWidth),
+                    ctx, swapchain, framebuffers, frameSync,
+                    renderPass.handle(), static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight), kMaxFramesInFlight,
                     depthImage.view());
 
                 lumen::ui::imgui_backend_remove_texture(
-                    reinterpret_cast<void*>(sceneTextureId));
+                    reinterpret_cast<void *>(sceneTextureId));
 
                 sceneTarget.resize(ctx, static_cast<uint32_t>(fbWidth),
                                    static_cast<uint32_t>(fbHeight));
@@ -400,6 +529,12 @@ static int run_demo3d() {
                     lumen::ui::imgui_backend_add_texture(
                         sceneSampler.handle(), sceneTarget.color_view(),
                         sceneTarget.color_sample_layout()));
+
+                rgColor = lumen::render::RGImage::from_texture(
+                    sceneTarget.color_image(), false);
+                rgDepth = lumen::render::RGImage::from_texture(
+                    sceneTarget.depth_image(), true);
+                rgSwapchain = lumen::render::RGImage::from_swapchain(swapchain);
             }
             needRecreateSwapchain = false;
             continue;
@@ -416,14 +551,14 @@ static int run_demo3d() {
             break;
 
         double now = lumen::core::get_time_seconds();
-        float dt = static_cast<float>(now - lastTime);
+        dt = static_cast<float>(now - lastTime);
         lastTime = now;
 
         lumen::ui::imgui_backend_new_frame();
 
         const auto &inp = pump.input();
-        const bool imguiWantsInput =
-            ImGui::GetIO().WantCaptureMouse || ImGui::GetIO().WantCaptureKeyboard;
+        const bool imguiWantsInput = ImGui::GetIO().WantCaptureMouse ||
+                                     ImGui::GetIO().WantCaptureKeyboard;
         if (!imguiWantsInput) {
             if (inp.is_key_down(lumen::platform::Key::A))
                 orbitYaw += kOrbitSpeed * dt;
@@ -460,17 +595,16 @@ static int run_demo3d() {
 
         // MVP 矩阵
         glm::vec3 cameraPos =
-            orbitRadius *
-            glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
-                      std::sin(orbitPitch),
-                      std::cos(orbitYaw) * std::cos(orbitPitch));
+            orbitRadius * glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
+                                    std::sin(orbitPitch),
+                                    std::cos(orbitYaw) * std::cos(orbitPitch));
         glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0f),
                                      glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 proj = glm::perspective(
-            glm::radians(42.0f),
-            static_cast<float>(fbWidth) / static_cast<float>(fbHeight), 0.1f,
-            100.0f);
-        proj[1][1] *= -1.0f;  // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
+        glm::mat4 proj = glm::perspective(glm::radians(42.0f),
+                                          static_cast<float>(fbWidth) /
+                                              static_cast<float>(fbHeight),
+                                          0.1f, 100.0f);
+        proj[1][1] *= -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::rotate(model, modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
         model = glm::rotate(model, modelPitch, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -478,10 +612,10 @@ static int run_demo3d() {
         ubo.mvp = proj * view * model;
         ubo.normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
         // 多光源：方向为从表面指向光源，Blender 猴头正面朝 -Z
-        ubo.light0 = glm::vec4(0.0f, 0.5f, -1.0f, 1.2f);   // 主光：正前方偏上，强
-        ubo.light1 = glm::vec4(-0.6f, 0.5f, -0.6f, 0.7f);  // 填充：左前方
-        ubo.light2 = glm::vec4(0.5f, 0.3f, -0.8f, 0.6f);   // 右前方补光
-        ubo.light3 = glm::vec4(0.0f, -0.5f, -0.9f, 0.5f);  // 底光：照下巴
+        ubo.light0 = glm::vec4(0.0f, 0.5f, -1.0f, 1.2f); // 主光：正前方偏上，强
+        ubo.light1 = glm::vec4(-0.6f, 0.5f, -0.6f, 0.7f); // 填充：左前方
+        ubo.light2 = glm::vec4(0.5f, 0.3f, -0.8f, 0.6f);  // 右前方补光
+        ubo.light3 = glm::vec4(0.0f, -0.5f, -0.9f, 0.5f); // 底光：照下巴
         uniformBuffers[currentFrame].update(ubo);
 
         VkCommandBuffer cmd = cmdBuffers[currentFrame];
@@ -494,102 +628,8 @@ static int run_demo3d() {
             continue;
         }
 
-        const VkExtent2D sceneExtent = sceneTarget.extent();
+        renderGraph.execute(cmd, imageIndex);
 
-        // Pass 1: render 3D to offscreen
-        VkRenderPassBeginInfo sceneRpBegin {
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-        };
-        sceneRpBegin.renderPass = sceneTarget.render_pass();
-        sceneRpBegin.framebuffer = sceneTarget.framebuffer();
-        sceneRpBegin.renderArea = { { 0, 0 }, sceneExtent };
-        VkClearValue sceneClearValues[2];
-        sceneClearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
-        sceneClearValues[1].depthStencil = { 1.0f, 0 };
-        sceneRpBegin.clearValueCount = 2;
-        sceneRpBegin.pClearValues = sceneClearValues;
-        vkCmdBeginRenderPass(cmd, &sceneRpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport sceneViewport {};
-        sceneViewport.width = static_cast<float>(sceneExtent.width);
-        sceneViewport.height = static_cast<float>(sceneExtent.height);
-        sceneViewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &sceneViewport);
-        VkRect2D sceneScissor { { 0, 0 }, sceneExtent };
-        vkCmdSetScissor(cmd, 0, 1, &sceneScissor);
-
-        VkPipeline activePipeline =
-            (renderMode == 1u) ? wireframePipeline.handle() : pipeline.handle();
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
-        vkCmdPushConstants(cmd, pipelineLayout.handle(),
-                           VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(renderMode),
-                           &renderMode);
-        VkDescriptorSet descSet = descriptorSets[currentFrame];
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout.handle(), 0, 1, &descSet, 0,
-                                nullptr);
-        VkBuffer vb = vertexBuffer.handle();
-        VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
-                             indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
-        vkCmdEndRenderPass(cmd);
-
-        // Pass 2: render to swapchain (clear + ImGui)
-        VkRenderPassBeginInfo rpBegin {
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-        };
-        rpBegin.renderPass = renderPass.handle();
-        rpBegin.framebuffer = framebuffers.get(imageIndex);
-        rpBegin.renderArea = { { 0, 0 }, swapchain.extent() };
-        VkClearValue clearValues[2];
-        clearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
-        clearValues[1].depthStencil = { 1.0f, 0 };
-        rpBegin.clearValueCount = 2;
-        rpBegin.pClearValues = clearValues;
-        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport viewport {};
-        viewport.width = static_cast<float>(swapchain.extent().width);
-        viewport.height = static_cast<float>(swapchain.extent().height);
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        VkRect2D scissor { { 0, 0 }, swapchain.extent() };
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-        // ImGui (docking enabled)
-        ImGuiID dockspaceId =
-            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-
-        ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-        ImGui::Begin("Scene");
-        ImVec2 avail = ImGui::GetContentRegionAvail();
-        auto sw = static_cast<float>(sceneExtent.width);
-        auto sh = static_cast<float>(sceneExtent.height);
-        float scale = (avail.x / sw < avail.y / sh) ? (avail.x / sw) : (avail.y / sh);
-        scale = (scale > 1.0f) ? 1.0f : scale;
-        ImGui::Image(sceneTextureId, ImVec2(sw * scale, sh * scale));
-        ImGui::End();
-
-        ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Demo3D");
-        ImGui::Text("Render: [0]Lit [1]Wireframe [2]Normal [3]Depth");
-        ImGui::Separator();
-        ImGui::SliderFloat("Camera Distance", &orbitRadius, kMinOrbitRadius,
-                           kMaxOrbitRadius, "%.1f");
-        ImGui::SliderFloat("Model Yaw", &modelYaw, -3.14f, 3.14f, "%.2f");
-        ImGui::SliderFloat("Model Pitch", &modelPitch, -1.5f, 1.5f, "%.2f");
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
-                          1.0f / (dt > 0.0f ? dt : 0.016f));
-        ImGui::End();
-
-        lumen::ui::imgui_backend_render(cmd);
-
-        vkCmdEndRenderPass(cmd);
         if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
             continue;
         }

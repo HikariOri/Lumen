@@ -102,6 +102,11 @@ public:
         return static_cast<uint32_t>(imageViews_.size());
     }
 
+    /// 获取指定索引的 Image
+    [[nodiscard]] VkImage image(uint32_t index) const {
+        return index < images_.size() ? images_[index] : VK_NULL_HANDLE;
+    }
+
     /// 获取指定索引的 Image View
     [[nodiscard]] VkImageView image_view(uint32_t index) const {
         return index < imageViews_.size() ? imageViews_[index]

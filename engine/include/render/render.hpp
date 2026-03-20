@@ -14,6 +14,7 @@
 #include "shader.hpp"
 #include "pipeline.hpp"
 #include "command_buffer.hpp"
+#include "pass/render_graph.hpp"
 #include "pass/render_pass.hpp"
 #include "pass/render_target.hpp"
 #include "resource/buffer.hpp"

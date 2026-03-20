@@ -59,6 +59,11 @@ public:
     /// 颜色附件 ImageView（供 ImGui::Image 等采样）
     [[nodiscard]] VkImageView color_view() const;
 
+    /// 颜色附件 Image（供 RenderGraph 使用）
+    [[nodiscard]] const Image& color_image() const { return colorImage_; }
+    /// 深度附件 Image（供 RenderGraph 使用）
+    [[nodiscard]] const Image& depth_image() const { return depthImage_; }
+
     /// 颜色附件的最终 Layout（采样前需 transition 到此）
     [[nodiscard]] VkImageLayout color_sample_layout() const {
         return config_.colorFinalLayout;
