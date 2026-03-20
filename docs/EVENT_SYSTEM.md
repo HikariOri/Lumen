@@ -156,4 +156,4 @@ lumen::platform::modifier_name(Modifier::Shift);        // "Shift"
 
 - 新增事件类型：在 `event.hpp` 增加结构体，并加入 `Event` variant、`dispatch_` 和 `event_type_name`
 - 新增回调：在 EventPump 增加 `on_xxx` 与对应 `xxxFn` 类型
-- 多后端（如 GLFW）：可新增 `event_pump_glfw.cpp`，通过编译选项切换实现
+- 多后端：若需支持其他窗口库，可新增对应 `event_pump_xxx.cpp`，通过编译选项切换实现

@@ -11,7 +11,7 @@
 ### 1.1 定位
 
 - **类型**：实时 3D 渲染引擎（可嵌入游戏/工具/编辑器）
-- **图形 API**：Vulkan 1.x（优先 Vulkan 1.2+，便于使用 descriptor indexing、timeline semaphore 等）
+- **图形 API**：Vulkan 1.4（使用 Properties2/Features2 链，支持 descriptor indexing、timeline semaphore 等）
 - **目标平台**：Windows（主）、可选 Linux / macOS
 - **语言**：C++17/20，引擎核心 C++，着色器 GLSL 或 HLSL（经 glslang/glslc 或 DXC 编译）
 
@@ -32,8 +32,8 @@
 
 | 类别 | 库/工具 | 用途 |
 |------|---------|------|
-| 图形 API | Vulkan SDK (1.2+) | 实例、设备、管线、描述符等 |
-| 窗口与输入 | SDL3、GLFW | 平台抽象层，可同时适配两种后端（编译时或运行时选择） |
+| 图形 API | Vulkan SDK (1.4) | 实例、设备、管线、描述符等 |
+| 窗口与输入 | SDL3 | 窗口、输入、Vulkan Surface 创建 |
 | 数学 | glm | 向量、矩阵、四元数 |
 | UI | Dear ImGui + ImGui Vulkan 后端 | 编辑器/调试 UI、面板、拾取 |
 | 模型加载 | tinyobjloader / Assimp | OBJ、FBX、glTF 等 |
@@ -71,33 +71,27 @@
 │  - 命令缓冲、同步、内存管理、描述符集                        │
 ├─────────────────────────────────────────────────────────────┤
 │  平台层 (Platform)                                           │
-│  - Window/Input 抽象 + SDL3/GLFW 后端, 文件系统, 线程/任务   │
+│  - Window/Input 抽象 + SDL3 后端, 文件系统, 线程/任务         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 平台抽象：同时适配 SDL3 与 GLFW
+### 3.2 平台抽象：SDL3
 
-为支持不同项目偏好与平台行为，窗口与输入建议做**抽象接口 + 多后端**，可同时适配 SDL3 与 GLFW。
+窗口与输入采用**抽象接口 + SDL3 后端**。
 
 - **抽象接口（应用只依赖此层）**
   - **窗口**：创建/销毁、尺寸与分辨率、是否全屏、标题；获取供 Vulkan 创建 Surface 的句柄（如 `VkSurfaceKHR` 所需平台句柄）。
   - **输入**：轮询或事件回调、键/鼠/手柄状态、窗口焦点与关闭请求。
-  - **Surface 创建**：Vulkan 的 `vkCreateXXXSurfaceKHR` 在 SDL3 下用 `SDL_GetVulkanInstanceExtensions` 等 API 创建 Surface，在 GLFW 下用 `glfwCreateWindowSurface`；接口层提供“创建当前窗口的 VkSurfaceKHR”，由各后端实现。
-- **后端实现**
-  - **SDL3 后端**：`Window`/`Input` 的 SDL3 实现，内部用 SDL3 窗口与事件 API；适合需要 SDL3 音频、游戏手柄、多平台一致性的项目。
-  - **GLFW 后端**：`Window`/`Input` 的 GLFW 实现，内部用 `GLFWwindow`、`glfwPollEvents` 等；适合轻量、仅需窗口与输入的 Vulkan 示例或工具。
-- **选用方式**
-  - **编译时**：通过 CMake 选项（如 `USE_SDL3=ON` / `USE_GLFW=ON`）或宏，只编译并链接所选后端，减小二进制与依赖。
-  - **运行时**（可选）：配置或环境变量指定后端，动态加载或工厂创建对应实现；实现成本较高，可按需再做。
-- **注意**
-  - 两套 API 在事件模型（SDL3 事件队列 vs GLFW 回调）、手柄枚举、多窗口支持上略有差异，抽象层需统一为引擎内的事件/状态模型（如“本帧按键按下”“鼠标 Delta”等），避免上层同时依赖 SDL3/GLFW 专有类型。
+  - **Surface 创建**：Vulkan 的 `vkCreateXXXSurfaceKHR` 在 SDL3 下用 `SDL_GetVulkanInstanceExtensions`、`SDL Vulkan_CreateSurface` 等 API 创建 Surface；接口层提供“创建当前窗口的 VkSurfaceKHR”。
+- **SDL3 后端**
+  - `Window`/`Input` 的 SDL3 实现，内部用 SDL3 窗口与事件 API；支持音频、游戏手柄、多平台一致性。
 
 ### 3.3 核心模块划分
 
 | 模块 | 职责 | 主要类/组件 |
 |------|------|-------------|
 | **Core** | 引擎生命周期、配置、日志、全局服务定位 | Engine, Config, Logger |
-| **Platform** | 窗口与输入抽象；SDL3/GLFW 可选后端，创建 Vulkan Surface | IWindow, IInput, WindowConfig；SDL3Backend, GLFWBackend |
+| **Platform** | 窗口与输入抽象；SDL3 后端，创建 Vulkan Surface | IWindow, IInput, WindowConfig；SDL3Backend |
 | **VkContext** | Instance、PhysicalDevice、Device、Queue、Swapchain | VkContext, VkSwapchain |
 | **VkMemory** | 分配器、Buffer/Image 封装、 staging、上传 | VkAllocator, VkBuffer, VkImage |
 | **VkPipeline** | 管线布局、Graphics/Compute 管线、缓存 | Pipeline (重写), PipelineCache |
@@ -489,10 +483,9 @@ engine/
 │   ├── platform/
 │   │   ├── window.hpp               # 窗口抽象（尺寸、Surface 句柄、全屏等）
 │   │   ├── input.hpp                # 输入抽象（键/鼠/手柄、事件或轮询）
-│   │   ├── platform_config.hpp      # 后端枚举、配置（SDL3/GLFW 选择）
+│   │   ├── platform_config.hpp      # 平台配置
 │   │   └── backend/
-│   │       ├── sdl3_window.hpp      # SDL3 窗口/输入实现（可选编译）
-│   │       └── glfw_window.hpp      # GLFW 窗口/输入实现（可选编译）
+│   │       └── sdl3_window.hpp      # SDL3 窗口/输入实现
 │   ├── render/
 │   │   ├── context.hpp              # Vulkan 实例、设备、队列、Surface
 │   │   ├── swapchain.hpp            # Swapchain、帧同步
@@ -549,12 +542,9 @@ engine/
 │   │   ├── window.cpp               # 抽象层或工厂
 │   │   ├── input.cpp
 │   │   └── backend/
-│   │       ├── sdl3/                # SDL3 后端（USE_SDL3 时编译）
+│   │       └── sdl3/                # SDL3 后端
 │   │       │   ├── sdl3_window.cpp
 │   │       │   └── sdl3_input.cpp
-│   │       └── glfw/                # GLFW 后端（USE_GLFW 时编译）
-│   │           ├── glfw_window.cpp
-│   │           └── glfw_input.cpp
 │   ├── render/
 │   │   ├── context.cpp
 │   │   ├── swapchain.cpp
@@ -605,7 +595,7 @@ engine/
 | 目录 | 职责 |
 |------|------|
 | `include/engine` | 引擎核心、配置、日志、类型 |
-| `include/platform` | 窗口与输入抽象；`backend/` 下 SDL3/GLFW 实现，编译时选一或两者并存 |
+| `include/platform` | 窗口与输入抽象；`backend/` 下 SDL3 实现 |
 | `include/render` | 全部渲染相关：Vulkan 上下文、资源、管线、各 Pass、PBR、导出 |
 | `include/scene` | 场景图、物体、变换、相机、光源、网格、材质；程序化地形（terrain_chunk、terrain_generator） |
 | `include/asset` | 资源加载、编译、缓存；程序化噪声（Perlin、Simplex、Worley） |
@@ -626,7 +616,7 @@ engine/
 
 ### Phase 1：可渲染场景（MVP）
 
-- 窗口与输入抽象与后端（SDL3/GLFW）；基础配置与日志（分辨率、全屏等；日志级别与输出）。
+- 窗口与输入抽象与 SDL3 后端；基础配置与日志（分辨率、全屏等；日志级别与输出）。
 - 网格：顶点/索引 Buffer、简单 Uniform（MVP）；相机与 Transform 驱动 MVP。
 - 单 Pass 前向渲染：简单光照（如 Blinn-Phong）或最简 PBR（单方向光）；纹理与 Sampler、Mipmap。
 - **交付**：能加载一个 OBJ，带纹理与光照的静态场景；具备基本配置与日志。

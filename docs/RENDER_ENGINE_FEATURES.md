@@ -8,16 +8,14 @@
 
 ## 一、功能特性总览（按模块）
 
-### 0. 平台（窗口与输入，SDL3/GLFW 双适配）
+### 0. 平台（窗口与输入，SDL3）
 
 - [ ] 窗口抽象接口（创建、尺寸、全屏、获取 Vulkan Surface 用句柄）
-- [ ] 输入抽象接口（键/鼠/手柄状态或事件，与后端无关）
+- [ ] 输入抽象接口（键/鼠/手柄状态或事件）
 - [ ] SDL3 后端实现（SDL3 窗口与 Vulkan Surface 创建等）
-- [ ] GLFW 后端实现（GLFWwindow + glfwCreateWindowSurface 等）
-- [ ] 编译时选择后端（CMake 选项如 USE_SDL3 / USE_GLFW，或两者同时可用）
-- [ ] 统一事件/状态模型（应用层不直接依赖 SDL3/GLFW 类型）
+- [ ] 统一事件/状态模型（应用层不直接依赖 SDL3 类型）
 
-### 1. Vulkan 底层
+### 1. Vulkan 底层（Vulkan 1.4）
 
 - [ ] Instance 创建（Layer、Extension、Validation）
 - [ ] Physical Device 选择与 Queue 族
@@ -210,7 +208,7 @@
 
 ### Phase 1：可渲染场景（MVP）
 
-1. 平台层：窗口与输入抽象 + 至少一种后端（SDL3 或 GLFW），能创建 Vulkan Surface。  
+1. 平台层：窗口与输入抽象 + SDL3 后端，能创建 Vulkan Surface。  
 2. 基础配置与日志：配置文件（或硬编码默认）、日志级别与输出。  
 3. 顶点/索引 Buffer（含 Staging 上传）  
 4. Uniform Buffer（MVP）  
@@ -220,7 +218,7 @@
 8. 模型加载（OBJ）+ 纹理加载  
 9. 深度缓冲 + 深度测试  
 10. 简单光照（Blinn-Phong 或最简 PBR 单光）  
-**验收**：加载一个带纹理的 OBJ，有基础光照，可旋转视角；可在 SDL3 或 GLFW 下编译运行；有日志与基本配置。
+**验收**：加载一个带纹理的 OBJ，有基础光照，可旋转视角；SDL3 窗口与 Vulkan Surface；有日志与基本配置。
 
 ---
 
