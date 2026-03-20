@@ -16,6 +16,8 @@ namespace lumen {
 namespace render {
 
 class Context;
+class Framebuffer;
+class FrameSync;
 
 /// Swapchain 配置
 struct SwapchainConfig {
@@ -135,6 +137,30 @@ private:
     uint32_t graphicsQueueFamily_ { 0 };
     uint32_t presentQueueFamily_ { 0 };
 };
+
+/**
+ * @brief 重建 Swapchain 及依赖资源（Framebuffers、FrameSync）
+ *
+ * 窗口 resize 或 Present 返回 OUT_OF_DATE 时调用。内部执行：
+ * ctx.wait_idle() → swapchain.resize() → framebuffers.create() → frameSync.create()
+ *
+ * @param ctx Vulkan 上下文
+ * @param swapchain Swapchain（会被 resize）
+ * @param framebuffers Framebuffer 集合（会重建）
+ * @param frameSync 帧同步对象（会重建）
+ * @param renderPass RenderPass 句柄（用于 framebuffers）
+ * @param width 新宽度（通常来自 window.get_framebuffer_size）
+ * @param height 新高度
+ * @param framesInFlight 并发帧数
+ * @param depthImageView 深度附件 ImageView，VK_NULL_HANDLE 表示无深度
+ * @return 成功返回 true；width/height 无效或 resize 失败返回 false
+ */
+bool recreate_swapchain_resources(const Context& ctx, Swapchain& swapchain,
+                                  Framebuffer& framebuffers,
+                                  FrameSync& frameSync,
+                                  VkRenderPass renderPass, uint32_t width,
+                                  uint32_t height, uint32_t framesInFlight,
+                                  VkImageView depthImageView = VK_NULL_HANDLE);
 
 } // namespace render
 } // namespace lumen

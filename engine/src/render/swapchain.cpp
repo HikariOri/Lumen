@@ -4,7 +4,9 @@
  */
 
 #include "render/swapchain.hpp"
+#include "render/command_buffer.hpp"
 #include "render/context.hpp"
+#include "render/pass/render_pass.hpp"
 #include "core/logger.hpp"
 
 #include <algorithm>
@@ -241,6 +243,31 @@ void Swapchain::destroy_() {
 }
 
 Swapchain::~Swapchain() { destroy_(); }
+
+bool recreate_swapchain_resources(const Context& ctx, Swapchain& swapchain,
+                                  Framebuffer& framebuffers,
+                                  FrameSync& frameSync, VkRenderPass renderPass,
+                                  uint32_t width, uint32_t height,
+                                  uint32_t framesInFlight,
+                                  VkImageView depthImageView) {
+    ctx.wait_idle();
+    if (width == 0 || height == 0) {
+        return false;
+    }
+    if (!swapchain.resize(width, height)) {
+        return false;
+    }
+    if (!framebuffers.create(ctx.device(), renderPass, swapchain,
+                             depthImageView)) {
+        return false;
+    }
+    if (!frameSync.create(ctx.device(), swapchain.image_count(),
+                          framesInFlight)) {
+        return false;
+    }
+    LUMEN_LOG_DEBUG("Swapchain 已重建 {}x{}", width, height);
+    return true;
+}
 
 } // namespace render
 } // namespace lumen

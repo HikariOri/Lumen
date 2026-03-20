@@ -366,18 +366,11 @@ static int run_sandbox() {
 
         // 窗口 resize 或 Present 返回 OUT_OF_DATE 时重建 Swapchain
         if (needRecreateSwapchain) {
-            ctx.wait_idle();
             window.get_framebuffer_size(&fbWidth, &fbHeight);
-            if (fbWidth > 0 && fbHeight > 0 &&
-                swapchain.resize(static_cast<uint32_t>(fbWidth),
-                                 static_cast<uint32_t>(fbHeight))) {
-                framebuffers.create(ctx.device(), renderPass.handle(),
-                                    swapchain, VK_NULL_HANDLE);
-                frameSync.create(ctx.device(), swapchain.image_count(),
-                                 kMaxFramesInFlight);
-                LUMEN_APP_LOG_DEBUG("Swapchain 已重建 {}x{}", fbWidth,
-                                    fbHeight);
-            }
+            lumen::render::recreate_swapchain_resources(
+                ctx, swapchain, framebuffers, frameSync, renderPass.handle(),
+                static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight),
+                kMaxFramesInFlight, VK_NULL_HANDLE);
             needRecreateSwapchain = false;
             continue;
         }
