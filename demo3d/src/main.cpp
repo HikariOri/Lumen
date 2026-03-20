@@ -257,7 +257,8 @@ static int run_demo3d() {
     frameSync.create(ctx.device(), swapchain.image_count(), kMaxFramesInFlight);
 
     LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [WASD] 相机 [鼠标拖拽] 模型 [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+        "Demo3D 启动 [WASD/右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
+        "[0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
     uint32_t renderMode { 0 };  // 0=lit, 1=wireframe, 2=normal, 3=depth
     float orbitYaw { 0.0f };
@@ -265,7 +266,10 @@ static int run_demo3d() {
     float orbitRadius { 2.5f };
     float modelYaw { 0.0f };
     float modelPitch { 0.0f };
-    constexpr float kMouseSensitivity { 0.005f };
+    constexpr float kMouseSensitivity { 0.007f };
+    constexpr float kZoomSpeed { 0.25f };
+    constexpr float kMinOrbitRadius { 0.8f };
+    constexpr float kMaxOrbitRadius { 20.0f };
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
@@ -291,6 +295,31 @@ static int run_demo3d() {
         fbWidth = r.width;
         fbHeight = r.height;
         needRecreateSwapchain = true;
+    });
+    // 拖拽时启用相对鼠标模式，实现无限旋转（光标不碰边）
+    pump.on_mouse_button_down([&](const lumen::platform::EventMouseButtonDown &e) {
+        if (e.button == lumen::platform::MouseButton::Left ||
+            e.button == lumen::platform::MouseButton::Right) {
+            SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
+        }
+    });
+    pump.on_mouse_button_up([&](const lumen::platform::EventMouseButtonUp &e) {
+        if (e.button == lumen::platform::MouseButton::Left ||
+            e.button == lumen::platform::MouseButton::Right) {
+            const auto &inp = pump.input();
+            bool otherDown =
+                (e.button == lumen::platform::MouseButton::Left
+                     ? inp.is_mouse_button_down(lumen::platform::MouseButton::Right)
+                     : inp.is_mouse_button_down(lumen::platform::MouseButton::Left));
+            if (!otherDown) {
+                SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
+            }
+        }
+    });
+    pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
+        orbitRadius =
+            glm::clamp(orbitRadius - e.deltaY * kZoomSpeed, kMinOrbitRadius,
+                       kMaxOrbitRadius);
     });
 
     constexpr float kOrbitSpeed = 1.2f;
@@ -343,11 +372,17 @@ static int run_demo3d() {
         if (inp.is_key_down(lumen::platform::Key::S))
             orbitPitch = glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
 
-        // 鼠标左键拖拽旋转模型
-        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+        // 左键拖拽旋转模型，右键拖拽旋转相机
+        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
             modelYaw -= inp.mouse_delta_x() * kMouseSensitivity;
             modelPitch += inp.mouse_delta_y() * kMouseSensitivity;
             modelPitch = glm::clamp(modelPitch, -1.5f, 1.5f);
+        }
+        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+            orbitYaw -= inp.mouse_delta_x() * kMouseSensitivity;
+            orbitPitch =
+                glm::clamp(orbitPitch + inp.mouse_delta_y() * kMouseSensitivity,
+                           0.1f, 1.4f);
         }
 
         uint32_t imageIndex = swapchain.acquire_next_image(
@@ -376,11 +411,11 @@ static int run_demo3d() {
         UBO ubo {};
         ubo.mvp = proj * view * model;
         ubo.normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
-        // 多光源：主光、填充光、背光、底光
-        ubo.light0 = glm::vec4(0.5f, 1.0f, 0.3f, 0.8f);   // 主光：上前方
-        ubo.light1 = glm::vec4(-0.7f, 0.5f, 0.2f, 0.5f);  // 填充：左侧
-        ubo.light2 = glm::vec4(0.2f, 0.3f, -1.0f, 0.4f);  // 背光：后方
-        ubo.light3 = glm::vec4(0.0f, -0.8f, 0.5f, 0.3f);  // 底光：减少黑影
+        // 多光源：方向为从表面指向光源，Blender 猴头正面朝 -Z
+        ubo.light0 = glm::vec4(0.0f, 0.5f, -1.0f, 1.2f);   // 主光：正前方偏上，强
+        ubo.light1 = glm::vec4(-0.6f, 0.5f, -0.6f, 0.7f);  // 填充：左前方
+        ubo.light2 = glm::vec4(0.5f, 0.3f, -0.8f, 0.6f);   // 右前方补光
+        ubo.light3 = glm::vec4(0.0f, -0.5f, -0.9f, 0.5f);  // 底光：照下巴
         uniformBuffers[currentFrame].update(ubo);
 
         VkCommandBuffer cmd = cmdBuffers[currentFrame];
