@@ -535,10 +535,7 @@ static int run_sandbox() {
 }
 
 int main() {
-    if (!lumen::core::Logger::init(
-            { /* default config with debug level */
-              .engine = { .level = spdlog::level::debug },
-              .app = { .level = spdlog::level::debug } })) {
+    if (!lumen::core::Logger::init()) {
         return -1;
     }
     int result = run_sandbox();

@@ -19,6 +19,18 @@ namespace core {
 
 namespace {
 
+spdlog::level::level_enum to_spdlog(LogLevel l) {
+    switch (l) {
+    case LogLevel::Trace: return spdlog::level::trace;
+    case LogLevel::Debug: return spdlog::level::debug;
+    case LogLevel::Info: return spdlog::level::info;
+    case LogLevel::Warn: return spdlog::level::warn;
+    case LogLevel::Error: return spdlog::level::err;
+    case LogLevel::Critical: return spdlog::level::critical;
+    default: return spdlog::level::info;
+    }
+}
+
 constexpr const char* k_engine_logger_name = "lumen";
 constexpr const char* k_app_logger_name = "app";
 
@@ -59,8 +71,9 @@ std::shared_ptr<spdlog::logger> create_logger(const char* name,
     }
     auto logger = std::make_shared<spdlog::logger>(
         name, sinks.begin(), sinks.end());
-    logger->set_level(pathCfg.level);
-    logger->flush_on(pathCfg.level);
+    auto lvl = to_spdlog(pathCfg.level);
+    logger->set_level(lvl);
+    logger->flush_on(lvl);
     return logger;
 }
 
@@ -92,7 +105,7 @@ bool Logger::init_(const LoggerConfig& config) {
 
     spdlog::set_default_logger(engineLogger);
     engineLogger->log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION},
-                     spdlog::level::info, "Logger 初始化完成 engine+app");
+                     to_spdlog(LogLevel::Info), "Logger 初始化完成 engine+app");
     return true;
 }
 
