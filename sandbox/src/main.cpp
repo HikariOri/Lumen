@@ -86,7 +86,17 @@ int main() {
         LUMEN_APP_LOG_ERROR("Vulkan Device 创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("Vulkan Device 创建成功");
+    {
+        auto gpu = ctx.physical_device_info();
+        LUMEN_APP_LOG_INFO(
+            "Vulkan Device 创建成功: {} ({})",
+            gpu.deviceName, lumen::render::device_type_name(gpu.deviceType));
+        if (gpu.deviceLocalMemoryBytes > 0) {
+            LUMEN_APP_LOG_INFO("  显存: {:.1f} GiB",
+                               gpu.deviceLocalMemoryBytes / (1024.0 * 1024.0 *
+                                                             1024.0));
+        }
+    }
 
     int w { 0 }, h { 0 };
     window.get_framebuffer_size(&w, &h);

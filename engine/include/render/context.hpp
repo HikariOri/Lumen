@@ -18,6 +18,30 @@
 namespace lumen {
     namespace render {
 
+        /// 物理设备类型
+        enum class PhysicalDeviceType : uint8_t {
+            Other,
+            Integrated,
+            Discrete,
+            Virtual,
+            Cpu,
+        };
+
+        /// 显卡信息（便于日志、UI 显示）
+        struct PhysicalDeviceInfo {
+            std::string deviceName;
+            PhysicalDeviceType deviceType { PhysicalDeviceType::Other };
+            uint32_t vendorId { 0 };
+            uint32_t deviceId { 0 };
+            uint32_t driverVersion { 0 };
+            uint32_t apiVersion { 0 };
+            /// 设备本地显存（VRAM）字节数，0 表示无法确定
+            VkDeviceSize deviceLocalMemoryBytes { 0 };
+        };
+
+        /// 设备类型名称（如 "Discrete GPU"）
+        const char* device_type_name(PhysicalDeviceType type);
+
         /// 上下文创建配置
         struct ContextConfig {
             /// 应用名称，用于 Instance 创建
@@ -115,6 +139,27 @@ namespace lumen {
                 return presentQueueFamily_;
             }
 
+            /// 物理设备属性（init_device 后有效）
+            [[nodiscard]] const VkPhysicalDeviceProperties &
+            physical_device_properties() const {
+                return physicalDeviceProperties_;
+            }
+
+            /// 物理设备特性（init_device 后有效）
+            [[nodiscard]] const VkPhysicalDeviceFeatures &
+            physical_device_features() const {
+                return physicalDeviceFeatures_;
+            }
+
+            /// 物理设备内存属性（init_device 后有效）
+            [[nodiscard]] const VkPhysicalDeviceMemoryProperties &
+            physical_device_memory_properties() const {
+                return physicalDeviceMemoryProperties_;
+            }
+
+            /// 显卡信息摘要（init_device 后有效）
+            [[nodiscard]] PhysicalDeviceInfo physical_device_info() const;
+
             /// 是否已初始化 Instance
             [[nodiscard]] bool has_instance() const {
                 return instance_ != VK_NULL_HANDLE;
@@ -138,6 +183,10 @@ namespace lumen {
             uint32_t graphicsQueueFamily_ { 0 };
             uint32_t presentQueueFamily_ { 0 };
             bool validationEnabled_ { false };
+
+            VkPhysicalDeviceProperties physicalDeviceProperties_ {};
+            VkPhysicalDeviceFeatures physicalDeviceFeatures_ {};
+            VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_ {};
         };
 
     } // namespace render
