@@ -4,14 +4,15 @@
  */
 
 #include "render/resource/descriptor.hpp"
-#include "render/context.hpp"
 #include "core/logger.hpp"
+#include "render/context.hpp"
+
 
 namespace lumen {
 namespace render {
 
-bool DescriptorSetLayout::create(const Context& ctx,
-                                 const std::vector<DescriptorBinding>& bindings) {
+bool DescriptorSetLayout::create(
+    const Context &ctx, const std::vector<DescriptorBinding> &bindings) {
     device_ = ctx.device();
 
     std::vector<VkDescriptorSetLayoutBinding> vkBindings(bindings.size());
@@ -23,7 +24,8 @@ bool DescriptorSetLayout::create(const Context& ctx,
     }
 
     VkDescriptorSetLayoutCreateInfo createInfo {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
     createInfo.bindingCount = static_cast<uint32_t>(vkBindings.size());
     createInfo.pBindings = vkBindings.data();
 
@@ -45,16 +47,16 @@ void DescriptorSetLayout::destroy_() {
 
 DescriptorSetLayout::~DescriptorSetLayout() { destroy_(); }
 
-DescriptorSetLayout::DescriptorSetLayout(DescriptorSetLayout&& other) noexcept
-    : device_ { other.device_ }
-    , layout_ { other.layout_ } {
+DescriptorSetLayout::DescriptorSetLayout(DescriptorSetLayout &&other) noexcept
+    : device_ { other.device_ }, layout_ { other.layout_ } {
     other.device_ = VK_NULL_HANDLE;
     other.layout_ = VK_NULL_HANDLE;
 }
 
-DescriptorSetLayout&
-DescriptorSetLayout::operator=(DescriptorSetLayout&& other) noexcept {
-    if (this == &other) return *this;
+DescriptorSetLayout &
+DescriptorSetLayout::operator=(DescriptorSetLayout &&other) noexcept {
+    if (this == &other)
+        return *this;
     destroy_();
     device_ = other.device_;
     layout_ = other.layout_;
@@ -65,8 +67,8 @@ DescriptorSetLayout::operator=(DescriptorSetLayout&& other) noexcept {
 
 // --- DescriptorPool ---
 
-bool DescriptorPool::create(const Context& ctx,
-                            const std::vector<DescriptorPoolSize>& poolSizes,
+bool DescriptorPool::create(const Context &ctx,
+                            const std::vector<DescriptorPoolSize> &poolSizes,
                             uint32_t maxSets) {
     device_ = ctx.device();
 
@@ -77,7 +79,8 @@ bool DescriptorPool::create(const Context& ctx,
     }
 
     VkDescriptorPoolCreateInfo createInfo {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+    };
     createInfo.poolSizeCount = static_cast<uint32_t>(vkSizes.size());
     createInfo.pPoolSizes = vkSizes.data();
     createInfo.maxSets = maxSets;
@@ -91,9 +94,10 @@ bool DescriptorPool::create(const Context& ctx,
 }
 
 bool DescriptorPool::allocate(VkDevice device, VkDescriptorSetLayout layout,
-                              VkDescriptorSet& outSet) {
+                              VkDescriptorSet &outSet) {
     VkDescriptorSetAllocateInfo allocInfo {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    };
     allocInfo.descriptorPool = pool_;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &layout;
@@ -116,15 +120,15 @@ void DescriptorPool::destroy_() {
 
 DescriptorPool::~DescriptorPool() { destroy_(); }
 
-DescriptorPool::DescriptorPool(DescriptorPool&& other) noexcept
-    : device_ { other.device_ }
-    , pool_ { other.pool_ } {
+DescriptorPool::DescriptorPool(DescriptorPool &&other) noexcept
+    : device_ { other.device_ }, pool_ { other.pool_ } {
     other.device_ = VK_NULL_HANDLE;
     other.pool_ = VK_NULL_HANDLE;
 }
 
-DescriptorPool& DescriptorPool::operator=(DescriptorPool&& other) noexcept {
-    if (this == &other) return *this;
+DescriptorPool &DescriptorPool::operator=(DescriptorPool &&other) noexcept {
+    if (this == &other)
+        return *this;
     destroy_();
     device_ = other.device_;
     pool_ = other.pool_;

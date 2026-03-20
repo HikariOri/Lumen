@@ -12,8 +12,8 @@ namespace lumen::render {
 
 // --- OffscreenRenderTarget ---
 
-bool OffscreenRenderTarget::create(const Context& ctx,
-                                   const OffscreenRenderTargetConfig& config) {
+bool OffscreenRenderTarget::create(const Context &ctx,
+                                   const OffscreenRenderTargetConfig &config) {
     if (config.width == 0 || config.height == 0) {
         LUMEN_LOG_ERROR("OffscreenRenderTarget: 无效尺寸 {}x{}", config.width,
                         config.height);
@@ -26,7 +26,7 @@ bool OffscreenRenderTarget::create(const Context& ctx,
     return create_internal_(ctx);
 }
 
-bool OffscreenRenderTarget::resize(const Context& ctx, uint32_t width,
+bool OffscreenRenderTarget::resize(const Context &ctx, uint32_t width,
                                    uint32_t height) {
     if (width == 0 || height == 0)
         return false;
@@ -57,7 +57,7 @@ void OffscreenRenderTarget::destroy_() {
     colorImage_ = Image();
 }
 
-bool OffscreenRenderTarget::create_internal_(const Context& ctx) {
+bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
     // Resize 时先释放旧资源，RenderPass 可复用
     if (framebuffer_.count() > 0) {
         framebuffer_.destroy();
@@ -112,17 +112,12 @@ bool OffscreenRenderTarget::create_internal_(const Context& ctx) {
     return true;
 }
 
-OffscreenRenderTarget::~OffscreenRenderTarget() {
-    destroy_();
-}
+OffscreenRenderTarget::~OffscreenRenderTarget() { destroy_(); }
 
 OffscreenRenderTarget::OffscreenRenderTarget(
-    OffscreenRenderTarget&& other) noexcept
-    : ctx_ { other.ctx_ },
-      config_ { other.config_ },
-      width_ { other.width_ },
-      height_ { other.height_ },
-      colorImage_ { std::move(other.colorImage_) },
+    OffscreenRenderTarget &&other) noexcept
+    : ctx_ { other.ctx_ }, config_ { other.config_ }, width_ { other.width_ },
+      height_ { other.height_ }, colorImage_ { std::move(other.colorImage_) },
       depthImage_ { std::move(other.depthImage_) },
       renderPass_ { std::move(other.renderPass_) },
       framebuffer_ { std::move(other.framebuffer_) } {
@@ -131,8 +126,8 @@ OffscreenRenderTarget::OffscreenRenderTarget(
     other.height_ = 0;
 }
 
-OffscreenRenderTarget&
-OffscreenRenderTarget::operator=(OffscreenRenderTarget&& other) noexcept {
+OffscreenRenderTarget &
+OffscreenRenderTarget::operator=(OffscreenRenderTarget &&other) noexcept {
     if (this == &other)
         return *this;
     destroy_();
@@ -152,8 +147,8 @@ OffscreenRenderTarget::operator=(OffscreenRenderTarget&& other) noexcept {
 
 // --- SwapchainRenderTarget ---
 
-void SwapchainRenderTarget::bind(Swapchain* swapchain,
-                                 Framebuffer* framebuffers) {
+void SwapchainRenderTarget::bind(Swapchain *swapchain,
+                                 Framebuffer *framebuffers) {
     swapchain_ = swapchain;
     framebuffers_ = framebuffers;
 }

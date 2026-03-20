@@ -28,7 +28,7 @@ public:
     [[nodiscard]] bool is_key_down(KeyCode key) const;
 
     /// 鼠标位置（窗口坐标系）
-    [[nodiscard]] void mouse_position(float& x, float& y) const {
+    [[nodiscard]] void mouse_position(float &x, float &y) const {
         x = mouseX_;
         y = mouseY_;
     }
@@ -36,7 +36,7 @@ public:
     [[nodiscard]] float mouse_y() const { return mouseY_; }
 
     /// 本帧鼠标位移
-    [[nodiscard]] void mouse_delta(float& dx, float& dy) const {
+    [[nodiscard]] void mouse_delta(float &dx, float &dy) const {
         dx = deltaX_;
         dy = deltaY_;
     }

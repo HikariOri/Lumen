@@ -35,7 +35,7 @@ struct ObjMesh {
  *
  * 支持无法线 / 无 UV 的 OBJ：缺法线时用面法线，缺 UV 时用 (0,0)。
  */
-bool load_obj(std::string_view filePath, ObjMesh& outMesh);
+bool load_obj(std::string_view filePath, ObjMesh &outMesh);
 
 } // namespace core
 } // namespace lumen

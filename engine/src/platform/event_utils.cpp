@@ -11,7 +11,7 @@
 namespace lumen::platform {
 
 std::string_view key_name(KeyCode key) {
-    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(key));
+    const char *name = SDL_GetScancodeName(static_cast<SDL_Scancode>(key));
     if (name && name[0] != '\0') {
         return name;
     }
@@ -20,12 +20,9 @@ std::string_view key_name(KeyCode key) {
 
 std::string_view mouse_button_name(MouseButton btn) {
     switch (btn) {
-    case MouseButton::Left:
-        return "Left";
-    case MouseButton::Middle:
-        return "Middle";
-    case MouseButton::Right:
-        return "Right";
+    case MouseButton::Left: return "Left";
+    case MouseButton::Middle: return "Middle";
+    case MouseButton::Right: return "Right";
     }
     return "Unknown";
 }
@@ -46,9 +43,9 @@ std::string_view modifier_name(Modifier mod) {
     return "None";
 }
 
-std::string_view event_type_name(const Event& e) {
+std::string_view event_type_name(const Event &e) {
     return std::visit(
-        [](auto&& arg) -> std::string_view {
+        [](auto &&arg) -> std::string_view {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, EventQuit>)
                 return "Quit";

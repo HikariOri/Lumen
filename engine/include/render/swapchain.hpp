@@ -41,10 +41,10 @@ struct SwapchainConfig {
 class Swapchain {
 public:
     Swapchain() = default;
-    Swapchain(const Swapchain&) = delete;
-    Swapchain(Swapchain&&) = default;
-    Swapchain& operator=(const Swapchain&) = delete;
-    Swapchain& operator=(Swapchain&&) = default;
+    Swapchain(const Swapchain &) = delete;
+    Swapchain(Swapchain &&) = default;
+    Swapchain &operator=(const Swapchain &) = delete;
+    Swapchain &operator=(Swapchain &&) = default;
     ~Swapchain();
 
     /**
@@ -56,8 +56,8 @@ public:
      * @param config 可选配置
      * @return 成功返回 true
      */
-    bool create(const Context& ctx, VkSurfaceKHR surface, uint32_t width,
-                uint32_t height, const SwapchainConfig& config = {});
+    bool create(const Context &ctx, VkSurfaceKHR surface, uint32_t width,
+                uint32_t height, const SwapchainConfig &config = {});
 
     /**
      * @brief 窗口 Resize 时重建 Swapchain
@@ -70,8 +70,10 @@ public:
     /**
      * @brief 获取下一帧图像索引
      * @param imageAvailableSemaphore 图像可用时将被 signal 的 semaphore
-     * @param fence 可选，传入 VK_NULL_HANDLE 表示不使用 fence（推荐，fence 仅用于 vkQueueSubmit）
-     * @param timeoutNs 超时纳秒，避免无限阻塞导致无法处理窗口事件；UINT64_MAX 表示无限等待
+     * @param fence 可选，传入 VK_NULL_HANDLE 表示不使用 fence（推荐，fence
+     * 仅用于 vkQueueSubmit）
+     * @param timeoutNs 超时纳秒，避免无限阻塞导致无法处理窗口事件；UINT64_MAX
+     * 表示无限等待
      * @return 成功返回图像索引，失败或超时返回 UINT32_MAX
      */
     uint32_t acquire_next_image(VkSemaphore imageAvailableSemaphore,
@@ -109,12 +111,11 @@ public:
 
     /// 获取指定索引的 Image View
     [[nodiscard]] VkImageView image_view(uint32_t index) const {
-        return index < imageViews_.size() ? imageViews_[index]
-                                         : VK_NULL_HANDLE;
+        return index < imageViews_.size() ? imageViews_[index] : VK_NULL_HANDLE;
     }
 
     /// 获取所有 Image Views
-    [[nodiscard]] const std::vector<VkImageView>& image_views() const {
+    [[nodiscard]] const std::vector<VkImageView> &image_views() const {
         return imageViews_;
     }
 
@@ -127,7 +128,7 @@ public:
 private:
     void destroy_();
     bool create_swapchain_(uint32_t width, uint32_t height,
-                          const SwapchainConfig& config);
+                           const SwapchainConfig &config);
     bool create_image_views_();
 
     VkDevice device_ { VK_NULL_HANDLE };
@@ -147,7 +148,8 @@ private:
  * @brief 重建 Swapchain 及依赖资源（Framebuffers、FrameSync）
  *
  * 窗口 resize 或 Present 返回 OUT_OF_DATE 时调用。内部执行：
- * ctx.wait_idle() → swapchain.resize() → framebuffers.create() → frameSync.create()
+ * ctx.wait_idle() → swapchain.resize() → framebuffers.create() →
+ * frameSync.create()
  *
  * @param ctx Vulkan 上下文
  * @param swapchain Swapchain（会被 resize）
@@ -160,11 +162,11 @@ private:
  * @param depthImageView 深度附件 ImageView，VK_NULL_HANDLE 表示无深度
  * @return 成功返回 true；width/height 无效或 resize 失败返回 false
  */
-bool recreate_swapchain_resources(const Context& ctx, Swapchain& swapchain,
-                                  Framebuffer& framebuffers,
-                                  FrameSync& frameSync,
-                                  VkRenderPass renderPass, uint32_t width,
-                                  uint32_t height, uint32_t framesInFlight,
+bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
+                                  Framebuffer &framebuffers,
+                                  FrameSync &frameSync, VkRenderPass renderPass,
+                                  uint32_t width, uint32_t height,
+                                  uint32_t framesInFlight,
                                   VkImageView depthImageView = VK_NULL_HANDLE);
 
 } // namespace render

@@ -107,7 +107,8 @@ bool Context::init_instance(const ContextConfig &config) {
                         static_cast<int>(result));
         return false;
     }
-    LUMEN_LOG_DEBUG("Vulkan instance 创建成功, validation={}", validationEnabled_);
+    LUMEN_LOG_DEBUG("Vulkan instance 创建成功, validation={}",
+                    validationEnabled_);
     return true;
 }
 

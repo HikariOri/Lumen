@@ -15,12 +15,9 @@ bool Input::is_key_down(KeyCode key) const {
 
 bool Input::is_mouse_button_down(MouseButton btn) const {
     switch (btn) {
-    case MouseButton::Left:
-        return mouseLeft_;
-    case MouseButton::Middle:
-        return mouseMiddle_;
-    case MouseButton::Right:
-        return mouseRight_;
+    case MouseButton::Left: return mouseLeft_;
+    case MouseButton::Middle: return mouseMiddle_;
+    case MouseButton::Right: return mouseRight_;
     }
     return false;
 }
@@ -37,15 +34,9 @@ void Input::update_key_(KeyCode key, bool down) {
 
 void Input::update_mouse_button_(MouseButton btn, bool down) {
     switch (btn) {
-    case MouseButton::Left:
-        mouseLeft_ = down;
-        break;
-    case MouseButton::Middle:
-        mouseMiddle_ = down;
-        break;
-    case MouseButton::Right:
-        mouseRight_ = down;
-        break;
+    case MouseButton::Left: mouseLeft_ = down; break;
+    case MouseButton::Middle: mouseMiddle_ = down; break;
+    case MouseButton::Right: mouseRight_ = down; break;
     }
 }
 

@@ -24,7 +24,7 @@ class RenderPass;
 struct ShaderStage {
     VkShaderModule module { VK_NULL_HANDLE };
     VkShaderStageFlagBits stage { VK_SHADER_STAGE_VERTEX_BIT };
-    const char* entryPoint { "main" };
+    const char *entryPoint { "main" };
 };
 
 /// 顶点输入绑定
@@ -50,7 +50,9 @@ struct GraphicsPipelineConfig {
     VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
     VkPolygonMode polygonMode { VK_POLYGON_MODE_FILL };
     VkCullModeFlags cullMode { VK_CULL_MODE_BACK_BIT };
-    VkFrontFace frontFace { VK_FRONT_FACE_CLOCKWISE };  // 与 proj[1][1]*=-1 配合，见 docs/GLM_VULKAN.md
+    VkFrontFace frontFace {
+        VK_FRONT_FACE_CLOCKWISE
+    }; // 与 proj[1][1]*=-1 配合，见 docs/GLM_VULKAN.md
     bool depthTest { true };
     bool depthWrite { true };
     VkCompareOp depthCompareOp { VK_COMPARE_OP_LESS };
@@ -63,10 +65,10 @@ struct GraphicsPipelineConfig {
 class PipelineLayout {
 public:
     PipelineLayout() = default;
-    PipelineLayout(const PipelineLayout&) = delete;
-    PipelineLayout(PipelineLayout&& other) noexcept;
-    PipelineLayout& operator=(const PipelineLayout&) = delete;
-    PipelineLayout& operator=(PipelineLayout&& other) noexcept;
+    PipelineLayout(const PipelineLayout &) = delete;
+    PipelineLayout(PipelineLayout &&other) noexcept;
+    PipelineLayout &operator=(const PipelineLayout &) = delete;
+    PipelineLayout &operator=(PipelineLayout &&other) noexcept;
     ~PipelineLayout();
 
     /**
@@ -75,9 +77,10 @@ public:
      * @param setLayouts DescriptorSetLayout 列表
      * @param pushConstantRanges Push Constant 范围（可为空）
      */
-    bool create(const Context& ctx,
-                const std::vector<VkDescriptorSetLayout>& setLayouts,
-                const std::vector<VkPushConstantRange>& pushConstantRanges = {});
+    bool
+    create(const Context &ctx,
+           const std::vector<VkDescriptorSetLayout> &setLayouts,
+           const std::vector<VkPushConstantRange> &pushConstantRanges = {});
 
     [[nodiscard]] VkPipelineLayout handle() const { return layout_; }
     [[nodiscard]] bool is_valid() const { return layout_ != VK_NULL_HANDLE; }
@@ -96,10 +99,10 @@ private:
 class PipelineCache {
 public:
     PipelineCache() = default;
-    PipelineCache(const PipelineCache&) = delete;
-    PipelineCache(PipelineCache&& other) noexcept;
-    PipelineCache& operator=(const PipelineCache&) = delete;
-    PipelineCache& operator=(PipelineCache&& other) noexcept;
+    PipelineCache(const PipelineCache &) = delete;
+    PipelineCache(PipelineCache &&other) noexcept;
+    PipelineCache &operator=(const PipelineCache &) = delete;
+    PipelineCache &operator=(PipelineCache &&other) noexcept;
     ~PipelineCache();
 
     /**
@@ -107,12 +110,12 @@ public:
      * @param ctx Context
      * @param filePath 持久化文件路径，空则仅内存缓存
      */
-    bool create(const Context& ctx, const char* filePath = nullptr);
+    bool create(const Context &ctx, const char *filePath = nullptr);
 
     /**
      * @brief 将缓存写入文件
      */
-    bool save_to_file(const char* filePath);
+    bool save_to_file(const char *filePath);
 
     [[nodiscard]] VkPipelineCache handle() const { return cache_; }
     [[nodiscard]] bool is_valid() const { return cache_ != VK_NULL_HANDLE; }
@@ -131,10 +134,10 @@ private:
 class GraphicsPipeline {
 public:
     GraphicsPipeline() = default;
-    GraphicsPipeline(const GraphicsPipeline&) = delete;
-    GraphicsPipeline(GraphicsPipeline&& other) noexcept;
-    GraphicsPipeline& operator=(const GraphicsPipeline&) = delete;
-    GraphicsPipeline& operator=(GraphicsPipeline&& other) noexcept;
+    GraphicsPipeline(const GraphicsPipeline &) = delete;
+    GraphicsPipeline(GraphicsPipeline &&other) noexcept;
+    GraphicsPipeline &operator=(const GraphicsPipeline &) = delete;
+    GraphicsPipeline &operator=(GraphicsPipeline &&other) noexcept;
     ~GraphicsPipeline();
 
     /**
@@ -146,9 +149,9 @@ public:
      * @param config 管线配置
      * @param cache 可选管线缓存
      */
-    bool create(const Context& ctx, VkPipelineLayout pipelineLayout,
+    bool create(const Context &ctx, VkPipelineLayout pipelineLayout,
                 VkRenderPass renderPass, uint32_t subpassIndex,
-                const GraphicsPipelineConfig& config,
+                const GraphicsPipelineConfig &config,
                 VkPipelineCache cache = VK_NULL_HANDLE);
 
     [[nodiscard]] VkPipeline handle() const { return pipeline_; }

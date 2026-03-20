@@ -140,14 +140,9 @@ struct EventWindowResize {
 };
 
 /// 事件联合类型
-using Event = std::variant<EventQuit,
-                          EventKeyDown,
-                          EventKeyUp,
-                          EventMouseButtonDown,
-                          EventMouseButtonUp,
-                          EventMouseMove,
-                          EventMouseWheel,
-                          EventWindowResize>;
+using Event = std::variant<EventQuit, EventKeyDown, EventKeyUp,
+                           EventMouseButtonDown, EventMouseButtonUp,
+                           EventMouseMove, EventMouseWheel, EventWindowResize>;
 
 using EventList = std::vector<Event>;
 
@@ -163,7 +158,7 @@ std::string_view mouse_button_name(MouseButton btn);
 std::string_view modifier_name(Modifier mod);
 
 /// 事件类型名称（如 "KeyDown", "MouseMove"）
-std::string_view event_type_name(const Event& e);
+std::string_view event_type_name(const Event &e);
 
 } // namespace platform
 } // namespace lumen

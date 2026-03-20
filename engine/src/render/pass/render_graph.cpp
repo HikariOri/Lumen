@@ -14,7 +14,7 @@ namespace lumen::render {
 
 // --- RGImage ---
 
-RGImage RGImage::from_texture(const Image& img, bool asDepth) {
+RGImage RGImage::from_texture(const Image &img, bool asDepth) {
     RGImage out {};
     out.type = RGImageType::Texture;
     out.image = img.handle();
@@ -26,7 +26,7 @@ RGImage RGImage::from_texture(const Image& img, bool asDepth) {
     return out;
 }
 
-RGImage RGImage::from_swapchain(const Swapchain& swapchain) {
+RGImage RGImage::from_swapchain(const Swapchain &swapchain) {
     RGImage out {};
     out.type = RGImageType::Swapchain;
     out.swapchain_ = &swapchain;
@@ -76,19 +76,15 @@ uint32_t RGImage::image_count() const {
 
 // --- RenderGraph ---
 
-RenderGraph::RenderGraph(const Context* ctx) : ctx_(ctx) {}
+RenderGraph::RenderGraph(const Context *ctx) : ctx_(ctx) {}
 
-void RenderGraph::add_pass(const RGPass& pass) {
-    passes_.push_back(pass);
-}
+void RenderGraph::add_pass(const RGPass &pass) { passes_.push_back(pass); }
 
-void RenderGraph::clear() {
-    passes_.clear();
-}
+void RenderGraph::clear() { passes_.clear(); }
 
-void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage* img,
-                                   VkImageLayout oldLayout,
-                                   VkImageLayout newLayout, uint32_t index) {
+void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
+                                    VkImageLayout oldLayout,
+                                    VkImageLayout newLayout, uint32_t index) {
     if (!img || img->image_at(index) == VK_NULL_HANDLE)
         return;
     if (oldLayout == newLayout)
@@ -100,9 +96,8 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage* img,
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = img->image_at(index);
-    barrier.subresourceRange.aspectMask = img->isDepth
-        ? VK_IMAGE_ASPECT_DEPTH_BIT
-        : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask =
+        img->isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -120,8 +115,7 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage* img,
         barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     } else if (oldLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-        barrier.srcAccessMask =
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         srcStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     } else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
         barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -131,11 +125,9 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage* img,
     if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
         barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    } else if (newLayout ==
-               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-        barrier.dstAccessMask =
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    } else if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+        barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     } else if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -145,14 +137,14 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage* img,
         dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr,
-                         1, &barrier);
+    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
+                         &barrier);
 
     img->set_layout(index, newLayout);
 }
 
-void RenderGraph::transition_image_(VkCommandBuffer cmd, RGImage* img,
-                                   VkImageLayout newLayout, uint32_t index) {
+void RenderGraph::transition_image_(VkCommandBuffer cmd, RGImage *img,
+                                    VkImageLayout newLayout, uint32_t index) {
     if (!img || img->image_at(index) == VK_NULL_HANDLE)
         return;
     VkImageLayout oldLayout = img->layout_at(index);
@@ -168,21 +160,21 @@ std::vector<size_t> RenderGraph::topo_sort_() const {
     std::vector<int> inDeg(n, 0);
 
     for (size_t i = 0; i < n; ++i) {
-        for (RGImage* write : passes_[i].writes) {
+        for (RGImage *write : passes_[i].writes) {
             if (!write)
                 continue;
             for (size_t j = 0; j < n; ++j) {
                 if (i == j)
                     continue;
                 bool readsWrite = false;
-                for (RGImage* read : passes_[j].reads) {
+                for (RGImage *read : passes_[j].reads) {
                     if (read == write) {
                         readsWrite = true;
                         break;
                     }
                 }
                 if (readsWrite) {
-                    adj[i].push_back(j);  // i -> j 表示 i 必须先于 j
+                    adj[i].push_back(j); // i -> j 表示 i 必须先于 j
                     inDeg[j]++;
                 }
             }
@@ -224,24 +216,24 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
     std::vector<size_t> order = topo_sort_();
 
     for (size_t idx : order) {
-        const RGPass& pass = passes_[idx];
+        const RGPass &pass = passes_[idx];
 
         // 将 reads 转到 SHADER_READ_ONLY
-        for (RGImage* img : pass.reads) {
+        for (RGImage *img : pass.reads) {
             if (img)
-                transition_image_(cmd, img,
-                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                  img->is_swapchain() ? swapchainImageIndex : 0);
+                transition_image_(
+                    cmd, img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    img->is_swapchain() ? swapchainImageIndex : 0);
         }
 
         // 将 writes 转到 ATTACHMENT
-        for (RGImage* img : pass.writes) {
+        for (RGImage *img : pass.writes) {
             if (!img)
                 continue;
             uint32_t subIndex = img->is_swapchain() ? swapchainImageIndex : 0;
-            VkImageLayout targetLayout = img->isDepth
-                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            VkImageLayout targetLayout =
+                img->isDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             transition_image_(cmd, img, targetLayout, subIndex);
         }
 
@@ -250,15 +242,17 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
             pass.execute(cmd, swapchainImageIndex);
 
         // 更新 layout 跟踪：RenderPass 会设置 finalLayout
-        // 离屏 color 通常 finalLayout=SHADER_READ_ONLY，swapchain 为 PRESENT_SRC
-        for (RGImage* img : pass.writes) {
+        // 离屏 color 通常 finalLayout=SHADER_READ_ONLY，swapchain 为
+        // PRESENT_SRC
+        for (RGImage *img : pass.writes) {
             if (!img)
                 continue;
             uint32_t subIndex = img->is_swapchain() ? swapchainImageIndex : 0;
             VkImageLayout finalLayout =
                 img->is_swapchain() ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-                : img->isDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                              : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                : img->isDepth
+                    ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                    : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             img->set_layout(subIndex, finalLayout);
         }
     }

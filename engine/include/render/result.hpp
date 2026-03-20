@@ -30,13 +30,15 @@ public:
 
     Result(VkResult r) : result_ { r } {}
 
-    Result(Result&& other) noexcept : result_ { other.result_ } {
+    Result(Result &&other) noexcept : result_ { other.result_ } {
         other.result_ = VK_SUCCESS;
     }
 
     ~Result() noexcept(false) {
-        if (static_cast<uint32_t>(result_) < VK_RESULT_MAX_ENUM) return;
-        if (callback_throw) callback_throw(result_);
+        if (static_cast<uint32_t>(result_) < VK_RESULT_MAX_ENUM)
+            return;
+        if (callback_throw)
+            callback_throw(result_);
         throw result_;
     }
 

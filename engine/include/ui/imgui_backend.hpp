@@ -10,8 +10,9 @@
 #include <vulkan/vulkan.h>
 
 #include "render/context.hpp"
-#include "render/swapchain.hpp"
 #include "render/pass/render_pass.hpp"
+#include "render/swapchain.hpp"
+
 
 struct SDL_Window;
 
@@ -22,17 +23,17 @@ namespace ui {
  * @brief ImGui Vulkan 初始化参数
  */
 struct ImGuiBackendInitInfo {
-    const render::Context* ctx { nullptr };
-    const render::Swapchain* swapchain { nullptr };
+    const render::Context *ctx { nullptr };
+    const render::Swapchain *swapchain { nullptr };
     VkRenderPass renderPass { VK_NULL_HANDLE };
-    SDL_Window* window { nullptr };
+    SDL_Window *window { nullptr };
 };
 
 /**
  * @brief 初始化 ImGui（Context + SDL3 + Vulkan 后端）
  * @return 成功返回 true
  */
-bool imgui_backend_init(const ImGuiBackendInitInfo& info);
+bool imgui_backend_init(const ImGuiBackendInitInfo &info);
 
 /**
  * @brief 关闭 ImGui 后端（在 ctx.wait_idle() 之后调用）
@@ -59,13 +60,13 @@ void imgui_backend_render(VkCommandBuffer cmd);
  * @brief 注册 Vulkan 纹理供 ImGui::Image 使用
  * @return ImTextureID（即 VkDescriptorSet），用于 ImGui::Image(id, size)
  */
-void* imgui_backend_add_texture(VkSampler sampler, VkImageView imageView,
+void *imgui_backend_add_texture(VkSampler sampler, VkImageView imageView,
                                 VkImageLayout imageLayout);
 
 /**
  * @brief 移除已注册的纹理（resize 时需先移除再重新添加）
  */
-void imgui_backend_remove_texture(void* textureId);
+void imgui_backend_remove_texture(void *textureId);
 
 } // namespace ui
 } // namespace lumen

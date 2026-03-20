@@ -34,7 +34,9 @@ struct DepthAttachmentDesc {
     VkAttachmentLoadOp loadOp { VK_ATTACHMENT_LOAD_OP_CLEAR };
     VkAttachmentStoreOp storeOp { VK_ATTACHMENT_STORE_OP_DONT_CARE };
     VkImageLayout initialLayout { VK_IMAGE_LAYOUT_UNDEFINED };
-    VkImageLayout finalLayout { VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkImageLayout finalLayout {
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
 };
 
 /// RenderPass 配置
@@ -51,10 +53,10 @@ struct RenderPassConfig {
 class RenderPass {
 public:
     RenderPass() = default;
-    RenderPass(const RenderPass&) = delete;
-    RenderPass(RenderPass&& other) noexcept;
-    RenderPass& operator=(const RenderPass&) = delete;
-    RenderPass& operator=(RenderPass&& other) noexcept;
+    RenderPass(const RenderPass &) = delete;
+    RenderPass(RenderPass &&other) noexcept;
+    RenderPass &operator=(const RenderPass &) = delete;
+    RenderPass &operator=(RenderPass &&other) noexcept;
     ~RenderPass();
 
     /**
@@ -63,7 +65,7 @@ public:
      * @param config 配置
      * @return 成功返回 true
      */
-    bool create(VkDevice device, const RenderPassConfig& config);
+    bool create(VkDevice device, const RenderPassConfig &config);
 
     [[nodiscard]] VkRenderPass handle() const { return renderPass_; }
     [[nodiscard]] bool is_valid() const {
@@ -84,10 +86,10 @@ private:
 class Framebuffer {
 public:
     Framebuffer() = default;
-    Framebuffer(const Framebuffer&) = delete;
-    Framebuffer(Framebuffer&& other) noexcept;
-    Framebuffer& operator=(const Framebuffer&) = delete;
-    Framebuffer& operator=(Framebuffer&& other) noexcept;
+    Framebuffer(const Framebuffer &) = delete;
+    Framebuffer(Framebuffer &&other) noexcept;
+    Framebuffer &operator=(const Framebuffer &) = delete;
+    Framebuffer &operator=(Framebuffer &&other) noexcept;
     ~Framebuffer();
 
     /**
@@ -99,18 +101,19 @@ public:
      * @return 成功返回 true
      */
     bool create(VkDevice device, VkRenderPass renderPass,
-                const Swapchain& swapchain,
+                const Swapchain &swapchain,
                 VkImageView depthImageView = VK_NULL_HANDLE);
 
     /**
      * @brief 创建离屏 Framebuffer（自定义附件）
      */
     bool create_offscreen(VkDevice device, VkRenderPass renderPass,
-                         uint32_t width, uint32_t height,
-                         const std::vector<VkImageView>& attachments);
+                          uint32_t width, uint32_t height,
+                          const std::vector<VkImageView> &attachments);
 
     /**
-     * @brief 销毁 Framebuffer（Swapchain 重建前必须先调用，以释放对 ImageView 的引用）
+     * @brief 销毁 Framebuffer（Swapchain 重建前必须先调用，以释放对 ImageView
+     * 的引用）
      */
     void destroy();
 

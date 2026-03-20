@@ -13,7 +13,7 @@
 
 namespace lumen::ui {
 
-bool imgui_backend_init(const ImGuiBackendInitInfo& info) {
+bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     if (!info.ctx || !info.swapchain || !info.renderPass || !info.window) {
         LUMEN_LOG_ERROR("ImGuiBackend: 缺少必要参数");
         return false;
@@ -21,7 +21,7 @@ bool imgui_backend_init(const ImGuiBackendInitInfo& info) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
@@ -45,7 +45,8 @@ bool imgui_backend_init(const ImGuiBackendInitInfo& info) {
     vulkanInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     vulkanInfo.CheckVkResultFn = [](VkResult err) {
         if (err != VK_SUCCESS) {
-            LUMEN_LOG_ERROR("ImGui Vulkan: VkResult = {}", static_cast<int>(err));
+            LUMEN_LOG_ERROR("ImGui Vulkan: VkResult = {}",
+                            static_cast<int>(err));
         }
     };
 
@@ -91,18 +92,16 @@ void imgui_backend_render(VkCommandBuffer cmd) {
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 }
 
-void* imgui_backend_add_texture(VkSampler sampler, VkImageView imageView,
+void *imgui_backend_add_texture(VkSampler sampler, VkImageView imageView,
                                 VkImageLayout imageLayout) {
     VkDescriptorSet set =
         ImGui_ImplVulkan_AddTexture(sampler, imageView, imageLayout);
-    return static_cast<void*>(set);
+    return static_cast<void *>(set);
 }
 
-void imgui_backend_remove_texture(void* textureId) {
+void imgui_backend_remove_texture(void *textureId) {
     if (textureId)
-        ImGui_ImplVulkan_RemoveTexture(
-            static_cast<VkDescriptorSet>(textureId));
+        ImGui_ImplVulkan_RemoveTexture(static_cast<VkDescriptorSet>(textureId));
 }
 
 } // namespace lumen::ui
-

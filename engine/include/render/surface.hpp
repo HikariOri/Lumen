@@ -27,19 +27,20 @@ public:
     /**
      * @brief 接管已创建的 Surface 句柄
      * @param instance 关联的 VkInstance（用于析构时销毁）
-     * @param surface 从 Window::create_vulkan_surface 获得的句柄，可为 VK_NULL_HANDLE
+     * @param surface 从 Window::create_vulkan_surface 获得的句柄，可为
+     * VK_NULL_HANDLE
      */
     Surface(VkInstance instance, VkSurfaceKHR surface) noexcept
         : instance_(instance), surface_(surface) {}
 
-    Surface(const Surface&) = delete;
-    Surface(Surface&& other) noexcept
+    Surface(const Surface &) = delete;
+    Surface(Surface &&other) noexcept
         : instance_(other.instance_), surface_(other.surface_) {
         other.instance_ = VK_NULL_HANDLE;
         other.surface_ = VK_NULL_HANDLE;
     }
-    Surface& operator=(const Surface&) = delete;
-    Surface& operator=(Surface&& other) noexcept {
+    Surface &operator=(const Surface &) = delete;
+    Surface &operator=(Surface &&other) noexcept {
         if (this != &other) {
             destroy_();
             instance_ = other.instance_;

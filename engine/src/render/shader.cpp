@@ -20,7 +20,8 @@ bool ShaderModule::create(VkDevice device, std::span<const uint32_t> code) {
     device_ = device;
 
     VkShaderModuleCreateInfo createInfo {
-        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+    };
     createInfo.codeSize = code.size_bytes();
     createInfo.pCode = code.data();
 
@@ -32,7 +33,7 @@ bool ShaderModule::create(VkDevice device, std::span<const uint32_t> code) {
     return result == VK_SUCCESS;
 }
 
-bool ShaderModule::create_from_file(VkDevice device, const char* filePath) {
+bool ShaderModule::create_from_file(VkDevice device, const char *filePath) {
     std::ifstream file { filePath, std::ios::ate | std::ios::binary };
     if (!file) {
         LUMEN_LOG_ERROR("Shader 文件打开失败: {}", filePath);
@@ -47,7 +48,7 @@ bool ShaderModule::create_from_file(VkDevice device, const char* filePath) {
 
     std::vector<uint32_t> code(fileSize / 4);
     file.seekg(0);
-    file.read(reinterpret_cast<char*>(code.data()), fileSize);
+    file.read(reinterpret_cast<char *>(code.data()), fileSize);
 
     bool ok = create(device, code);
     if (ok) {
@@ -56,10 +57,12 @@ bool ShaderModule::create_from_file(VkDevice device, const char* filePath) {
     return ok;
 }
 
-VkPipelineShaderStageCreateInfo ShaderModule::stage_create_info(
-    VkShaderStageFlagBits stage, const char* entryPoint) const {
+VkPipelineShaderStageCreateInfo
+ShaderModule::stage_create_info(VkShaderStageFlagBits stage,
+                                const char *entryPoint) const {
     VkPipelineShaderStageCreateInfo info {
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+    };
     info.stage = stage;
     info.module = module_;
     info.pName = entryPoint;
@@ -75,15 +78,15 @@ void ShaderModule::destroy_() {
 
 ShaderModule::~ShaderModule() { destroy_(); }
 
-ShaderModule::ShaderModule(ShaderModule&& other) noexcept
-    : device_ { other.device_ }
-    , module_ { other.module_ } {
+ShaderModule::ShaderModule(ShaderModule &&other) noexcept
+    : device_ { other.device_ }, module_ { other.module_ } {
     other.device_ = VK_NULL_HANDLE;
     other.module_ = VK_NULL_HANDLE;
 }
 
-ShaderModule& ShaderModule::operator=(ShaderModule&& other) noexcept {
-    if (this == &other) return *this;
+ShaderModule &ShaderModule::operator=(ShaderModule &&other) noexcept {
+    if (this == &other)
+        return *this;
     destroy_();
     device_ = other.device_;
     module_ = other.module_;

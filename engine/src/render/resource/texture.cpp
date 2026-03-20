@@ -4,12 +4,13 @@
  */
 
 #include "render/resource/texture.hpp"
+#include "core/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
 #include "render/resource/image.hpp"
 #include "render/resource/sampler.hpp"
-#include "core/logger.hpp"
+
 
 #include <stb_image.h>
 
@@ -160,7 +161,8 @@ bool Texture::create_from_memory(const Context &ctx, const void *data,
 bool Texture::create_from_file(const Context &ctx, const char *filePath,
                                VkQueue transferQueue, CommandPool &cmdPool,
                                const SamplerConfig &samplerConfig) {
-    stbi_set_flip_vertically_on_load(1); // Vulkan 纹理 (0,0)=左下，stb 默认行 0=顶部，需翻转
+    stbi_set_flip_vertically_on_load(
+        1); // Vulkan 纹理 (0,0)=左下，stb 默认行 0=顶部，需翻转
     int w = 0, h = 0, channels = 0;
     stbi_uc *pixels = stbi_load(filePath, &w, &h, &channels, STBI_rgb_alpha);
     if (!pixels) {
@@ -223,8 +225,8 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
 
     VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &image_);
     if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("vkCreateImage 失败: {} ({}x{})", static_cast<int>(result),
-                        texWidth, texHeight);
+        LUMEN_LOG_ERROR("vkCreateImage 失败: {} ({}x{})",
+                        static_cast<int>(result), texWidth, texHeight);
         return false;
     }
 

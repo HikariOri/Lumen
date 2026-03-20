@@ -31,8 +31,8 @@ spdlog::level::level_enum to_spdlog(LogLevel l) {
     }
 }
 
-constexpr const char* k_engine_logger_name = "lumen";
-constexpr const char* k_app_logger_name = "app";
+constexpr const char *k_engine_logger_name = "lumen";
+constexpr const char *k_app_logger_name = "app";
 
 spdlog::sink_ptr make_console_sink() {
     auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
@@ -40,7 +40,7 @@ spdlog::sink_ptr make_console_sink() {
     return console;
 }
 
-spdlog::sink_ptr make_file_sink(const LoggerPathConfig& cfg) {
+spdlog::sink_ptr make_file_sink(const LoggerPathConfig &cfg) {
     if (!cfg.enable || cfg.filePath.empty()) {
         return nullptr;
     }
@@ -55,9 +55,9 @@ spdlog::sink_ptr make_file_sink(const LoggerPathConfig& cfg) {
     return std::make_shared<spdlog::sinks::basic_file_sink_mt>(cfg.filePath);
 }
 
-std::shared_ptr<spdlog::logger> create_logger(const char* name,
-                                              const LoggerConfig& config,
-                                              const LoggerPathConfig& pathCfg) {
+std::shared_ptr<spdlog::logger> create_logger(const char *name,
+                                              const LoggerConfig &config,
+                                              const LoggerPathConfig &pathCfg) {
     std::vector<spdlog::sink_ptr> sinks;
     if (config.enableConsole) {
         sinks.emplace_back(make_console_sink());
@@ -69,8 +69,8 @@ std::shared_ptr<spdlog::logger> create_logger(const char* name,
     if (sinks.empty()) {
         return nullptr;
     }
-    auto logger = std::make_shared<spdlog::logger>(
-        name, sinks.begin(), sinks.end());
+    auto logger =
+        std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
     auto lvl = to_spdlog(pathCfg.level);
     logger->set_level(lvl);
     logger->flush_on(lvl);
@@ -79,16 +79,16 @@ std::shared_ptr<spdlog::logger> create_logger(const char* name,
 
 } // namespace
 
-Logger& Logger::instance() {
+Logger &Logger::instance() {
     static Logger inst;
     return inst;
 }
 
-bool Logger::init(const LoggerConfig& config) {
+bool Logger::init(const LoggerConfig &config) {
     return instance().init_(config);
 }
 
-bool Logger::init_(const LoggerConfig& config) {
+bool Logger::init_(const LoggerConfig &config) {
     spdlog::shutdown();
 
     auto engineLogger =
@@ -104,26 +104,21 @@ bool Logger::init_(const LoggerConfig& config) {
     }
 
     spdlog::set_default_logger(engineLogger);
-    engineLogger->log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION},
-                     to_spdlog(LogLevel::Info), "Logger 初始化完成 engine+app");
+    engineLogger->log(
+        spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },
+        to_spdlog(LogLevel::Info), "Logger 初始化完成 engine+app");
     return true;
 }
 
-void Logger::shutdown() {
-    instance().shutdown_();
-}
+void Logger::shutdown() { instance().shutdown_(); }
 
-void Logger::shutdown_() {
-    spdlog::shutdown();
-}
+void Logger::shutdown_() { spdlog::shutdown(); }
 
 std::shared_ptr<spdlog::logger> Logger::engine() {
     return instance().engine_();
 }
 
-std::shared_ptr<spdlog::logger> Logger::app() {
-    return instance().app_();
-}
+std::shared_ptr<spdlog::logger> Logger::app() { return instance().app_(); }
 
 std::shared_ptr<spdlog::logger> Logger::engine_() {
     return spdlog::get(k_engine_logger_name);

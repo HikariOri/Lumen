@@ -15,7 +15,7 @@ std::string get_base_path() {
     if (!cached.empty()) {
         return cached;
     }
-    const char* base = SDL_GetBasePath();
+    const char *base = SDL_GetBasePath();
     if (!base) {
         return {};
     }

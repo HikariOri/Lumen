@@ -31,16 +31,15 @@ namespace platform {
 class EventPump {
 public:
     using QuitFn = std::function<void()>;
-    using KeyDownFn = std::function<void(const EventKeyDown&)>;
-    using KeyUpFn = std::function<void(const EventKeyUp&)>;
-    using MouseButtonDownFn =
-        std::function<void(const EventMouseButtonDown&)>;
-    using MouseButtonUpFn = std::function<void(const EventMouseButtonUp&)>;
-    using MouseMoveFn = std::function<void(const EventMouseMove&)>;
-    using MouseWheelFn = std::function<void(const EventMouseWheel&)>;
-    using WindowResizeFn = std::function<void(const EventWindowResize&)>;
+    using KeyDownFn = std::function<void(const EventKeyDown &)>;
+    using KeyUpFn = std::function<void(const EventKeyUp &)>;
+    using MouseButtonDownFn = std::function<void(const EventMouseButtonDown &)>;
+    using MouseButtonUpFn = std::function<void(const EventMouseButtonUp &)>;
+    using MouseMoveFn = std::function<void(const EventMouseMove &)>;
+    using MouseWheelFn = std::function<void(const EventMouseWheel &)>;
+    using WindowResizeFn = std::function<void(const EventWindowResize &)>;
     /// 原始 SDL 事件回调（用于 ImGui 等，每事件调用一次）
-    using SDLEventFn = std::function<void(const void* sdlEvent)>;
+    using SDLEventFn = std::function<void(const void *sdlEvent)>;
 
     void on_quit(QuitFn f) { on_quit_ = std::move(f); }
     void on_key_down(KeyDownFn f) { on_key_down_ = std::move(f); }
@@ -65,10 +64,10 @@ public:
     bool poll();
 
     /// 本帧输入状态（poll 后有效）
-    const Input& input() const { return input_; }
+    const Input &input() const { return input_; }
 
 private:
-    void dispatch_(const EventList& events);
+    void dispatch_(const EventList &events);
 
     Input input_;
     EventList events_;

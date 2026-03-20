@@ -36,10 +36,10 @@ struct WindowConfig {
 class Window {
 public:
     Window() = default;
-    Window(const Window&) = delete;
-    Window(Window&& other) noexcept;
-    Window& operator=(const Window&) = delete;
-    Window& operator=(Window&& other) noexcept;
+    Window(const Window &) = delete;
+    Window(Window &&other) noexcept;
+    Window &operator=(const Window &) = delete;
+    Window &operator=(Window &&other) noexcept;
     ~Window();
 
     /**
@@ -47,12 +47,12 @@ public:
      * @param config 窗口配置
      * @return 成功返回 true
      */
-    bool create(const WindowConfig& config);
+    bool create(const WindowConfig &config);
 
     /**
      * @brief 获取 Vulkan Instance 所需扩展（用于 Context::init_instance）
      */
-    std::vector<const char*> get_vulkan_instance_extensions() const;
+    std::vector<const char *> get_vulkan_instance_extensions() const;
 
     /**
      * @brief 创建 Vulkan Surface
@@ -73,13 +73,13 @@ public:
     [[nodiscard]] uint32_t height() const;
 
     /// 窗口 framebuffer 尺寸（用于 Vulkan Swapchain）
-    void get_framebuffer_size(int* width, int* height) const;
+    void get_framebuffer_size(int *width, int *height) const;
 
-    void set_title(const std::string& title);
+    void set_title(const std::string &title);
     void set_fullscreen(bool fullscreen);
 
     /// SDL 窗口句柄（供 ImGui 等使用）
-    [[nodiscard]] SDL_Window* sdl_window() const { return window_; }
+    [[nodiscard]] SDL_Window *sdl_window() const { return window_; }
 
     /// 是否有效
     [[nodiscard]] bool is_valid() const { return window_ != nullptr; }
@@ -87,7 +87,7 @@ public:
 private:
     void destroy_();
 
-    SDL_Window* window_ { nullptr };
+    SDL_Window *window_ { nullptr };
     uint32_t width_ { 0 };
     uint32_t height_ { 0 };
 };
