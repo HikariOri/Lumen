@@ -270,6 +270,11 @@ PhysicalDeviceInfo Context::physical_device_info() const {
     return info;
 }
 
+void Context::wait_idle() const {
+    if (device_ != VK_NULL_HANDLE)
+        vkDeviceWaitIdle(device_);
+}
+
 bool Context::init_device(VkSurfaceKHR surface) {
     if (!has_instance())
         return false;

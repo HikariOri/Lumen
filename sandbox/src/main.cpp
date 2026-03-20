@@ -366,7 +366,7 @@ static int run_sandbox() {
 
         // 窗口 resize 或 Present 返回 OUT_OF_DATE 时重建 Swapchain
         if (needRecreateSwapchain) {
-            vkDeviceWaitIdle(ctx.device());
+            ctx.wait_idle();
             window.get_framebuffer_size(&fbWidth, &fbHeight);
             if (fbWidth > 0 && fbHeight > 0 &&
                 swapchain.resize(static_cast<uint32_t>(fbWidth),
@@ -550,7 +550,7 @@ static int run_sandbox() {
         ++frameCount;
     }
 
-    vkDeviceWaitIdle(ctx.device());
+    ctx.wait_idle();
 
     LUMEN_APP_LOG_INFO("Sandbox 退出");
     return 0;

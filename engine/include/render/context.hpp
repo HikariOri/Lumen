@@ -200,6 +200,12 @@ public:
   /// 是否已初始化 Device
   [[nodiscard]] bool has_device() const { return device_ != VK_NULL_HANDLE; }
 
+  /**
+   * @brief 等待设备所有操作完成（阻塞直到 GPU 空闲）
+   * @note 在重建 Swapchain、资源销毁等操作前调用
+   */
+  void wait_idle() const;
+
 private:
   void destroy_();
   void relink_properties_chain_();
