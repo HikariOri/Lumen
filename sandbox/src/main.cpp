@@ -8,6 +8,7 @@
 #include "core/logger.hpp"
 #include "core/path.hpp"
 #include "core/time.hpp"
+#include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
@@ -28,8 +29,9 @@ struct Vertex {
 
 /// UBO 与着色器 layout(std140) 对应
 struct UBO {
-    float time;
-    float _pad[3]; // std140 对齐到 16 字节
+    glm::vec2 position { 0.0f, 0.0f };
+    float rotation { 0.0f };
+    float _pad; // std140 对齐到 16 字节
 };
 #include <algorithm>
 #include <array>
@@ -213,7 +215,7 @@ static int run_sandbox() {
     lumen::render::DescriptorSetLayout descLayout;
     std::vector<lumen::render::DescriptorBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-          VK_SHADER_STAGE_FRAGMENT_BIT },
+          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
         { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
           VK_SHADER_STAGE_FRAGMENT_BIT },
     };
@@ -294,9 +296,14 @@ static int run_sandbox() {
         return -1;
     }
 
-    LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环");
+    LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环 [WASD] 移动 [QE] 旋转");
     float lastLoggedTime = -10.0f;        // 用于限速调试日志
     uint64_t frameCount = 0;              // 用于限速调试日志
+    glm::vec2 rectPos { 0.0f, 0.0f };
+    float rectRotation { 0.0f };
+    double lastTime = lumen::core::get_time_seconds();
+    constexpr float kMoveSpeed = 1.5f;
+    constexpr float kRotSpeed = 2.5f;
     constexpr uint64_t kLogInterval = 60; // 每 N 帧输出一次阶段日志
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
@@ -390,6 +397,25 @@ static int run_sandbox() {
         }
         if (!running)
             break;
+
+        // 键盘控制：WASD 移动，QE 旋转
+        double now = lumen::core::get_time_seconds();
+        float dt = static_cast<float>(now - lastTime);
+        lastTime = now;
+        const auto& inp = pump.input();
+        if (inp.is_key_down(lumen::platform::Key::W))
+            rectPos.y -= kMoveSpeed * dt;  // Vulkan NDC Y 向下，减为上
+        if (inp.is_key_down(lumen::platform::Key::S))
+            rectPos.y += kMoveSpeed * dt;
+        if (inp.is_key_down(lumen::platform::Key::A))
+            rectPos.x -= kMoveSpeed * dt;
+        if (inp.is_key_down(lumen::platform::Key::D))
+            rectPos.x += kMoveSpeed * dt;
+        if (inp.is_key_down(lumen::platform::Key::Q))
+            rectRotation -= kRotSpeed * dt;
+        if (inp.is_key_down(lumen::platform::Key::E))
+            rectRotation += kRotSpeed * dt;
+
         if (doLog) {
             LUMEN_APP_LOG_DEBUG("[frame {}] acquire 图像 ...", frameCount);
         }
@@ -455,13 +481,9 @@ static int run_sandbox() {
                           VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
 
         UBO ubo {};
-        ubo.time = static_cast<float>(lumen::core::get_time_seconds());
+        ubo.position = rectPos;
+        ubo.rotation = rectRotation;
         uniformBuffers[currentFrame].update(ubo);
-        // 调试：每 2 秒打印一次 time，确认是否递增（调试完可删除）
-        if (ubo.time - lastLoggedTime > 2.0f) {
-            LUMEN_APP_LOG_DEBUG("UBO time={}", ubo.time);
-            lastLoggedTime = ubo.time;
-        }
 
         vkCmdBindDescriptorSets(cmdBuffers[currentFrame],
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
