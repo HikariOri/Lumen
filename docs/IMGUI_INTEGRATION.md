@@ -7,10 +7,16 @@
 ```
 engine/
 ├── include/ui/
-│   └── imgui_backend.hpp   # ImGui 后端封装
+│   ├── imgui_backend.hpp         # ImGui 后端封装
+│   ├── texture_view_panel.hpp    # 纹理预览面板（Scene/Wireframe 等）
+│   └── gpu_capabilities_panel.hpp# GPU 信息面板
 └── src/ui/
-    └── imgui_backend.cpp   # Vulkan + SDL3 实现
+    ├── imgui_backend.cpp
+    ├── texture_view_panel.cpp
+    └── gpu_capabilities_panel.cpp
 ```
+
+可复用面板详见 [UI_PANELS.md](UI_PANELS.md)。
 
 - **平台**：SDL3 窗口 + 输入
 - **渲染**：Vulkan 后端
@@ -113,7 +119,7 @@ pump.on_mouse_button_down([&](const EventMouseButtonDown& e) {
 1. **离屏渲染**：创建离屏 framebuffer（颜色 + 深度），`finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
 2. **注册纹理**：`imgui_backend_add_texture(sampler, imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)` 获取 `ImTextureID`
 3. **渲染流程**：先渲染 3D 到离屏，再渲染到 swapchain（clear + ImGui）
-4. **Scene 窗口**：`ImGui::Image(sceneTextureId, size)`，**不要**使用 `ImVec2(0,1), ImVec2(1,0)` 做 Y 翻转（见下方注意事项）
+4. **Scene 窗口**：使用 `imgui_texture_view_panel("Scene", sceneTextureId, &outW, &outH)`（见 [UI_PANELS.md](UI_PANELS.md)）；**不要**使用 `ImVec2(0,1), ImVec2(1,0)` 做 Y 翻转（见下方注意事项）
 5. **Resize**：先 `imgui_backend_remove_texture(oldId)`，重建离屏资源后再 `imgui_backend_add_texture` 获取新 ID
 
 ### 4.1 ImGui::Image 与 Vulkan 纹理方向（避免上下颠倒）

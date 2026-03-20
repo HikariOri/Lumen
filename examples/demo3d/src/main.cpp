@@ -23,7 +23,9 @@
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
+#include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
+#include "ui/texture_view_panel.hpp"
 
 #include <array>
 #include <string>
@@ -538,39 +540,18 @@ static int run_demo3d() {
                 ImGuiID dockspaceId =
                     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                ImGui::Begin("Scene");
-                ImVec2 avail = ImGui::GetContentRegionAvail();
-                ImGui::Image(sceneTextureId, avail);
-
-                // 记录本帧显示尺寸供下一帧调整离屏分辨率（1:1
-                // 像素匹配，省显存）
-                nextSceneW = std::max(1u, static_cast<uint32_t>(avail.x));
-                nextSceneH = std::max(1u, static_cast<uint32_t>(avail.y));
-                ImGui::End();
-
+                lumen::ui::imgui_texture_view_panel(
+                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                ImGui::Begin("Wireframe");
-                ImVec2 availWf = ImGui::GetContentRegionAvail();
-                ImGui::Image(wireframeTextureId, availWf);
-                nextWireframeW = std::max(1u, static_cast<uint32_t>(availWf.x));
-                nextWireframeH = std::max(1u, static_cast<uint32_t>(availWf.y));
-                ImGui::End();
-
+                lumen::ui::imgui_texture_view_panel(
+                    "Wireframe", wireframeTextureId, &nextWireframeW,
+                    &nextWireframeH);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                ImGui::Begin("Normal");
-                ImVec2 availNm = ImGui::GetContentRegionAvail();
-                ImGui::Image(normalTextureId, availNm);
-                nextNormalW = std::max(1u, static_cast<uint32_t>(availNm.x));
-                nextNormalH = std::max(1u, static_cast<uint32_t>(availNm.y));
-                ImGui::End();
-
+                lumen::ui::imgui_texture_view_panel(
+                    "Normal", normalTextureId, &nextNormalW, &nextNormalH);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                ImGui::Begin("Depth");
-                ImVec2 availDp = ImGui::GetContentRegionAvail();
-                ImGui::Image(depthTextureId, availDp);
-                nextDepthW = std::max(1u, static_cast<uint32_t>(availDp.x));
-                nextDepthH = std::max(1u, static_cast<uint32_t>(availDp.y));
-                ImGui::End();
+                lumen::ui::imgui_texture_view_panel(
+                    "Depth", depthTextureId, &nextDepthW, &nextDepthH);
 
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
@@ -603,35 +584,7 @@ static int run_demo3d() {
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 ImGui::SetNextWindowPos(ImVec2(10, 300), ImGuiCond_FirstUseEver);
                 ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
-                ImGui::Begin("GPU Capabilities");
-                const auto gpuInfo = ctx.physical_device_info();
-                ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "%s",
-                                  gpuInfo.deviceName.c_str());
-                ImGui::Text("Type: %s",
-                           lumen::render::device_type_name(gpuInfo.deviceType));
-                ImGui::Text("Vendor ID: 0x%04X", gpuInfo.vendorId);
-                ImGui::Text("Device ID: 0x%04X", gpuInfo.deviceId);
-                ImGui::Text("API: %u.%u.%u", VK_VERSION_MAJOR(gpuInfo.apiVersion),
-                           VK_VERSION_MINOR(gpuInfo.apiVersion),
-                           VK_VERSION_PATCH(gpuInfo.apiVersion));
-                ImGui::Text("Driver: 0x%08X", gpuInfo.driverVersion);
-                if (gpuInfo.deviceLocalMemoryBytes > 0) {
-                    const double vramMB =
-                        static_cast<double>(gpuInfo.deviceLocalMemoryBytes) /
-                        (1024.0 * 1024.0);
-                    ImGui::Text("VRAM: %.0f MiB", vramMB);
-                }
-                ImGui::Separator();
-                const auto& limits =
-                    ctx.physical_device_properties().limits;
-                ImGui::Text("maxImageDimension2D: %u", limits.maxImageDimension2D);
-                ImGui::Text("maxUniformBufferRange: %u KiB",
-                            limits.maxUniformBufferRange / 1024);
-                ImGui::Text("maxStorageBufferRange: %u KiB",
-                            limits.maxStorageBufferRange / 1024);
-                ImGui::Text("maxPushConstantsSize: %u bytes",
-                            limits.maxPushConstantsSize);
-                ImGui::End();
+                lumen::ui::imgui_gpu_capabilities_panel(ctx);
 
                 lumen::ui::imgui_backend_render(cmd);
                 vkCmdEndRenderPass(cmd);

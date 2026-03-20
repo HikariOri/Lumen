@@ -13,7 +13,6 @@
 #include "render/pass/render_pass.hpp"
 #include "render/swapchain.hpp"
 
-
 struct SDL_Window;
 
 namespace lumen {
