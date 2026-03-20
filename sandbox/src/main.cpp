@@ -1,11 +1,12 @@
 /**
  * @file main.cpp
- * @brief Sandbox：测试引擎功能，绘制三角形
+ * @brief Sandbox：测试引擎功能，纹理矩形
  */
 
 #include "engine.hpp"
 
 #include "core/logger.hpp"
+#include "core/path.hpp"
 #include "core/time.hpp"
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
@@ -13,6 +14,7 @@
 #include "render/pass/render_pass.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/descriptor.hpp"
+#include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
 
@@ -21,7 +23,7 @@
 
 struct Vertex {
     glm::vec2 position;
-    glm::vec4 color;
+    glm::vec2 uv;
 };
 
 /// UBO 与着色器 layout(std140) 对应
@@ -36,7 +38,7 @@ struct UBO {
 
 namespace {
 
-    constexpr uint32_t kMaxFramesInFlight { 2 };
+constexpr uint32_t kMaxFramesInFlight { 2 };
 
 } // namespace
 
@@ -53,7 +55,7 @@ int main() {
 
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
-    winConfig.title = "LearnVulkan Sandbox - 彩色矩形";
+    winConfig.title = "LearnVulkan Sandbox - 纹理矩形";
     winConfig.width = 800;
     winConfig.height = 600;
 
@@ -88,13 +90,12 @@ int main() {
     }
     {
         auto gpu = ctx.physical_device_info();
-        LUMEN_APP_LOG_INFO(
-            "Vulkan Device 创建成功: {} ({})",
-            gpu.deviceName, lumen::render::device_type_name(gpu.deviceType));
+        LUMEN_APP_LOG_INFO("Vulkan Device 创建成功: {} ({})", gpu.deviceName,
+                           lumen::render::device_type_name(gpu.deviceType));
         if (gpu.deviceLocalMemoryBytes > 0) {
             LUMEN_APP_LOG_INFO("  显存: {:.1f} GiB",
-                               gpu.deviceLocalMemoryBytes / (1024.0 * 1024.0 *
-                                                             1024.0));
+                               gpu.deviceLocalMemoryBytes /
+                                   (1024.0 * 1024.0 * 1024.0));
         }
     }
 
@@ -128,11 +129,11 @@ int main() {
         return -1;
     }
 
-    // Shaders
+    // Shaders（纹理矩形）
     std::string vertPath =
-        lumen::core::get_resource_path("shaders/triangle.vert.spv");
+        lumen::core::get_resource_path("shaders/texture.vert.spv");
     std::string fragPath =
-        lumen::core::get_resource_path("shaders/triangle.frag.spv");
+        lumen::core::get_resource_path("shaders/texture.frag.spv");
     lumen::render::ShaderModule vertShader;
     lumen::render::ShaderModule fragShader;
     if (!vertShader.create_from_file(ctx.device(), vertPath.c_str())) {
@@ -144,12 +145,12 @@ int main() {
         return -1;
     }
 
-    // 矩形 4 个顶点（左下、左上、右上、右下）
+    // 矩形 4 个顶点（左下、左上、右上、右下）+ UV
     const std::array<Vertex, 4> vertices = { {
-        { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f, 1.0f } }, // 左下 红
-        { { -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 左上 绿
-        { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f, 1.0f } },   // 右上 蓝
-        { { 0.5f, -0.5f }, { 1.0f, 1.0f, 0.0f, 1.0f } },  // 右下 黄
+        { glm::vec2(-0.5f, -0.5f), glm::vec2(0.0f, 1.0f) }, // 左下
+        { glm::vec2(-0.5f, 0.5f), glm::vec2(0.0f, 0.0f) },  // 左上
+        { glm::vec2(0.5f, 0.5f), glm::vec2(1.0f, 0.0f) },   // 右上
+        { glm::vec2(0.5f, -0.5f), glm::vec2(1.0f, 1.0f) },  // 右下
     } };
 
     // 索引：两个三角形组成矩形（0,1,2 和 0,2,3）
@@ -170,6 +171,44 @@ int main() {
     indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
     indexBuffer.upload(indices.data(), sizeof(indices));
 
+    // CommandPool（纹理加载需提前创建）
+    lumen::render::CommandPool cmdPool;
+    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
+        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
+        return -1;
+    }
+
+    // 纹理：优先从文件加载，失败则用程序化棋盘格
+    lumen::render::Texture texture;
+    std::string texPath = lumen::core::get_resource_path(
+        "./assets/textures/ikun2026_happy_new_year.jpg");
+    if (!texture.create_from_file(ctx, texPath.c_str(), ctx.graphics_queue(),
+                                  cmdPool)) {
+        // 程序化棋盘格纹理 64x64 RGBA
+        constexpr uint32_t kTexSize = 64;
+        std::vector<uint8_t> pixels(kTexSize * kTexSize * 4);
+        for (uint32_t y = 0; y < kTexSize; ++y) {
+            for (uint32_t x = 0; x < kTexSize; ++x) {
+                bool checker = ((x / 8) + (y / 8)) % 2 == 0;
+                uint8_t v = checker ? 255 : 80;
+                size_t i = (y * kTexSize + x) * 4;
+                pixels[i + 0] = v;
+                pixels[i + 1] = v;
+                pixels[i + 2] = checker ? 180 : 100;
+                pixels[i + 3] = 255;
+            }
+        }
+        if (!texture.create_from_memory(ctx, pixels.data(), pixels.size(),
+                                        kTexSize, kTexSize,
+                                        ctx.graphics_queue(), cmdPool)) {
+            LUMEN_APP_LOG_ERROR("纹理创建失败");
+            return -1;
+        }
+        LUMEN_APP_LOG_INFO("使用程序化棋盘格纹理");
+    } else {
+        LUMEN_APP_LOG_INFO("纹理加载成功: {}", texPath);
+    }
+
     // Per-frame UniformBuffer（避免多帧并发时覆盖）
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight> uniformBuffers;
     for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
@@ -179,11 +218,13 @@ int main() {
         }
     }
 
-    // DescriptorSetLayout：binding 0 = UBO (fragment)
+    // DescriptorSetLayout：binding 0 = UBO, binding 1 = 纹理
     lumen::render::DescriptorSetLayout descLayout;
     std::vector<lumen::render::DescriptorBinding> bindings = {
         { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-          VK_SHADER_STAGE_FRAGMENT_BIT }
+          VK_SHADER_STAGE_FRAGMENT_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+          VK_SHADER_STAGE_FRAGMENT_BIT },
     };
     if (!descLayout.create(ctx, bindings)) {
         LUMEN_APP_LOG_ERROR("DescriptorSetLayout 创建失败");
@@ -193,7 +234,10 @@ int main() {
     // DescriptorPool 与 Per-frame DescriptorSet
     lumen::render::DescriptorPool descPool;
     if (!descPool.create(
-            ctx, { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight } },
+            ctx,
+            { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight },
+              { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                kMaxFramesInFlight } },
             kMaxFramesInFlight)) {
         LUMEN_APP_LOG_ERROR("DescriptorPool 创建失败");
         return -1;
@@ -209,6 +253,9 @@ int main() {
             ctx.device(), descriptorSets[i], 0,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
             sizeof(UBO));
+        lumen::render::write_descriptor_image(
+            ctx.device(), descriptorSets[i], 1, texture.view(),
+            texture.sampler(), texture.descriptor_layout());
     }
 
     // PipelineLayout（含 descriptor set layout）
@@ -229,7 +276,7 @@ int main() {
     pipeConfig.vertexAttributes.push_back(
         { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, color) });
+        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
     pipeConfig.depthTest = false;
     pipeConfig.depthWrite = false;
     pipeConfig.cullMode = VK_CULL_MODE_NONE;
@@ -241,12 +288,7 @@ int main() {
         return -1;
     }
 
-    // CommandPool & CommandBuffers
-    lumen::render::CommandPool cmdPool;
-    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
-        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
-        return -1;
-    }
+    // CommandBuffers（cmdPool 已用于纹理加载）
     auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
     if (cmdBuffers.size() != kMaxFramesInFlight) {
         LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
@@ -273,7 +315,7 @@ int main() {
     bool running { true };
 
     pump.on_quit([&] { running = false; });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown& e) {
+    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
         if (e.key == lumen::platform::Key::Escape) {
             running = false;
             return;
@@ -282,26 +324,25 @@ int main() {
                             lumen::platform::key_name(e.key), e.key,
                             e.repeat ? " 重复" : "");
     });
-    pump.on_key_up([](const lumen::platform::EventKeyUp& e) {
+    pump.on_key_up([](const lumen::platform::EventKeyUp &e) {
         LUMEN_APP_LOG_DEBUG("按键松开: {} ({})",
                             lumen::platform::key_name(e.key), e.key);
     });
     pump.on_mouse_button_down(
-        [](const lumen::platform::EventMouseButtonDown& e) {
+        [](const lumen::platform::EventMouseButtonDown &e) {
             LUMEN_APP_LOG_DEBUG("鼠标按下: {} ({:.0f}, {:.0f})",
                                 lumen::platform::mouse_button_name(e.button),
                                 e.x, e.y);
         });
-    pump.on_mouse_button_up(
-        [](const lumen::platform::EventMouseButtonUp& e) {
-            LUMEN_APP_LOG_DEBUG("鼠标松开: {} ({:.0f}, {:.0f})",
-                                lumen::platform::mouse_button_name(e.button),
-                                e.x, e.y);
-        });
-    pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel& e) {
+    pump.on_mouse_button_up([](const lumen::platform::EventMouseButtonUp &e) {
+        LUMEN_APP_LOG_DEBUG("鼠标松开: {} ({:.0f}, {:.0f})",
+                            lumen::platform::mouse_button_name(e.button), e.x,
+                            e.y);
+    });
+    pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel &e) {
         LUMEN_APP_LOG_DEBUG("滚轮: dx={:.1f} dy={:.1f}", e.deltaX, e.deltaY);
     });
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize& r) {
+    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
         fbWidth = r.width;
         fbHeight = r.height;
         needRecreateSwapchain = true;

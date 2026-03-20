@@ -26,9 +26,6 @@
 
 #include <spdlog/spdlog.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
 #include <slang-com-helper.h>
 #include <slang-com-ptr.h>
 #include <slang.h>

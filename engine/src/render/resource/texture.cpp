@@ -10,6 +10,8 @@
 #include "render/resource/image.hpp"
 #include "render/resource/sampler.hpp"
 
+#include <stb_image.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -157,6 +159,7 @@ bool Texture::create_from_memory(const Context &ctx, const void *data,
 bool Texture::create_from_file(const Context &ctx, const char *filePath,
                                VkQueue transferQueue, CommandPool &cmdPool,
                                const SamplerConfig &samplerConfig) {
+    stbi_set_flip_vertically_on_load(1); // Vulkan 纹理 (0,0)=左下，stb 默认行 0=顶部，需翻转
     int w = 0, h = 0, channels = 0;
     stbi_uc *pixels = stbi_load(filePath, &w, &h, &channels, STBI_rgb_alpha);
     if (!pixels) {

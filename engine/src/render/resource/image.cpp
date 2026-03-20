@@ -7,6 +7,8 @@
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
 
+#include <stb_image.h>
+
 #include <cmath>
 #include <limits>
 
@@ -116,6 +118,7 @@ namespace lumen::render {
     }
 
     bool Image::create_from_file(const Context &ctx, const char *filePath) {
+        stbi_set_flip_vertically_on_load(1); // Vulkan 纹理 (0,0)=左下
         int w { 0 }, h { 0 }, channels { 0 };
         stbi_uc *pixels =
             stbi_load(filePath, &w, &h, &channels, STBI_rgb_alpha);

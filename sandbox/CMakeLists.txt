@@ -15,18 +15,22 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/triangle.frag"
           -o "$<TARGET_FILE_DIR:sandbox>/shaders/triangle.frag.spv"
-  COMMENT "Ensuring shader output directory exists and compiling GLSL shader"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/texture.vert"
+          -o "$<TARGET_FILE_DIR:sandbox>/shaders/texture.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/texture.frag"
+          -o "$<TARGET_FILE_DIR:sandbox>/shaders/texture.frag.spv"
+  COMMENT "Ensuring shader output directory exists and compiling GLSL shaders"
   VERBATIM
 )
 
 
-
-
 # Copy assets files after build.
-# add_custom_command(
-#         TARGET ${CUR_TARGET}
-#         POST_BUILD
-#         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets"
-#                 "$<TARGET_FILE_DIR:${CUR_TARGET}>/assets"
-#         VERBATIM
-# )
+add_custom_command(
+        TARGET sandbox
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets"
+                "$<TARGET_FILE_DIR:sandbox>/assets"
+        VERBATIM
+)
