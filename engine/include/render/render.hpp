@@ -18,4 +18,5 @@
 #include "resource/buffer.hpp"
 #include "resource/image.hpp"
 #include "resource/sampler.hpp"
+#include "resource/texture.hpp"
 #include "resource/descriptor.hpp"
