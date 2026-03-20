@@ -570,12 +570,14 @@ static int run_demo3d() {
                 newDepth.create_depth_attachment(
                     ctx, static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight));
-                depthImage = std::move(newDepth);
+                // 必须先 destroy framebuffers 再替换 depthImage，否则旧 depth view
+                // 仍被 framebuffer 引用时被销毁会触发 VUID-vkDestroyImageView-01026
                 lumen::render::recreate_swapchain_resources(
                     ctx, swapchain, framebuffers, frameSync,
                     renderPass.handle(), static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight), kMaxFramesInFlight,
-                    depthImage.view());
+                    newDepth.view());
+                depthImage = std::move(newDepth);
 
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(sceneTextureId));
