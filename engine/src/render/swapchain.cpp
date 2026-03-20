@@ -254,6 +254,8 @@ bool recreate_swapchain_resources(const Context& ctx, Swapchain& swapchain,
     if (width == 0 || height == 0) {
         return false;
     }
+    // 必须先销毁 Framebuffer，否则 swapchain 的 ImageView 仍被引用，vkDestroyImageView 会报错
+    framebuffers.destroy();
     if (!swapchain.resize(width, height)) {
         return false;
     }

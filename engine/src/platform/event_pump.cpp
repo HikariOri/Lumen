@@ -49,6 +49,8 @@ bool EventPump::poll() {
 
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        if (on_sdl_event_)
+            on_sdl_event_(&e);
         switch (static_cast<SDL_EventType>(e.type)) {
         case SDL_EVENT_QUIT:
             events_.emplace_back(std::in_place_type<EventQuit>);

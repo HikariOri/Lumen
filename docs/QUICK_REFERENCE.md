@@ -27,6 +27,7 @@
 
 ## 文档索引
 
+- [IMGUI_INTEGRATION.md](IMGUI_INTEGRATION.md) — ImGui Vulkan + SDL3 集成与注意事项
 - [NOTES.md](NOTES.md) — 开发注意事项
 - [LOGGER.md](LOGGER.md) — 日志系统
 - [COMMIT_CONVENTION.md](COMMIT_CONVENTION.md) — 提交规范

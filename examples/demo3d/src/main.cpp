@@ -6,6 +6,7 @@
 #include "engine.hpp"
 
 #include "core/logger.hpp"
+#include "ui/imgui_backend.hpp"
 #include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "core/time.hpp"
@@ -17,6 +18,7 @@
 #include "render/pipeline.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
+#include "render/resource/sampler.hpp"
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
@@ -91,7 +93,7 @@ static int run_demo3d() {
         return -1;
     }
 
-    // RenderPass：开启深度缓冲
+    // RenderPass：主屏（呈现）
     lumen::render::RenderPassConfig rpConfig;
     rpConfig.useDepth = true;
     rpConfig.colorAttachment.format = swapchain.image_format();
@@ -100,7 +102,50 @@ static int run_demo3d() {
         return -1;
     }
 
-    // 深度附件
+    // 离屏 RenderPass：3D 场景渲染到纹理（finalLayout=SHADER_READ）
+    lumen::render::RenderPassConfig sceneRpConfig;
+    sceneRpConfig.useDepth = true;
+    sceneRpConfig.colorAttachment.format = swapchain.image_format();
+    sceneRpConfig.colorAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    lumen::render::RenderPass sceneRenderPass;
+    if (!sceneRenderPass.create(ctx.device(), sceneRpConfig)) {
+        return -1;
+    }
+
+    // 离屏：场景颜色 + 深度
+    lumen::render::ImageCreateInfo sceneColorInfo;
+    sceneColorInfo.width = static_cast<uint32_t>(w);
+    sceneColorInfo.height = static_cast<uint32_t>(h);
+    sceneColorInfo.format = swapchain.image_format();
+    sceneColorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT;
+    lumen::render::Image sceneColorImage;
+    if (!sceneColorImage.create(ctx, sceneColorInfo)) {
+        LUMEN_APP_LOG_ERROR("场景颜色附件创建失败");
+        return -1;
+    }
+    lumen::render::Image sceneDepthImage;
+    if (!sceneDepthImage.create_depth_attachment(ctx, static_cast<uint32_t>(w),
+                                                 static_cast<uint32_t>(h))) {
+        return -1;
+    }
+
+    std::vector<VkImageView> sceneAttachments { sceneColorImage.view(),
+                                                sceneDepthImage.view() };
+    lumen::render::Framebuffer sceneFramebuffer;
+    if (!sceneFramebuffer.create_offscreen(
+            ctx.device(), sceneRenderPass.handle(), static_cast<uint32_t>(w),
+            static_cast<uint32_t>(h), sceneAttachments)) {
+        return -1;
+    }
+
+    lumen::render::Sampler sceneSampler;
+    if (!sceneSampler.create(ctx)) {
+        return -1;
+    }
+
+    // 深度附件（主屏）
     lumen::render::Image depthImage;
     if (!depthImage.create_depth_attachment(ctx, static_cast<uint32_t>(w),
                                             static_cast<uint32_t>(h))) {
@@ -237,18 +282,18 @@ static int run_demo3d() {
     pipeConfig.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // Blender OBJ 外表面为 CCW
 
     lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
-                         pipeConfig)) {
+    if (!pipeline.create(ctx, pipelineLayout.handle(),
+                         sceneRenderPass.handle(), 0, pipeConfig)) {
         return -1;
     }
 
-    // 线框管线
     lumen::render::GraphicsPipelineConfig wireframeConfig = pipeConfig;
     wireframeConfig.polygonMode = VK_POLYGON_MODE_LINE;
     wireframeConfig.cullMode = VK_CULL_MODE_NONE;
     lumen::render::GraphicsPipeline wireframePipeline;
     if (!wireframePipeline.create(ctx, pipelineLayout.handle(),
-                                  renderPass.handle(), 0, wireframeConfig)) {
+                                  sceneRenderPass.handle(), 0,
+                                  wireframeConfig)) {
         return -1;
     }
 
@@ -256,27 +301,48 @@ static int run_demo3d() {
     lumen::render::FrameSync frameSync;
     frameSync.create(ctx.device(), swapchain.image_count(), kMaxFramesInFlight);
 
-    LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [WASD/右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
-        "[0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
-
-    uint32_t renderMode { 0 };  // 0=lit, 1=wireframe, 2=normal, 3=depth
+    lumen::platform::EventPump pump;
+    uint32_t renderMode { 0 };
     float orbitYaw { 0.0f };
     float orbitPitch { 0.3f };
     float orbitRadius { 2.5f };
     float modelYaw { 0.0f };
     float modelPitch { 0.0f };
-    constexpr float kMouseSensitivity { 0.007f };
-    constexpr float kZoomSpeed { 0.25f };
-    constexpr float kMinOrbitRadius { 0.8f };
-    constexpr float kMaxOrbitRadius { 20.0f };
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
     bool running { true };
     double lastTime = lumen::core::get_time_seconds();
 
-    lumen::platform::EventPump pump;
+    // ImGui 后端
+    lumen::ui::ImGuiBackendInitInfo imguiInfo;
+    imguiInfo.ctx = &ctx;
+    imguiInfo.swapchain = &swapchain;
+    imguiInfo.renderPass = renderPass.handle();
+    imguiInfo.window = window.sdl_window();
+    if (!lumen::ui::imgui_backend_init(imguiInfo)) {
+        LUMEN_APP_LOG_ERROR("ImGui 初始化失败");
+        return -1;
+    }
+
+    ImTextureID sceneTextureId = reinterpret_cast<ImTextureID>(
+        lumen::ui::imgui_backend_add_texture(
+            sceneSampler.handle(), sceneColorImage.view(),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+
+    pump.on_sdl_event([](const void* ev) {
+        ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event*>(ev));
+    });
+
+    LUMEN_APP_LOG_INFO(
+        "Demo3D 启动 [WASD/右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
+        "[0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+
+    constexpr float kMouseSensitivity { 0.007f };
+    constexpr float kZoomSpeed { 0.25f };
+    constexpr float kMinOrbitRadius { 0.8f };
+    constexpr float kMaxOrbitRadius { 20.0f };
+
     pump.on_quit([&] { running = false; });
     pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
         if (e.key == lumen::platform::Key::Escape) {
@@ -296,8 +362,10 @@ static int run_demo3d() {
         fbHeight = r.height;
         needRecreateSwapchain = true;
     });
-    // 拖拽时启用相对鼠标模式，实现无限旋转（光标不碰边）
+    // 拖拽时启用相对鼠标模式（ImGui 未占用时）
     pump.on_mouse_button_down([&](const lumen::platform::EventMouseButtonDown &e) {
+        if (ImGui::GetIO().WantCaptureMouse)
+            return;
         if (e.button == lumen::platform::MouseButton::Left ||
             e.button == lumen::platform::MouseButton::Right) {
             SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
@@ -317,6 +385,8 @@ static int run_demo3d() {
         }
     });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
+        if (ImGui::GetIO().WantCaptureMouse)
+            return;
         orbitRadius =
             glm::clamp(orbitRadius - e.deltaY * kZoomSpeed, kMinOrbitRadius,
                        kMaxOrbitRadius);
@@ -343,6 +413,34 @@ static int run_demo3d() {
                     static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight), kMaxFramesInFlight,
                     depthImage.view());
+
+                lumen::ui::imgui_backend_remove_texture(
+                    reinterpret_cast<void*>(sceneTextureId));
+
+                lumen::render::ImageCreateInfo sceneColorInfo;
+                sceneColorInfo.width = static_cast<uint32_t>(fbWidth);
+                sceneColorInfo.height = static_cast<uint32_t>(fbHeight);
+                sceneColorInfo.format = swapchain.image_format();
+                sceneColorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                       VK_IMAGE_USAGE_SAMPLED_BIT;
+                sceneColorImage = lumen::render::Image();
+                sceneColorImage.create(ctx, sceneColorInfo);
+                sceneDepthImage = lumen::render::Image();
+                sceneDepthImage.create_depth_attachment(
+                    ctx, static_cast<uint32_t>(fbWidth),
+                    static_cast<uint32_t>(fbHeight));
+                std::vector<VkImageView> newSceneAttachments {
+                    sceneColorImage.view(), sceneDepthImage.view()
+                };
+                sceneFramebuffer = lumen::render::Framebuffer();
+                sceneFramebuffer.create_offscreen(
+                    ctx.device(), sceneRenderPass.handle(),
+                    static_cast<uint32_t>(fbWidth),
+                    static_cast<uint32_t>(fbHeight), newSceneAttachments);
+                sceneTextureId = reinterpret_cast<ImTextureID>(
+                    lumen::ui::imgui_backend_add_texture(
+                        sceneSampler.handle(), sceneColorImage.view(),
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
             }
             needRecreateSwapchain = false;
             continue;
@@ -362,23 +460,33 @@ static int run_demo3d() {
         float dt = static_cast<float>(now - lastTime);
         lastTime = now;
 
-        const auto &inp = pump.input();
-        if (inp.is_key_down(lumen::platform::Key::A))
-            orbitYaw += kOrbitSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::D))
-            orbitYaw -= kOrbitSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::W))
-            orbitPitch = glm::clamp(orbitPitch + kOrbitSpeed * dt, 0.1f, 1.4f);
-        if (inp.is_key_down(lumen::platform::Key::S))
-            orbitPitch = glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
+        lumen::ui::imgui_backend_new_frame();
 
-        // 左键拖拽旋转模型，右键拖拽旋转相机
-        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
+        const auto &inp = pump.input();
+        const bool imguiWantsInput =
+            ImGui::GetIO().WantCaptureMouse || ImGui::GetIO().WantCaptureKeyboard;
+        if (!imguiWantsInput) {
+            if (inp.is_key_down(lumen::platform::Key::A))
+                orbitYaw += kOrbitSpeed * dt;
+            if (inp.is_key_down(lumen::platform::Key::D))
+                orbitYaw -= kOrbitSpeed * dt;
+            if (inp.is_key_down(lumen::platform::Key::W))
+                orbitPitch =
+                    glm::clamp(orbitPitch + kOrbitSpeed * dt, 0.1f, 1.4f);
+            if (inp.is_key_down(lumen::platform::Key::S))
+                orbitPitch =
+                    glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
+        }
+
+        // 左键拖拽旋转模型，右键拖拽旋转相机（ImGui 未占用时）
+        if (!imguiWantsInput &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
             modelYaw -= inp.mouse_delta_x() * kMouseSensitivity;
             modelPitch += inp.mouse_delta_y() * kMouseSensitivity;
             modelPitch = glm::clamp(modelPitch, -1.5f, 1.5f);
         }
-        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+        if (!imguiWantsInput &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
             orbitYaw -= inp.mouse_delta_x() * kMouseSensitivity;
             orbitPitch =
                 glm::clamp(orbitPitch + inp.mouse_delta_y() * kMouseSensitivity,
@@ -401,9 +509,8 @@ static int run_demo3d() {
                                      glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 proj = glm::perspective(
             glm::radians(42.0f),
-            static_cast<float>(swapchain.extent().width) /
-                static_cast<float>(swapchain.extent().height),
-            0.1f, 100.0f);
+            static_cast<float>(fbWidth) / static_cast<float>(fbHeight), 0.1f,
+            100.0f);
         proj[1][1] *= -1.0f;  // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::rotate(model, modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -428,28 +535,32 @@ static int run_demo3d() {
             continue;
         }
 
-        VkRenderPassBeginInfo rpBegin {
+        const VkExtent2D sceneExtent {
+            static_cast<uint32_t>(fbWidth),
+            static_cast<uint32_t>(fbHeight)
+        };
+
+        // Pass 1: render 3D to offscreen
+        VkRenderPassBeginInfo sceneRpBegin {
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
         };
-        rpBegin.renderPass = renderPass.handle();
-        rpBegin.framebuffer = framebuffers.get(imageIndex);
-        rpBegin.renderArea = { { 0, 0 }, swapchain.extent() };
-        VkClearValue clearValues[2];
-        clearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
-        clearValues[1].depthStencil = { 1.0f, 0 };
-        rpBegin.clearValueCount = 2;
-        rpBegin.pClearValues = clearValues;
+        sceneRpBegin.renderPass = sceneRenderPass.handle();
+        sceneRpBegin.framebuffer = sceneFramebuffer.get(0);
+        sceneRpBegin.renderArea = { { 0, 0 }, sceneExtent };
+        VkClearValue sceneClearValues[2];
+        sceneClearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+        sceneClearValues[1].depthStencil = { 1.0f, 0 };
+        sceneRpBegin.clearValueCount = 2;
+        sceneRpBegin.pClearValues = sceneClearValues;
+        vkCmdBeginRenderPass(cmd, &sceneRpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-        VkViewport viewport {};
-        viewport.width = static_cast<float>(swapchain.extent().width);
-        viewport.height = static_cast<float>(swapchain.extent().height);
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-        VkRect2D scissor { { 0, 0 }, swapchain.extent() };
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        VkViewport sceneViewport {};
+        sceneViewport.width = static_cast<float>(sceneExtent.width);
+        sceneViewport.height = static_cast<float>(sceneExtent.height);
+        sceneViewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &sceneViewport);
+        VkRect2D sceneScissor { { 0, 0 }, sceneExtent };
+        vkCmdSetScissor(cmd, 0, 1, &sceneScissor);
 
         VkPipeline activePipeline =
             (renderMode == 1u) ? wireframePipeline.handle() : pipeline.handle();
@@ -461,13 +572,63 @@ static int run_demo3d() {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout.handle(), 0, 1, &descSet, 0,
                                 nullptr);
-
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
         vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
         vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+        vkCmdEndRenderPass(cmd);
+
+        // Pass 2: render to swapchain (clear + ImGui)
+        VkRenderPassBeginInfo rpBegin {
+            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        };
+        rpBegin.renderPass = renderPass.handle();
+        rpBegin.framebuffer = framebuffers.get(imageIndex);
+        rpBegin.renderArea = { { 0, 0 }, swapchain.extent() };
+        VkClearValue clearValues[2];
+        clearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
+        clearValues[1].depthStencil = { 1.0f, 0 };
+        rpBegin.clearValueCount = 2;
+        rpBegin.pClearValues = clearValues;
+        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport viewport {};
+        viewport.width = static_cast<float>(swapchain.extent().width);
+        viewport.height = static_cast<float>(swapchain.extent().height);
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        VkRect2D scissor { { 0, 0 }, swapchain.extent() };
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        // ImGui (docking enabled)
+        ImGuiID dockspaceId =
+            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+        ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Scene");
+        ImGui::Image(sceneTextureId,
+                    ImVec2(static_cast<float>(sceneExtent.width),
+                           static_cast<float>(sceneExtent.height)));
+        ImGui::End();
+
+        ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Demo3D");
+        ImGui::Text("Render: [0]Lit [1]Wireframe [2]Normal [3]Depth");
+        ImGui::Separator();
+        ImGui::SliderFloat("Camera Distance", &orbitRadius, kMinOrbitRadius,
+                           kMaxOrbitRadius, "%.1f");
+        ImGui::SliderFloat("Model Yaw", &modelYaw, -3.14f, 3.14f, "%.2f");
+        ImGui::SliderFloat("Model Pitch", &modelPitch, -1.5f, 1.5f, "%.2f");
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
+                          1.0f / (dt > 0.0f ? dt : 0.016f));
+        ImGui::End();
+
+        lumen::ui::imgui_backend_render(cmd);
 
         vkCmdEndRenderPass(cmd);
         if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -501,6 +662,7 @@ static int run_demo3d() {
     }
 
     ctx.wait_idle();
+    lumen::ui::imgui_backend_shutdown();
     LUMEN_APP_LOG_INFO("Demo3D 退出");
     return 0;
 }

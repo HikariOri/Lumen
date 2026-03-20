@@ -109,6 +109,11 @@ public:
                          uint32_t width, uint32_t height,
                          const std::vector<VkImageView>& attachments);
 
+    /**
+     * @brief 销毁 Framebuffer（Swapchain 重建前必须先调用，以释放对 ImageView 的引用）
+     */
+    void destroy();
+
     [[nodiscard]] uint32_t count() const {
         return static_cast<uint32_t>(framebuffers_.size());
     }

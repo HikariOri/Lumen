@@ -175,6 +175,8 @@ namespace lumen::render {
         return result == VK_SUCCESS;
     }
 
+    void Framebuffer::destroy() { destroy_(); }
+
     void Framebuffer::destroy_() {
         for (auto fb : framebuffers_) {
             vkDestroyFramebuffer(device_, fb, nullptr);

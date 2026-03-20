@@ -39,6 +39,8 @@ public:
     using MouseMoveFn = std::function<void(const EventMouseMove&)>;
     using MouseWheelFn = std::function<void(const EventMouseWheel&)>;
     using WindowResizeFn = std::function<void(const EventWindowResize&)>;
+    /// 原始 SDL 事件回调（用于 ImGui 等，每事件调用一次）
+    using SDLEventFn = std::function<void(const void* sdlEvent)>;
 
     void on_quit(QuitFn f) { on_quit_ = std::move(f); }
     void on_key_down(KeyDownFn f) { on_key_down_ = std::move(f); }
@@ -54,6 +56,7 @@ public:
     void on_window_resize(WindowResizeFn f) {
         on_window_resize_ = std::move(f);
     }
+    void on_sdl_event(SDLEventFn f) { on_sdl_event_ = std::move(f); }
 
     /**
      * @brief 轮询事件、更新 Input、分发回调
@@ -78,6 +81,7 @@ private:
     MouseMoveFn on_mouse_move_;
     MouseWheelFn on_mouse_wheel_;
     WindowResizeFn on_window_resize_;
+    SDLEventFn on_sdl_event_;
 };
 
 } // namespace platform
