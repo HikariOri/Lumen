@@ -3,8 +3,8 @@
  * @brief EventPump SDL3 实现
  */
 
-#include "platform/event.hpp"
 #include "platform/event_pump.hpp"
+#include "platform/event.hpp"
 #include "platform/input.hpp"
 
 #include <utility>
@@ -34,14 +34,10 @@ Modifier sdl_mods_to_modifier(uint16_t sdlMods) {
 
 MouseButton sdl_button_to_mouse_button(uint8_t btn) {
     switch (btn) {
-    case SDL_BUTTON_LEFT:
-        return MouseButton::Left;
-    case SDL_BUTTON_MIDDLE:
-        return MouseButton::Middle;
-    case SDL_BUTTON_RIGHT:
-        return MouseButton::Right;
-    default:
-        return MouseButton::Left;
+    case SDL_BUTTON_LEFT: return MouseButton::Left;
+    case SDL_BUTTON_MIDDLE: return MouseButton::Middle;
+    case SDL_BUTTON_RIGHT: return MouseButton::Right;
+    default: return MouseButton::Left;
     }
 }
 
@@ -62,57 +58,57 @@ bool EventPump::poll() {
             return false;
 
         case SDL_EVENT_KEY_DOWN: {
-            auto& k = e.key;
+            auto &k = e.key;
             KeyCode code = static_cast<KeyCode>(k.scancode);
             input_.update_key_(code, true);
             input_.update_modifiers_(static_cast<uint16_t>(k.mod));
             events_.emplace_back(std::in_place_type<EventKeyDown>, code,
-                                k.repeat, sdl_mods_to_modifier(k.mod));
+                                 k.repeat, sdl_mods_to_modifier(k.mod));
             break;
         }
         case SDL_EVENT_KEY_UP: {
-            auto& k = e.key;
+            auto &k = e.key;
             KeyCode code = static_cast<KeyCode>(k.scancode);
             input_.update_key_(code, false);
             input_.update_modifiers_(static_cast<uint16_t>(k.mod));
             events_.emplace_back(std::in_place_type<EventKeyUp>, code,
-                                sdl_mods_to_modifier(k.mod));
+                                 sdl_mods_to_modifier(k.mod));
             break;
         }
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            auto& b = e.button;
+            auto &b = e.button;
             MouseButton btn = sdl_button_to_mouse_button(b.button);
             input_.update_mouse_button_(btn, true);
             input_.update_mouse_position_(b.x, b.y);
             events_.emplace_back(std::in_place_type<EventMouseButtonDown>, btn,
-                                b.x, b.y);
+                                 b.x, b.y);
             break;
         }
         case SDL_EVENT_MOUSE_BUTTON_UP: {
-            auto& b = e.button;
+            auto &b = e.button;
             MouseButton btn = sdl_button_to_mouse_button(b.button);
             input_.update_mouse_button_(btn, false);
             input_.update_mouse_position_(b.x, b.y);
             events_.emplace_back(std::in_place_type<EventMouseButtonUp>, btn,
-                                b.x, b.y);
+                                 b.x, b.y);
             break;
         }
 
         case SDL_EVENT_MOUSE_MOTION: {
-            auto& m = e.motion;
+            auto &m = e.motion;
             input_.update_mouse_position_(m.x, m.y);
             input_.mouseX_ = m.x;
             input_.mouseY_ = m.y;
             input_.deltaX_ += m.xrel;
             input_.deltaY_ += m.yrel;
             events_.emplace_back(std::in_place_type<EventMouseMove>, m.x, m.y,
-                                m.xrel, m.yrel);
+                                 m.xrel, m.yrel);
             break;
         }
 
         case SDL_EVENT_MOUSE_WHEEL: {
-            auto& w = e.wheel;
+            auto &w = e.wheel;
             float dx = w.x;
             float dy = w.y;
             if (w.direction == SDL_MOUSEWHEEL_FLIPPED) {
@@ -126,7 +122,7 @@ bool EventPump::poll() {
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
             events_.emplace_back(std::in_place_type<EventWindowResize>,
-                                e.window.data1, e.window.data2);
+                                 e.window.data1, e.window.data2);
             break;
         }
 
@@ -137,17 +133,16 @@ bool EventPump::poll() {
                 on_quit_();
             return false;
 
-        default:
-            break;
+        default: break;
         }
     }
 
     // 同步键盘/鼠标状态（SDL 权威状态，确保与事件一致）
     int numKeys { 0 };
-    const bool* keyState = SDL_GetKeyboardState(&numKeys);
+    const bool *keyState = SDL_GetKeyboardState(&numKeys);
     if (keyState) {
-        for (int i { 0 }; i < numKeys && i < static_cast<int>(Input::k_max_keys);
-             ++i) {
+        for (int i { 0 };
+             i < numKeys && i < static_cast<int>(Input::k_max_keys); ++i) {
             input_.keys_[i] = keyState[i];
         }
     }
@@ -163,8 +158,8 @@ bool EventPump::poll() {
     return true;
 }
 
-void EventPump::dispatch_(const EventList& events) {
-    for (const auto& e : events) {
+void EventPump::dispatch_(const EventList &events) {
+    for (const auto &e : events) {
         if (std::holds_alternative<EventKeyDown>(e) && on_key_down_) {
             on_key_down_(std::get<EventKeyDown>(e));
         } else if (std::holds_alternative<EventKeyUp>(e) && on_key_up_) {
@@ -175,7 +170,8 @@ void EventPump::dispatch_(const EventList& events) {
         } else if (std::holds_alternative<EventMouseButtonUp>(e) &&
                    on_mouse_button_up_) {
             on_mouse_button_up_(std::get<EventMouseButtonUp>(e));
-        } else if (std::holds_alternative<EventMouseMove>(e) && on_mouse_move_) {
+        } else if (std::holds_alternative<EventMouseMove>(e) &&
+                   on_mouse_move_) {
             on_mouse_move_(std::get<EventMouseMove>(e));
         } else if (std::holds_alternative<EventMouseWheel>(e) &&
                    on_mouse_wheel_) {

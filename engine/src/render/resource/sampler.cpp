@@ -9,12 +9,10 @@
 namespace lumen {
 namespace render {
 
-bool Sampler::create(const Context& ctx, const SamplerConfig& config) {
+bool Sampler::create(const Context &ctx, const SamplerConfig &config) {
     device_ = ctx.device();
 
-    VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(ctx.physical_device(), &props);
-
+    const auto &props = ctx.physical_device_properties();
     VkSamplerCreateInfo samplerInfo { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     samplerInfo.magFilter = config.magFilter;
     samplerInfo.minFilter = config.minFilter;
@@ -28,7 +26,8 @@ bool Sampler::create(const Context& ctx, const SamplerConfig& config) {
     samplerInfo.maxLod = config.maxLod;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
 
-    VkResult result = vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_);
+    VkResult result =
+        vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_);
     return result == VK_SUCCESS;
 }
 
@@ -41,15 +40,15 @@ void Sampler::destroy_() {
 
 Sampler::~Sampler() { destroy_(); }
 
-Sampler::Sampler(Sampler&& other) noexcept
-    : device_ { other.device_ }
-    , sampler_ { other.sampler_ } {
+Sampler::Sampler(Sampler &&other) noexcept
+    : device_ { other.device_ }, sampler_ { other.sampler_ } {
     other.device_ = VK_NULL_HANDLE;
     other.sampler_ = VK_NULL_HANDLE;
 }
 
-Sampler& Sampler::operator=(Sampler&& other) noexcept {
-    if (this == &other) return *this;
+Sampler &Sampler::operator=(Sampler &&other) noexcept {
+    if (this == &other)
+        return *this;
     destroy_();
     device_ = other.device_;
     sampler_ = other.sampler_;
