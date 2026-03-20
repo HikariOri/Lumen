@@ -6,6 +6,7 @@
 #include "render/resource/image.hpp"
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
+#include "core/logger.hpp"
 
 #include <stb_image.h>
 
@@ -72,8 +73,11 @@ namespace lumen::render {
         }
 
         VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &image_);
-        if (result != VK_SUCCESS)
+        if (result != VK_SUCCESS) {
+            LUMEN_LOG_ERROR("Image 创建失败: {} ({}x{})",
+                            static_cast<int>(result), info.width, info.height);
             return false;
+        }
 
         VkMemoryRequirements memReqs;
         vkGetImageMemoryRequirements(device_, image_, &memReqs);

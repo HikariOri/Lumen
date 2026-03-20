@@ -5,6 +5,7 @@
 
 #include "render/swapchain.hpp"
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -90,13 +91,24 @@ bool Swapchain::create(const Context& ctx, VkSurfaceKHR surface, uint32_t width,
     graphicsQueueFamily_ = ctx.graphics_queue_family();
     presentQueueFamily_ = ctx.present_queue_family();
 
-    return create_swapchain_(width, height, config) && create_image_views_();
+    bool ok = create_swapchain_(width, height, config) && create_image_views_();
+    if (ok) {
+        LUMEN_LOG_DEBUG("Swapchain 创建成功 {}x{} imageCount={}", extent_.width,
+                        extent_.height, static_cast<uint32_t>(images_.size()));
+    } else {
+        LUMEN_LOG_ERROR("Swapchain 创建失败");
+    }
+    return ok;
 }
 
 bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
                                  const SwapchainConfig& config) {
     auto support = query_swapchain_support(physicalDevice_, surface_);
-    if (support.formats.empty() || support.presentModes.empty()) return false;
+    if (support.formats.empty() || support.presentModes.empty()) {
+        LUMEN_LOG_ERROR("Swapchain 不支持: formats={} presentModes={}",
+                        support.formats.size(), support.presentModes.size());
+        return false;
+    }
 
     VkSurfaceFormatKHR format = choose_surface_format(
         support.formats, config.imageFormat, config.colorSpace);
@@ -138,7 +150,10 @@ bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
 
     VkResult result =
         vkCreateSwapchainKHR(device_, &createInfo, nullptr, &swapchain_);
-    if (result != VK_SUCCESS) return false;
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("vkCreateSwapchainKHR 失败: {}", static_cast<int>(result));
+        return false;
+    }
 
     imageFormat_ = format.format;
 
@@ -201,11 +216,19 @@ VkResult Swapchain::present(VkQueue queue, uint32_t imageIndex,
 }
 
 bool Swapchain::resize(uint32_t width, uint32_t height) {
+    LUMEN_LOG_DEBUG("Swapchain 调整大小 {}x{}", width, height);
     destroy_();
-    return create_swapchain_(width, height, config_) && create_image_views_();
+    bool ok = create_swapchain_(width, height, config_) && create_image_views_();
+    if (ok) {
+        LUMEN_LOG_DEBUG("Swapchain resize 完成 {}x{}", extent_.width, extent_.height);
+    }
+    return ok;
 }
 
 void Swapchain::destroy_() {
+    if (!imageViews_.empty() || swapchain_ != VK_NULL_HANDLE) {
+        LUMEN_LOG_DEBUG("销毁 Swapchain (imageViews={})", imageViews_.size());
+    }
     for (auto view : imageViews_) {
         vkDestroyImageView(device_, view, nullptr);
     }

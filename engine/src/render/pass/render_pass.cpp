@@ -5,6 +5,7 @@
 
 #include "render/pass/render_pass.hpp"
 #include "render/swapchain.hpp"
+#include "core/logger.hpp"
 
 namespace lumen::render {
 
@@ -77,6 +78,10 @@ namespace lumen::render {
 
         VkResult result =
             vkCreateRenderPass(device_, &createInfo, nullptr, &renderPass_);
+        if (result == VK_SUCCESS) {
+            LUMEN_LOG_DEBUG("RenderPass 创建成功, useDepth={}",
+                            config.useDepth);
+        }
         return result == VK_SUCCESS;
     }
 
@@ -137,10 +142,14 @@ namespace lumen::render {
             VkResult result = vkCreateFramebuffer(device, &createInfo, nullptr,
                                                   &framebuffers_[i]);
             if (result != VK_SUCCESS) {
+                LUMEN_LOG_ERROR("Framebuffer 创建失败 index={}", i);
                 destroy_();
                 return false;
             }
         }
+        LUMEN_LOG_DEBUG("Framebuffer 创建成功 count={} {}x{}",
+                        framebuffers_.size(), swapchain.extent().width,
+                        swapchain.extent().height);
         return true;
     }
 

@@ -342,6 +342,9 @@ int main() {
     pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel &e) {
         LUMEN_APP_LOG_DEBUG("滚轮: dx={:.1f} dy={:.1f}", e.deltaX, e.deltaY);
     });
+    pump.on_mouse_move([&](const lumen::platform::EventMouseMove &e) {
+        LUMEN_APP_LOG_DEBUG("鼠标移动: ({:.0f}, {:.0f})", e.x, e.y);
+    });
     pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
         fbWidth = r.width;
         fbHeight = r.height;

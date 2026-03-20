@@ -82,6 +82,8 @@ bool Logger::init(const LoggerConfig& config) {
     }
 
     spdlog::set_default_logger(engineLogger);
+    engineLogger->log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION},
+                     spdlog::level::info, "Logger 初始化完成 engine+app");
     return true;
 }
 

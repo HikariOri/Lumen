@@ -5,6 +5,7 @@
 
 #include "render/resource/buffer.hpp"
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 #include <cstring>
 
@@ -62,8 +63,11 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &info) {
   bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
   VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &buffer_);
-  if (result != VK_SUCCESS)
+  if (result != VK_SUCCESS) {
+    LUMEN_LOG_ERROR("Buffer 创建失败: {} size={}", static_cast<int>(result),
+                    info.size);
     return false;
+  }
 
   VkMemoryRequirements memReqs;
   vkGetBufferMemoryRequirements(device_, buffer_, &memReqs);
@@ -78,12 +82,15 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &info) {
 
   result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory_);
   if (result != VK_SUCCESS) {
+    LUMEN_LOG_ERROR("Buffer 内存分配失败: {}", static_cast<int>(result));
     vkDestroyBuffer(device_, buffer_, nullptr);
     buffer_ = VK_NULL_HANDLE;
     return false;
   }
 
   vkBindBufferMemory(device_, buffer_, memory_, 0);
+  LUMEN_LOG_DEBUG("Buffer 创建成功 size={} hostVisible={}", info.size,
+                  info.hostVisible);
   return true;
 }
 

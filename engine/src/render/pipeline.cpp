@@ -5,6 +5,7 @@
 
 #include "render/pipeline.hpp"
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 #include <fstream>
 
@@ -31,11 +32,16 @@ bool PipelineLayout::create(
 
     VkResult result =
         vkCreatePipelineLayout(device_, &createInfo, nullptr, &layout_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("PipelineLayout 创建成功, setLayouts={}",
+                        setLayouts.size());
+    }
     return result == VK_SUCCESS;
 }
 
 void PipelineLayout::destroy_() {
     if (layout_ != VK_NULL_HANDLE) {
+        LUMEN_LOG_DEBUG("销毁 PipelineLayout");
         vkDestroyPipelineLayout(device_, layout_, nullptr);
         layout_ = VK_NULL_HANDLE;
     }
@@ -83,6 +89,10 @@ bool PipelineCache::create(const Context& ctx, const char* filePath) {
 
     VkResult result =
         vkCreatePipelineCache(device_, &createInfo, nullptr, &cache_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("PipelineCache 创建成功, initData={} bytes",
+                        data.size());
+    }
     return result == VK_SUCCESS;
 }
 
@@ -239,11 +249,18 @@ bool GraphicsPipeline::create(const Context& ctx,
 
     VkResult result = vkCreateGraphicsPipelines(
         device_, cache, 1, &pipelineInfo, nullptr, &pipeline_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("GraphicsPipeline 创建成功");
+    } else {
+        LUMEN_LOG_ERROR("vkCreateGraphicsPipelines 失败: {}",
+                        static_cast<int>(result));
+    }
     return result == VK_SUCCESS;
 }
 
 void GraphicsPipeline::destroy_() {
     if (pipeline_ != VK_NULL_HANDLE) {
+        LUMEN_LOG_DEBUG("销毁 GraphicsPipeline");
         vkDestroyPipeline(device_, pipeline_, nullptr);
         pipeline_ = VK_NULL_HANDLE;
     }

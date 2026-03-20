@@ -41,6 +41,8 @@ namespace lumen::platform {
             SDL_SetWindowFullscreen(window_, true);
         }
 
+        LUMEN_LOG_DEBUG("窗口创建成功 {}x{} \"{}\"", width_, height_,
+                        config.title);
         return true;
     }
 
@@ -66,8 +68,10 @@ namespace lumen::platform {
 
         VkSurfaceKHR surface { VK_NULL_HANDLE };
         if (!SDL_Vulkan_CreateSurface(window_, instance, nullptr, &surface)) {
+            LUMEN_LOG_ERROR("Vulkan Surface 创建失败: {}", SDL_GetError());
             return VK_NULL_HANDLE;
         }
+        LUMEN_LOG_DEBUG("Vulkan Surface 创建成功");
         return surface;
     }
 
@@ -112,6 +116,7 @@ namespace lumen::platform {
 
     void Window::destroy_() {
         if (window_) {
+            LUMEN_LOG_DEBUG("销毁窗口");
             SDL_DestroyWindow(window_);
             window_ = nullptr;
         }

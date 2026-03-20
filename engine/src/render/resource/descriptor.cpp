@@ -5,6 +5,7 @@
 
 #include "render/resource/descriptor.hpp"
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 namespace lumen {
 namespace render {
@@ -28,6 +29,10 @@ bool DescriptorSetLayout::create(const Context& ctx,
 
     VkResult result =
         vkCreateDescriptorSetLayout(device_, &createInfo, nullptr, &layout_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("DescriptorSetLayout 创建成功 bindings={}",
+                        bindings.size());
+    }
     return result == VK_SUCCESS;
 }
 
@@ -79,6 +84,9 @@ bool DescriptorPool::create(const Context& ctx,
 
     VkResult result =
         vkCreateDescriptorPool(device_, &createInfo, nullptr, &pool_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("DescriptorPool 创建成功 maxSets={}", maxSets);
+    }
     return result == VK_SUCCESS;
 }
 

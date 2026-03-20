@@ -4,6 +4,7 @@
  */
 
 #include "render/shader.hpp"
+#include "core/logger.hpp"
 
 #include <fstream>
 
@@ -11,7 +12,10 @@ namespace lumen {
 namespace render {
 
 bool ShaderModule::create(VkDevice device, std::span<const uint32_t> code) {
-    if (code.empty()) return false;
+    if (code.empty()) {
+        LUMEN_LOG_ERROR("ShaderModule 创建失败: code 为空");
+        return false;
+    }
 
     device_ = device;
 
@@ -22,21 +26,34 @@ bool ShaderModule::create(VkDevice device, std::span<const uint32_t> code) {
 
     VkResult result =
         vkCreateShaderModule(device_, &createInfo, nullptr, &module_);
+    if (result == VK_SUCCESS) {
+        LUMEN_LOG_DEBUG("ShaderModule 创建成功, {} bytes", code.size_bytes());
+    }
     return result == VK_SUCCESS;
 }
 
 bool ShaderModule::create_from_file(VkDevice device, const char* filePath) {
     std::ifstream file { filePath, std::ios::ate | std::ios::binary };
-    if (!file) return false;
+    if (!file) {
+        LUMEN_LOG_ERROR("Shader 文件打开失败: {}", filePath);
+        return false;
+    }
 
     size_t fileSize = file.tellg();
-    if (fileSize % 4 != 0) return false;
+    if (fileSize % 4 != 0) {
+        LUMEN_LOG_ERROR("Shader 文件大小不是 4 的倍数: {}", filePath);
+        return false;
+    }
 
     std::vector<uint32_t> code(fileSize / 4);
     file.seekg(0);
     file.read(reinterpret_cast<char*>(code.data()), fileSize);
 
-    return create(device, code);
+    bool ok = create(device, code);
+    if (ok) {
+        LUMEN_LOG_DEBUG("Shader 加载成功: {}", filePath);
+    }
+    return ok;
 }
 
 VkPipelineShaderStageCreateInfo ShaderModule::stage_create_info(

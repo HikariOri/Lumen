@@ -5,6 +5,7 @@
 
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
+#include "core/logger.hpp"
 
 namespace lumen::render {
 
@@ -19,6 +20,10 @@ namespace lumen::render {
 
         VkResult result =
             vkCreateCommandPool(device_, &createInfo, nullptr, &pool_);
+        if (result == VK_SUCCESS) {
+            LUMEN_LOG_DEBUG("CommandPool 创建成功, queueFamily={}",
+                            queueFamilyIndex);
+        }
         return result == VK_SUCCESS;
     }
 
@@ -35,6 +40,7 @@ namespace lumen::render {
 
         if (vkAllocateCommandBuffers(device_, &allocInfo, buffers.data()) !=
             VK_SUCCESS) {
+            LUMEN_LOG_ERROR("CommandBuffer 分配失败 count={}", count);
             return {};
         }
         return buffers;
@@ -118,10 +124,13 @@ namespace lumen::render {
         for (uint32_t i { 0 }; i < framesInFlight; ++i) {
             if (vkCreateFence(device_, &fenceInfo, nullptr,
                               &inFlightFences_[i]) != VK_SUCCESS) {
+                LUMEN_LOG_ERROR("FrameSync Fence 创建失败");
                 destroy_();
                 return false;
             }
         }
+        LUMEN_LOG_DEBUG("FrameSync 创建成功 swapchainImages={} framesInFlight={}",
+                        swapchainImageCount, framesInFlight);
         return true;
     }
 

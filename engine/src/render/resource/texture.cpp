@@ -9,6 +9,7 @@
 #include "render/resource/buffer.hpp"
 #include "render/resource/image.hpp"
 #include "render/resource/sampler.hpp"
+#include "core/logger.hpp"
 
 #include <stb_image.h>
 
@@ -163,6 +164,7 @@ bool Texture::create_from_file(const Context &ctx, const char *filePath,
     int w = 0, h = 0, channels = 0;
     stbi_uc *pixels = stbi_load(filePath, &w, &h, &channels, STBI_rgb_alpha);
     if (!pixels) {
+        LUMEN_LOG_ERROR("纹理加载失败: {}", filePath);
         return false;
     }
 
@@ -175,8 +177,11 @@ bool Texture::create_from_file(const Context &ctx, const char *filePath,
                                   cmdPool, true);
     stbi_image_free(pixels);
 
-    if (!ok)
+    if (!ok) {
+        LUMEN_LOG_ERROR("纹理从像素创建失败: {}x{}", texWidth, texHeight);
         return false;
+    }
+    LUMEN_LOG_DEBUG("纹理加载成功: {} {}x{}", filePath, texWidth, texHeight);
     return create_sampler_(ctx, samplerConfig);
 }
 
@@ -218,6 +223,8 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
 
     VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &image_);
     if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("vkCreateImage 失败: {} ({}x{})", static_cast<int>(result),
+                        texWidth, texHeight);
         return false;
     }
 
@@ -232,6 +239,7 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
 
     result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory_);
     if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("纹理内存分配失败: {}", static_cast<int>(result));
         vkDestroyImage(device_, image_, nullptr);
         image_ = VK_NULL_HANDLE;
         return false;

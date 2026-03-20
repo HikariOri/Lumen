@@ -107,6 +107,7 @@ bool Context::init_instance(const ContextConfig &config) {
                         static_cast<int>(result));
         return false;
     }
+    LUMEN_LOG_DEBUG("Vulkan instance 创建成功, validation={}", validationEnabled_);
     return true;
 }
 
@@ -148,6 +149,8 @@ bool Context::pick_physical_device_(VkSurfaceKHR surface) {
 
         if (gfxIdx != UINT32_MAX &&
             (surface == VK_NULL_HANDLE || presentIdx != UINT32_MAX)) {
+            LUMEN_LOG_DEBUG("选中物理设备: {}, 队列族 gfx={} present={}",
+                            props.deviceName, gfxIdx, presentIdx);
             physicalDevice_ = dev;
             graphicsQueueFamily_ = gfxIdx;
             presentQueueFamily_ =
@@ -209,11 +212,14 @@ bool Context::create_logical_device_(VkSurfaceKHR surface) {
 
     VkResult result =
         vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_);
-    if (result != VK_SUCCESS)
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("vkCreateDevice 失败: {}", static_cast<int>(result));
         return false;
+    }
 
     vkGetDeviceQueue(device_, graphicsQueueFamily_, 0, &graphicsQueue_);
     vkGetDeviceQueue(device_, presentQueueFamily_, 0, &presentQueue_);
+    LUMEN_LOG_DEBUG("逻辑设备创建成功");
     return true;
 }
 
@@ -270,10 +276,15 @@ bool Context::init_device(VkSurfaceKHR surface) {
     if (device_ != VK_NULL_HANDLE)
         return true;
 
-    if (!pick_physical_device_(surface))
+    if (!pick_physical_device_(surface)) {
+        LUMEN_LOG_ERROR("未找到合适的物理设备");
         return false;
+    }
     if (!create_logical_device_(surface))
         return false;
+    auto info = physical_device_info();
+    LUMEN_LOG_INFO("Vulkan 设备初始化完成: {} ({})", info.deviceName,
+                   device_type_name(info.deviceType));
     return true;
 }
 
@@ -343,6 +354,7 @@ Context &Context::operator=(Context &&other) noexcept {
 
 void Context::destroy_() {
     if (device_ != VK_NULL_HANDLE) {
+        LUMEN_LOG_DEBUG("销毁逻辑设备");
         vkDestroyDevice(device_, nullptr);
         device_ = VK_NULL_HANDLE;
         graphicsQueue_ = VK_NULL_HANDLE;
@@ -350,6 +362,7 @@ void Context::destroy_() {
     }
     physicalDevice_ = VK_NULL_HANDLE;
     if (instance_ != VK_NULL_HANDLE) {
+        LUMEN_LOG_DEBUG("销毁 Vulkan instance");
         vkDestroyInstance(instance_, nullptr);
         instance_ = VK_NULL_HANDLE;
     }
