@@ -42,17 +42,7 @@ constexpr uint32_t kMaxFramesInFlight { 2 };
 
 } // namespace
 
-int main() {
-    lumen::core::LoggerConfig logConfig;
-    logConfig.engine.level = spdlog::level::debug;
-    logConfig.app.level = spdlog::level::debug;
-    if (!lumen::core::Logger::init(logConfig)) {
-        return -1;
-    }
-
-    LUMEN_APP_LOG_INFO("Sandbox 启动");
-    LUMEN_APP_LOG_INFO("应用层日志测试");
-
+static int run_sandbox() {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
     winConfig.title = "LearnVulkan Sandbox - 纹理矩形";
@@ -74,6 +64,7 @@ int main() {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 创建失败");
         return -1;
     }
+    LUMEN_APP_LOG_INFO("Sandbox 启动");
     LUMEN_APP_LOG_INFO("Vulkan Instance 创建成功");
 
     lumen::render::Surface surface(
@@ -393,10 +384,12 @@ int main() {
         while (!frameSync.wait_fence(currentFrame, kFenceWaitTimeoutNs)) {
             if (!pump.poll()) {
                 running = false;
-                goto exit_loop;
+                break;
             }
             SDL_Delay(1);
         }
+        if (!running)
+            break;
         if (doLog) {
             LUMEN_APP_LOG_DEBUG("[frame {}] acquire 图像 ...", frameCount);
         }
@@ -534,11 +527,21 @@ int main() {
         currentFrame = (currentFrame + 1) % kMaxFramesInFlight;
         ++frameCount;
     }
-exit_loop:
 
     vkDeviceWaitIdle(ctx.device());
 
     LUMEN_APP_LOG_INFO("Sandbox 退出");
-    lumen::core::Logger::shutdown();
     return 0;
+}
+
+int main() {
+    if (!lumen::core::Logger::init(
+            { /* default config with debug level */
+              .engine = { .level = spdlog::level::debug },
+              .app = { .level = spdlog::level::debug } })) {
+        return -1;
+    }
+    int result = run_sandbox();
+    lumen::core::Logger::shutdown();
+    return result;
 }

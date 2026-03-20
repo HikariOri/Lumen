@@ -66,7 +66,16 @@ std::shared_ptr<spdlog::logger> create_logger(const char* name,
 
 } // namespace
 
+Logger& Logger::instance() {
+    static Logger inst;
+    return inst;
+}
+
 bool Logger::init(const LoggerConfig& config) {
+    return instance().init_(config);
+}
+
+bool Logger::init_(const LoggerConfig& config) {
     spdlog::shutdown();
 
     auto engineLogger =
@@ -87,13 +96,27 @@ bool Logger::init(const LoggerConfig& config) {
     return true;
 }
 
-void Logger::shutdown() { spdlog::shutdown(); }
+void Logger::shutdown() {
+    instance().shutdown_();
+}
+
+void Logger::shutdown_() {
+    spdlog::shutdown();
+}
 
 std::shared_ptr<spdlog::logger> Logger::engine() {
-    return spdlog::get(k_engine_logger_name);
+    return instance().engine_();
 }
 
 std::shared_ptr<spdlog::logger> Logger::app() {
+    return instance().app_();
+}
+
+std::shared_ptr<spdlog::logger> Logger::engine_() {
+    return spdlog::get(k_engine_logger_name);
+}
+
+std::shared_ptr<spdlog::logger> Logger::app_() {
     return spdlog::get(k_app_logger_name);
 }
 

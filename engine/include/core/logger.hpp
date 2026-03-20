@@ -33,34 +33,34 @@ struct LoggerConfig {
 
 /**
  * @class Logger
- * @brief 双 logger 封装：引擎内 (lumen) 与外部 (app) 分离
+ * @brief 单例：引擎内 (lumen) 与外部 (app) 双 logger，程序退出时自动 shutdown
  */
 class Logger {
 public:
-    Logger() = default;
-    Logger(const Logger &) = delete;
-    Logger(Logger &&) = default;
-    Logger &operator=(const Logger &) = delete;
-    Logger &operator=(Logger &&) = default;
-    ~Logger() = default;
-
-    /**
-     * @brief 初始化引擎与外部 logger
-     */
     static bool init(const LoggerConfig &config = {});
-
     static void shutdown();
 
-    /// 引擎内部 logger
     static std::shared_ptr<spdlog::logger> engine();
-
-    /// 外部调用 logger
     static std::shared_ptr<spdlog::logger> app();
 
-    /// 引擎 logger 名称（constexpr）
     static constexpr const char *engine_name() { return "lumen"; }
-    /// 外部 logger 名称（constexpr）
     static constexpr const char *app_name() { return "app"; }
+
+    Logger(const Logger &) = delete;
+    Logger(Logger &&) = delete;
+    Logger &operator=(const Logger &) = delete;
+    Logger &operator=(Logger &&) = delete;
+
+private:
+    static Logger &instance();
+
+    bool init_(const LoggerConfig &config);
+    void shutdown_();
+    std::shared_ptr<spdlog::logger> engine_();
+    std::shared_ptr<spdlog::logger> app_();
+
+    Logger() = default;
+    ~Logger() = default;
 };
 
 } // namespace core
