@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -149,6 +150,20 @@ using Event = std::variant<EventQuit,
                           EventWindowResize>;
 
 using EventList = std::vector<Event>;
+
+// ============== 名称查询 ==============
+
+/// 按键名称（如 "W", "Escape"）
+std::string_view key_name(KeyCode key);
+
+/// 鼠标按钮名称（如 "Left", "Middle", "Right"）
+std::string_view mouse_button_name(MouseButton btn);
+
+/// 修饰键名称（如 "Shift", "Ctrl"）
+std::string_view modifier_name(Modifier mod);
+
+/// 事件类型名称（如 "KeyDown", "MouseMove"）
+std::string_view event_type_name(const Event& e);
 
 } // namespace platform
 } // namespace lumen

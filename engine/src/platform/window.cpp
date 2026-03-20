@@ -73,9 +73,7 @@ namespace lumen::platform {
 
     bool Window::poll_events() {
         EventPump pump;
-        EventList events;
-        Input input;
-        return pump.poll(events, input);
+        return pump.poll();
     }
 
     uint32_t Window::width() const {

@@ -259,25 +259,47 @@ int main() {
     bool needRecreateSwapchain { false };
 
     lumen::platform::EventPump pump;
-    lumen::platform::EventList events;
-    lumen::platform::Input input;
     uint32_t currentFrame { 0 };
     bool running { true };
 
+    pump.on_quit([&] { running = false; });
+    pump.on_key_down([&](const lumen::platform::EventKeyDown& e) {
+        if (e.key == lumen::platform::Key::Escape) {
+            running = false;
+            return;
+        }
+        LUMEN_APP_LOG_DEBUG("按键按下: {} ({}){}",
+                            lumen::platform::key_name(e.key), e.key,
+                            e.repeat ? " 重复" : "");
+    });
+    pump.on_key_up([](const lumen::platform::EventKeyUp& e) {
+        LUMEN_APP_LOG_DEBUG("按键松开: {} ({})",
+                            lumen::platform::key_name(e.key), e.key);
+    });
+    pump.on_mouse_button_down(
+        [](const lumen::platform::EventMouseButtonDown& e) {
+            LUMEN_APP_LOG_DEBUG("鼠标按下: {} ({:.0f}, {:.0f})",
+                                lumen::platform::mouse_button_name(e.button),
+                                e.x, e.y);
+        });
+    pump.on_mouse_button_up(
+        [](const lumen::platform::EventMouseButtonUp& e) {
+            LUMEN_APP_LOG_DEBUG("鼠标松开: {} ({:.0f}, {:.0f})",
+                                lumen::platform::mouse_button_name(e.button),
+                                e.x, e.y);
+        });
+    pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel& e) {
+        LUMEN_APP_LOG_DEBUG("滚轮: dx={:.1f} dy={:.1f}", e.deltaX, e.deltaY);
+    });
+    pump.on_window_resize([&](const lumen::platform::EventWindowResize& r) {
+        fbWidth = r.width;
+        fbHeight = r.height;
+        needRecreateSwapchain = true;
+        LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
+    });
+
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
     constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
-
-    auto pump_and_check_quit = [&]() {
-        if (!pump.poll(events, input)) {
-            return true;
-        }
-        for (const auto &e : events) {
-            if (std::holds_alternative<lumen::platform::EventQuit>(e)) {
-                return true;
-            }
-        }
-        return false;
-    };
 
     while (running) {
         bool doLog = (frameCount < 5) || (frameCount % kLogInterval == 0);
@@ -285,19 +307,9 @@ int main() {
             LUMEN_APP_LOG_DEBUG("[frame {}] 循环开始", frameCount);
         }
 
-        if (pump_and_check_quit()) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] pump 检测到退出", frameCount);
-            running = false;
+        if (!pump.poll()) {
+            LUMEN_APP_LOG_DEBUG("[frame {}] 检测到退出", frameCount);
             break;
-        }
-        for (const auto &e : events) {
-            if (std::holds_alternative<lumen::platform::EventWindowResize>(e)) {
-                const auto &r = std::get<lumen::platform::EventWindowResize>(e);
-                fbWidth = r.width;
-                fbHeight = r.height;
-                needRecreateSwapchain = true;
-                LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
-            }
         }
 
         // 窗口 resize 或 Present 返回 OUT_OF_DATE 时重建 Swapchain
@@ -325,7 +337,7 @@ int main() {
                                 currentFrame);
         }
         while (!frameSync.wait_fence(currentFrame, kFenceWaitTimeoutNs)) {
-            if (pump_and_check_quit()) {
+            if (!pump.poll()) {
                 running = false;
                 goto exit_loop;
             }
