@@ -298,7 +298,7 @@ static int run_sandbox() {
     }
 
     LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环 [WASD] 移动 [QE] 旋转");
-    float lastLoggedTime = -10.0f;        // 用于限速调试日志
+    float lastLoggedTime = -10.0f; // 用于限速调试日志
     uint64_t frameCount = 0;       // 用于限速调试日志
     glm::vec2 rectPos { 0.0f, 0.0f };
     float rectRotation { 0.0f };
@@ -350,7 +350,7 @@ static int run_sandbox() {
         needRecreateSwapchain = true;
         LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
     });
- 
+
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
     constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
 

@@ -50,7 +50,7 @@ struct GraphicsPipelineConfig {
     VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
     VkPolygonMode polygonMode { VK_POLYGON_MODE_FILL };
     VkCullModeFlags cullMode { VK_CULL_MODE_BACK_BIT };
-    VkFrontFace frontFace { VK_FRONT_FACE_COUNTER_CLOCKWISE };
+    VkFrontFace frontFace { VK_FRONT_FACE_CLOCKWISE };  // 与 proj[1][1]*=-1 配合，见 docs/GLM_VULKAN.md
     bool depthTest { true };
     bool depthWrite { true };
     VkCompareOp depthCompareOp { VK_COMPARE_OP_LESS };
