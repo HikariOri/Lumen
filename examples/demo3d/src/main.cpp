@@ -15,6 +15,7 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/pass/render_pass.hpp"
+#include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
@@ -102,41 +103,17 @@ static int run_demo3d() {
         return -1;
     }
 
-    // 离屏 RenderPass：3D 场景渲染到纹理（finalLayout=SHADER_READ）
-    lumen::render::RenderPassConfig sceneRpConfig;
-    sceneRpConfig.useDepth = true;
-    sceneRpConfig.colorAttachment.format = swapchain.image_format();
-    sceneRpConfig.colorAttachment.finalLayout =
+    // 离屏渲染目标：Scene → OffscreenRenderTarget → ImGui 采样
+    lumen::render::OffscreenRenderTargetConfig sceneTargetConfig;
+    sceneTargetConfig.width = static_cast<uint32_t>(w);
+    sceneTargetConfig.height = static_cast<uint32_t>(h);
+    sceneTargetConfig.format = swapchain.image_format();
+    sceneTargetConfig.useDepth = true;
+    sceneTargetConfig.colorFinalLayout =
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    lumen::render::RenderPass sceneRenderPass;
-    if (!sceneRenderPass.create(ctx.device(), sceneRpConfig)) {
-        return -1;
-    }
-
-    // 离屏：场景颜色 + 深度
-    lumen::render::ImageCreateInfo sceneColorInfo;
-    sceneColorInfo.width = static_cast<uint32_t>(w);
-    sceneColorInfo.height = static_cast<uint32_t>(h);
-    sceneColorInfo.format = swapchain.image_format();
-    sceneColorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                           VK_IMAGE_USAGE_SAMPLED_BIT;
-    lumen::render::Image sceneColorImage;
-    if (!sceneColorImage.create(ctx, sceneColorInfo)) {
-        LUMEN_APP_LOG_ERROR("场景颜色附件创建失败");
-        return -1;
-    }
-    lumen::render::Image sceneDepthImage;
-    if (!sceneDepthImage.create_depth_attachment(ctx, static_cast<uint32_t>(w),
-                                                 static_cast<uint32_t>(h))) {
-        return -1;
-    }
-
-    std::vector<VkImageView> sceneAttachments { sceneColorImage.view(),
-                                                sceneDepthImage.view() };
-    lumen::render::Framebuffer sceneFramebuffer;
-    if (!sceneFramebuffer.create_offscreen(
-            ctx.device(), sceneRenderPass.handle(), static_cast<uint32_t>(w),
-            static_cast<uint32_t>(h), sceneAttachments)) {
+    lumen::render::OffscreenRenderTarget sceneTarget;
+    if (!sceneTarget.create(ctx, sceneTargetConfig)) {
+        LUMEN_APP_LOG_ERROR("场景离屏目标创建失败");
         return -1;
     }
 
@@ -283,7 +260,7 @@ static int run_demo3d() {
 
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout.handle(),
-                         sceneRenderPass.handle(), 0, pipeConfig)) {
+                         sceneTarget.render_pass(), 0, pipeConfig)) {
         return -1;
     }
 
@@ -292,7 +269,7 @@ static int run_demo3d() {
     wireframeConfig.cullMode = VK_CULL_MODE_NONE;
     lumen::render::GraphicsPipeline wireframePipeline;
     if (!wireframePipeline.create(ctx, pipelineLayout.handle(),
-                                  sceneRenderPass.handle(), 0,
+                                  sceneTarget.render_pass(), 0,
                                   wireframeConfig)) {
         return -1;
     }
@@ -327,8 +304,8 @@ static int run_demo3d() {
 
     ImTextureID sceneTextureId = reinterpret_cast<ImTextureID>(
         lumen::ui::imgui_backend_add_texture(
-            sceneSampler.handle(), sceneColorImage.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+            sceneSampler.handle(), sceneTarget.color_view(),
+            sceneTarget.color_sample_layout()));
 
     pump.on_sdl_event([](const void* ev) {
         ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event*>(ev));
@@ -417,30 +394,12 @@ static int run_demo3d() {
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void*>(sceneTextureId));
 
-                lumen::render::ImageCreateInfo sceneColorInfo;
-                sceneColorInfo.width = static_cast<uint32_t>(fbWidth);
-                sceneColorInfo.height = static_cast<uint32_t>(fbHeight);
-                sceneColorInfo.format = swapchain.image_format();
-                sceneColorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                       VK_IMAGE_USAGE_SAMPLED_BIT;
-                sceneColorImage = lumen::render::Image();
-                sceneColorImage.create(ctx, sceneColorInfo);
-                sceneDepthImage = lumen::render::Image();
-                sceneDepthImage.create_depth_attachment(
-                    ctx, static_cast<uint32_t>(fbWidth),
-                    static_cast<uint32_t>(fbHeight));
-                std::vector<VkImageView> newSceneAttachments {
-                    sceneColorImage.view(), sceneDepthImage.view()
-                };
-                sceneFramebuffer = lumen::render::Framebuffer();
-                sceneFramebuffer.create_offscreen(
-                    ctx.device(), sceneRenderPass.handle(),
-                    static_cast<uint32_t>(fbWidth),
-                    static_cast<uint32_t>(fbHeight), newSceneAttachments);
+                sceneTarget.resize(ctx, static_cast<uint32_t>(fbWidth),
+                                   static_cast<uint32_t>(fbHeight));
                 sceneTextureId = reinterpret_cast<ImTextureID>(
                     lumen::ui::imgui_backend_add_texture(
-                        sceneSampler.handle(), sceneColorImage.view(),
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+                        sceneSampler.handle(), sceneTarget.color_view(),
+                        sceneTarget.color_sample_layout()));
             }
             needRecreateSwapchain = false;
             continue;
@@ -535,17 +494,14 @@ static int run_demo3d() {
             continue;
         }
 
-        const VkExtent2D sceneExtent {
-            static_cast<uint32_t>(fbWidth),
-            static_cast<uint32_t>(fbHeight)
-        };
+        const VkExtent2D sceneExtent = sceneTarget.extent();
 
         // Pass 1: render 3D to offscreen
         VkRenderPassBeginInfo sceneRpBegin {
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
         };
-        sceneRpBegin.renderPass = sceneRenderPass.handle();
-        sceneRpBegin.framebuffer = sceneFramebuffer.get(0);
+        sceneRpBegin.renderPass = sceneTarget.render_pass();
+        sceneRpBegin.framebuffer = sceneTarget.framebuffer();
         sceneRpBegin.renderArea = { { 0, 0 }, sceneExtent };
         VkClearValue sceneClearValues[2];
         sceneClearValues[0].color = { { 0.1f, 0.12f, 0.18f, 1.0f } };
@@ -608,9 +564,12 @@ static int run_demo3d() {
 
         ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
         ImGui::Begin("Scene");
-        ImGui::Image(sceneTextureId,
-                    ImVec2(static_cast<float>(sceneExtent.width),
-                           static_cast<float>(sceneExtent.height)));
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        auto sw = static_cast<float>(sceneExtent.width);
+        auto sh = static_cast<float>(sceneExtent.height);
+        float scale = (avail.x / sw < avail.y / sh) ? (avail.x / sw) : (avail.y / sh);
+        scale = (scale > 1.0f) ? 1.0f : scale;
+        ImGui::Image(sceneTextureId, ImVec2(sw * scale, sh * scale));
         ImGui::End();
 
         ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);

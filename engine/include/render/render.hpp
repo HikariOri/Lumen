@@ -15,6 +15,7 @@
 #include "pipeline.hpp"
 #include "command_buffer.hpp"
 #include "pass/render_pass.hpp"
+#include "pass/render_target.hpp"
 #include "resource/buffer.hpp"
 #include "resource/image.hpp"
 #include "resource/sampler.hpp"
