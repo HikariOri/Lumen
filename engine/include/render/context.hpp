@@ -45,7 +45,7 @@ const char *device_type_name(PhysicalDeviceType type);
 /// 上下文创建配置
 struct ContextConfig {
     /// 应用名称，用于 Instance 创建
-    std::string appName { "LearnVulkan" };
+    std::string appName { "Lumen" };
     /// 应用版本号（Vulkan 格式：major.minor.patch 打包）
     uint32_t appVersion { VK_MAKE_VERSION(0, 1, 0) };
     /// 引擎名称

@@ -48,7 +48,7 @@ constexpr uint32_t kMaxFramesInFlight { 2 };
 static int run_sandbox() {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
-    winConfig.title = "LearnVulkan Sandbox - 纹理矩形";
+    winConfig.title = "Lumen Sandbox - 纹理矩形";
     winConfig.width = 800;
     winConfig.height = 600;
 

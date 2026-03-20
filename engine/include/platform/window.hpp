@@ -20,7 +20,7 @@ namespace platform {
 
 /// 窗口创建配置
 struct WindowConfig {
-    std::string title { "LearnVulkan" };
+    std::string title { "Lumen" };
     uint32_t width { 1280 };
     uint32_t height { 720 };
     bool fullscreen { false };

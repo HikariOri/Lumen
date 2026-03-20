@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.31.0)
 
 project(
-    LearnVulkan
+    Lumen
     VERSION 0.1.0
     LANGUAGES C CXX
-    DESCRIPTION "Learn Vulkan"
+    DESCRIPTION "Lumen Render Engine"
 ) 
 
 include(cmake/FindExternal.cmake)
