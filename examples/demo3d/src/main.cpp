@@ -127,6 +127,25 @@ static int run_demo3d() {
         return -1;
     }
 
+    constexpr uint32_t kAuxViewportW { 320 };
+    constexpr uint32_t kAuxViewportH { 240 };
+    lumen::render::OffscreenRenderTargetConfig auxConfig;
+    auxConfig.width = kAuxViewportW;
+    auxConfig.height = kAuxViewportH;
+    auxConfig.format = swapchain.image_format();
+    auxConfig.useDepth = true;
+    auxConfig.colorFinalLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    lumen::render::OffscreenRenderTarget wireframeTarget;
+    lumen::render::OffscreenRenderTarget normalTarget;
+    lumen::render::OffscreenRenderTarget depthTarget;
+    if (!wireframeTarget.create(ctx, auxConfig) ||
+        !normalTarget.create(ctx, auxConfig) ||
+        !depthTarget.create(ctx, auxConfig)) {
+        LUMEN_APP_LOG_ERROR("辅助视口创建失败");
+        return -1;
+    }
+
     lumen::render::Sampler sceneSampler;
     if (!sceneSampler.create(ctx)) {
         return -1;
@@ -304,6 +323,12 @@ static int run_demo3d() {
     float dt { 0.016f };
     uint32_t nextSceneW { 0 };
     uint32_t nextSceneH { 0 };
+    uint32_t nextWireframeW { 0 };
+    uint32_t nextWireframeH { 0 };
+    uint32_t nextNormalW { 0 };
+    uint32_t nextNormalH { 0 };
+    uint32_t nextDepthW { 0 };
+    uint32_t nextDepthH { 0 };
     glm::vec4 clearColor { 0.1f, 0.12f, 0.18f, 1.0f };
     glm::vec4 modelColor { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -322,12 +347,42 @@ static int run_demo3d() {
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(), sceneTarget.color_view(),
             sceneTarget.color_sample_layout()));
+    auto wireframeTextureId =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            sceneSampler.handle(), wireframeTarget.color_view(),
+            wireframeTarget.color_sample_layout()));
+    auto normalTextureId =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            sceneSampler.handle(), normalTarget.color_view(),
+            normalTarget.color_sample_layout()));
+    auto depthTextureId =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            sceneSampler.handle(), depthTarget.color_view(),
+            depthTarget.color_sample_layout()));
 
     // RenderGraph：声明 reads/writes，自动排序与同步
     lumen::render::RGImage rgColor =
         lumen::render::RGImage::from_texture(sceneTarget.color_image(), false);
     lumen::render::RGImage rgDepth =
         lumen::render::RGImage::from_texture(sceneTarget.depth_image(), true);
+    lumen::render::RGImage rgWireframeColor =
+        lumen::render::RGImage::from_texture(
+            wireframeTarget.color_image(), false);
+    lumen::render::RGImage rgWireframeDepth =
+        lumen::render::RGImage::from_texture(
+            wireframeTarget.depth_image(), true);
+    lumen::render::RGImage rgNormalColor =
+        lumen::render::RGImage::from_texture(
+            normalTarget.color_image(), false);
+    lumen::render::RGImage rgNormalDepth =
+        lumen::render::RGImage::from_texture(
+            normalTarget.depth_image(), true);
+    lumen::render::RGImage rgDepthColor =
+        lumen::render::RGImage::from_texture(
+            depthTarget.color_image(), false);
+    lumen::render::RGImage rgDepthDepth =
+        lumen::render::RGImage::from_texture(
+            depthTarget.depth_image(), true);
     lumen::render::RGImage rgSwapchain =
         lumen::render::RGImage::from_swapchain(swapchain);
 
@@ -387,6 +442,71 @@ static int run_demo3d() {
             },
     });
 
+    auto addAuxPass = [&](const char* name, lumen::render::RGImage* outColor,
+                         lumen::render::RGImage* outDepth,
+                         lumen::render::OffscreenRenderTarget& target,
+                         VkPipeline pipelineHandle, uint32_t mode) {
+        renderGraph.add_pass(lumen::render::RGPass {
+            .name = name,
+            .reads = {},
+            .writes = { outColor, outDepth },
+            .execute =
+                [&, pipelineHandle, mode](
+                    VkCommandBuffer cmd, uint32_t /*swapchainImageIndex*/) {
+                    const VkExtent2D ext = target.extent();
+                    if (ext.width == 0 || ext.height == 0)
+                        return;
+                    VkRenderPassBeginInfo rpBegin {
+                        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+                    };
+                    rpBegin.renderPass = target.render_pass();
+                    rpBegin.framebuffer = target.framebuffer();
+                    rpBegin.renderArea = { { 0, 0 }, ext };
+                    VkClearValue clearVals[2];
+                    clearVals[0].color = { { clearColor.r, clearColor.g,
+                                             clearColor.b, clearColor.a } };
+                    clearVals[1].depthStencil = { 1.0f, 0 };
+                    rpBegin.clearValueCount = 2;
+                    rpBegin.pClearValues = clearVals;
+                    vkCmdBeginRenderPass(cmd, &rpBegin,
+                                         VK_SUBPASS_CONTENTS_INLINE);
+                    VkViewport vp {};
+                    vp.width = static_cast<float>(ext.width);
+                    vp.height = static_cast<float>(ext.height);
+                    vp.maxDepth = 1.0f;
+                    vkCmdSetViewport(cmd, 0, 1, &vp);
+                    VkRect2D scissor { { 0, 0 }, ext };
+                    vkCmdSetScissor(cmd, 0, 1, &scissor);
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      pipelineHandle);
+                    PushConstants pc {};
+                    pc.mode = mode;
+                    pc.modelColor = modelColor;
+                    vkCmdPushConstants(cmd, pipelineLayout.handle(),
+                                       VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                       sizeof(PushConstants), &pc);
+                    VkDescriptorSet ds = descriptorSets[currentFrame];
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            pipelineLayout.handle(), 0, 1, &ds,
+                                            0, nullptr);
+                    VkBuffer vb = vertexBuffer.handle();
+                    VkDeviceSize vbOff { 0 };
+                    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOff);
+                    vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
+                                         indexBuffer.vk_index_type());
+                    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+                    vkCmdEndRenderPass(cmd);
+                },
+        });
+    };
+
+    addAuxPass("Wireframe", &rgWireframeColor, &rgWireframeDepth,
+               wireframeTarget, wireframePipeline.handle(), 1);
+    addAuxPass("Normal", &rgNormalColor, &rgNormalDepth, normalTarget,
+               pipeline.handle(), 2);
+    addAuxPass("Depth", &rgDepthColor, &rgDepthDepth, depthTarget,
+               pipeline.handle(), 3);
+
     renderGraph.add_pass(lumen::render::RGPass {
         .name = "UI",
         .reads = { &rgColor },
@@ -426,6 +546,30 @@ static int run_demo3d() {
                 // 像素匹配，省显存）
                 nextSceneW = std::max(1u, static_cast<uint32_t>(avail.x));
                 nextSceneH = std::max(1u, static_cast<uint32_t>(avail.y));
+                ImGui::End();
+
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::Begin("Wireframe");
+                ImVec2 availWf = ImGui::GetContentRegionAvail();
+                ImGui::Image(wireframeTextureId, availWf);
+                nextWireframeW = std::max(1u, static_cast<uint32_t>(availWf.x));
+                nextWireframeH = std::max(1u, static_cast<uint32_t>(availWf.y));
+                ImGui::End();
+
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::Begin("Normal");
+                ImVec2 availNm = ImGui::GetContentRegionAvail();
+                ImGui::Image(normalTextureId, availNm);
+                nextNormalW = std::max(1u, static_cast<uint32_t>(availNm.x));
+                nextNormalH = std::max(1u, static_cast<uint32_t>(availNm.y));
+                ImGui::End();
+
+                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
+                ImGui::Begin("Depth");
+                ImVec2 availDp = ImGui::GetContentRegionAvail();
+                ImGui::Image(depthTextureId, availDp);
+                nextDepthW = std::max(1u, static_cast<uint32_t>(availDp.x));
+                nextDepthH = std::max(1u, static_cast<uint32_t>(availDp.y));
                 ImGui::End();
 
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
@@ -619,21 +763,77 @@ static int run_demo3d() {
 
         // 根据上一帧 UI 计算的显示尺寸调整离屏渲染分辨率（wait_idle
         // 避免多帧并发时资源冲突）
-        if (nextSceneW > 0 && nextSceneH > 0 &&
+        const bool needSceneResize =
+            nextSceneW > 0 && nextSceneH > 0 &&
             (sceneTarget.extent().width != nextSceneW ||
-             sceneTarget.extent().height != nextSceneH)) {
+             sceneTarget.extent().height != nextSceneH);
+        const bool needWireframeResize =
+            nextWireframeW > 0 && nextWireframeH > 0 &&
+            (wireframeTarget.extent().width != nextWireframeW ||
+             wireframeTarget.extent().height != nextWireframeH);
+        const bool needNormalResize =
+            nextNormalW > 0 && nextNormalH > 0 &&
+            (normalTarget.extent().width != nextNormalW ||
+             normalTarget.extent().height != nextNormalH);
+        const bool needDepthResize =
+            nextDepthW > 0 && nextDepthH > 0 &&
+            (depthTarget.extent().width != nextDepthW ||
+             depthTarget.extent().height != nextDepthH);
+        if (needSceneResize || needWireframeResize || needNormalResize ||
+            needDepthResize) {
             ctx.wait_idle();
-            sceneTarget.resize(ctx, nextSceneW, nextSceneH);
-            lumen::ui::imgui_backend_remove_texture(
-                reinterpret_cast<void *>(sceneTextureId));
-            sceneTextureId = reinterpret_cast<ImTextureID>(
-                lumen::ui::imgui_backend_add_texture(
-                    sceneSampler.handle(), sceneTarget.color_view(),
-                    sceneTarget.color_sample_layout()));
-            rgColor = lumen::render::RGImage::from_texture(
-                sceneTarget.color_image(), false);
-            rgDepth = lumen::render::RGImage::from_texture(
-                sceneTarget.depth_image(), true);
+            if (needSceneResize) {
+                sceneTarget.resize(ctx, nextSceneW, nextSceneH);
+                lumen::ui::imgui_backend_remove_texture(
+                    reinterpret_cast<void *>(sceneTextureId));
+                sceneTextureId = reinterpret_cast<ImTextureID>(
+                    lumen::ui::imgui_backend_add_texture(
+                        sceneSampler.handle(), sceneTarget.color_view(),
+                        sceneTarget.color_sample_layout()));
+                rgColor = lumen::render::RGImage::from_texture(
+                    sceneTarget.color_image(), false);
+                rgDepth = lumen::render::RGImage::from_texture(
+                    sceneTarget.depth_image(), true);
+            }
+            if (needWireframeResize) {
+                wireframeTarget.resize(ctx, nextWireframeW, nextWireframeH);
+                lumen::ui::imgui_backend_remove_texture(
+                    reinterpret_cast<void *>(wireframeTextureId));
+                wireframeTextureId = reinterpret_cast<ImTextureID>(
+                    lumen::ui::imgui_backend_add_texture(
+                        sceneSampler.handle(), wireframeTarget.color_view(),
+                        wireframeTarget.color_sample_layout()));
+                rgWireframeColor = lumen::render::RGImage::from_texture(
+                    wireframeTarget.color_image(), false);
+                rgWireframeDepth = lumen::render::RGImage::from_texture(
+                    wireframeTarget.depth_image(), true);
+            }
+            if (needNormalResize) {
+                normalTarget.resize(ctx, nextNormalW, nextNormalH);
+                lumen::ui::imgui_backend_remove_texture(
+                    reinterpret_cast<void *>(normalTextureId));
+                normalTextureId = reinterpret_cast<ImTextureID>(
+                    lumen::ui::imgui_backend_add_texture(
+                        sceneSampler.handle(), normalTarget.color_view(),
+                        normalTarget.color_sample_layout()));
+                rgNormalColor = lumen::render::RGImage::from_texture(
+                    normalTarget.color_image(), false);
+                rgNormalDepth = lumen::render::RGImage::from_texture(
+                    normalTarget.depth_image(), true);
+            }
+            if (needDepthResize) {
+                depthTarget.resize(ctx, nextDepthW, nextDepthH);
+                lumen::ui::imgui_backend_remove_texture(
+                    reinterpret_cast<void *>(depthTextureId));
+                depthTextureId = reinterpret_cast<ImTextureID>(
+                    lumen::ui::imgui_backend_add_texture(
+                        sceneSampler.handle(), depthTarget.color_view(),
+                        depthTarget.color_sample_layout()));
+                rgDepthColor = lumen::render::RGImage::from_texture(
+                    depthTarget.color_image(), false);
+                rgDepthDepth = lumen::render::RGImage::from_texture(
+                    depthTarget.depth_image(), true);
+            }
         }
 
         const auto &inp = pump.input();
