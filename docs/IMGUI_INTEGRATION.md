@@ -8,6 +8,7 @@
 engine/
 ├── include/ui/
 │   ├── imgui_backend.hpp         # ImGui 后端封装
+│   ├── input_bridge.hpp          # SDL→ImGui 事件、WantCapture 查询
 │   ├── texture_view_panel.hpp    # 纹理预览面板（Scene/Wireframe 等）
 │   └── gpu_capabilities_panel.hpp# GPU 信息面板
 └── src/ui/
@@ -36,10 +37,9 @@ info.window = window.sdl_window();
 if (!lumen::ui::imgui_backend_init(info))
     return -1;
 
-// 转发 SDL 事件给 ImGui（需在 EventPump 中注册）
-pump.on_sdl_event([](const void* ev) {
-    ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event*>(ev));
-});
+// 转发 SDL 事件给 ImGui（imgui_backend_init 之后）
+#include "ui/input_bridge.hpp"
+lumen::ui::imgui_setup_event_pump(pump);
 
 // 每帧
 lumen::ui::imgui_backend_new_frame();
@@ -85,16 +85,24 @@ SDL_SetWindowRelativeMouseMode(window, false);  // 不要用 SDL_FALSE
 
 当 ImGui 窗口获得焦点时，应避免将鼠标/键盘事件用于 3D 控制（相机旋转、模型旋转、缩放等）。
 
-**做法**：检查 `ImGui::GetIO().WantCaptureMouse` 与 `WantCaptureKeyboard`：
+**做法**：使用 `input_bridge.hpp` 的 WantCapture 查询：
 
 ```cpp
-if (!ImGui::GetIO().WantCaptureMouse) {
+#include "ui/input_bridge.hpp"
+
+if (!lumen::ui::imgui_wants_mouse()) {
     // 处理相机/模型旋转、滚轮缩放等
 }
-if (!ImGui::GetIO().WantCaptureKeyboard) {
+if (!lumen::ui::imgui_wants_keyboard()) {
     // 处理 WASD 等
 }
+// 或统一判断：
+if (!lumen::ui::imgui_wants_any_input()) {
+    // 游戏输入逻辑
+}
 ```
+
+详见 [EVENT_SYSTEM.md](EVENT_SYSTEM.md) 第 4 节。
 
 ### 3.4 RenderPass 兼容性
 
@@ -106,7 +114,7 @@ ImGui Vulkan 后端使用的 RenderPass 需与主渲染通道的 color attachmen
 
 ```cpp
 pump.on_mouse_button_down([&](const EventMouseButtonDown& e) {
-    if (ImGui::GetIO().WantCaptureMouse)
+    if (lumen::ui::imgui_wants_mouse())
         return;
     // 启用相对鼠标模式...
 });
@@ -142,6 +150,8 @@ ImGui::Image(sceneTextureId, size);  // uv0=(0,0), uv1=(1,1)，不翻转
 
 ## 5. 参考
 
+- [EVENT_SYSTEM.md](EVENT_SYSTEM.md) — 事件与分层输入系统
+- [UI_PANELS.md](UI_PANELS.md) — 纹理预览、GPU 信息等面板
 - [Dear ImGui](https://github.com/ocornut/imgui)
 - [ImGui Vulkan 后端](https://github.com/ocornut/imgui/blob/master/backends/imgui_impl_vulkan.cpp)
 - [GLM 与 Vulkan 适配](GLM_VULKAN.md)

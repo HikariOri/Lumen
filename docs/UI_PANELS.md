@@ -7,6 +7,7 @@
 ```
 engine/include/ui/
 ├── imgui_backend.hpp      # ImGui 后端封装（Vulkan + SDL3）
+├── input_bridge.hpp       # SDL→ImGui 事件、WantCapture 查询（见 EVENT_SYSTEM.md）
 ├── texture_view_panel.hpp # 纹理预览面板（Scene/Wireframe/Normal/Depth）
 └── gpu_capabilities_panel.hpp  # GPU 信息面板
 
@@ -33,9 +34,17 @@ engine/src/ui/
 ### API
 
 ```cpp
+struct TextureViewRect {
+    float minX, minY;   // 左上角屏幕坐标
+    float maxX, maxY;   // 右下角屏幕坐标
+    float width();      // maxX - minX
+    float height();     // maxY - minY
+};
+
 void imgui_texture_view_panel(const char *title, ImTextureID textureId,
                               uint32_t *outWidth = nullptr,
                               uint32_t *outHeight = nullptr,
+                              TextureViewRect *outRect = nullptr,
                               const ImVec2 &uv0 = ImVec2(0, 0),
                               const ImVec2 &uv1 = ImVec2(1, 1));
 ```
@@ -46,6 +55,7 @@ void imgui_texture_view_panel(const char *title, ImTextureID textureId,
 | `textureId` | `ImTextureID`，来自 `imgui_backend_add_texture()` |
 | `outWidth` | 输出本帧显示宽度，供下一帧 resize 离屏目标；`nullptr` 则不输出 |
 | `outHeight` | 输出本帧显示高度；`nullptr` 则不输出 |
+| `outRect` | 输出 Image 屏幕坐标矩形（左上 min、右下 max），用于射线拾取等；`nullptr` 则不输出 |
 | `uv0`, `uv1` | 纹理 UV 范围，默认 `(0,0)-(1,1)`，Vulkan 离屏通常不需 Y 翻转 |
 
 ### 典型用法：Scene / 多视口
@@ -73,11 +83,43 @@ lumen::ui::imgui_texture_view_panel("Wireframe", wireframeTextureId,
 
 详见 [ImGui 3D 场景渲染到窗口](IMGUI_INTEGRATION.md#4-3d-场景渲染到-imgui-窗口)。
 
+### 视口鼠标状态（ViewportMouseState）
+
+用于射线拾取、坐标转换等，提供鼠标在视口内的局部坐标与归一化坐标。
+
+```cpp
+struct ViewportMouseState {
+    bool inViewport;   // 鼠标是否在视口内
+    float localX;      // 局部 X，以视口左上角为 0
+    float localY;      // 局部 Y
+    float normX;       // 归一化 [0,1]，用于射线拾取
+    float normY;       // 归一化 [0,1]
+};
+
+// 计算
+ViewportMouseState state = lumen::ui::viewport_mouse_state(
+    sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
+
+if (state.inViewport) {
+    // 射线拾取：state.normX, state.normY 转 NDC
+    // 或使用 state.localX, state.localY 像素坐标
+}
+```
+
+### 视口调试显示
+
+```cpp
+// 需在 ImGui::Begin 之后
+const auto state = lumen::ui::viewport_mouse_state(
+    sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
+lumen::ui::imgui_viewport_mouse_debug(sceneRect, state, "Scene");
+```
+
 ### 仅显示纹理（不关心尺寸）
 
 ```cpp
 lumen::ui::imgui_texture_view_panel("Preview", textureId);
-// outWidth/outHeight 传 nullptr 即可
+// outWidth/outHeight/outRect 传 nullptr 即可
 ```
 
 ---

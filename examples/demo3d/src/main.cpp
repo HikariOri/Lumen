@@ -9,6 +9,7 @@
 #include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "core/time.hpp"
+#include "platform/event_debug.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
@@ -25,6 +26,7 @@
 #include "render/swapchain.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
+#include "ui/input_bridge.hpp"
 #include "ui/texture_view_panel.hpp"
 
 #include <array>
@@ -325,6 +327,7 @@ static int run_demo3d() {
     float dt { 0.016f };
     uint32_t nextSceneW { 0 };
     uint32_t nextSceneH { 0 };
+    lumen::ui::TextureViewRect sceneRect {}; // Scene Image 屏幕坐标，供射线拾取等使用
     uint32_t nextWireframeW { 0 };
     uint32_t nextWireframeH { 0 };
     uint32_t nextNormalW { 0 };
@@ -541,7 +544,7 @@ static int run_demo3d() {
                     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
-                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH);
+                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
                     "Wireframe", wireframeTextureId, &nextWireframeW,
@@ -579,6 +582,12 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
+                const auto sceneMouseState =
+                    lumen::ui::viewport_mouse_state(
+                        sceneRect, pump.input().mouse_x(),
+                        pump.input().mouse_y());
+                lumen::ui::imgui_viewport_mouse_debug(sceneRect, sceneMouseState,
+                                                     "Scene");
                 ImGui::End();
 
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
@@ -591,9 +600,8 @@ static int run_demo3d() {
             },
     });
 
-    pump.on_sdl_event([](const void *ev) {
-        ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event *>(ev));
-    });
+    lumen::ui::imgui_setup_event_pump(pump);
+    lumen::platform::add_input_debug_handler(pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
     LUMEN_APP_LOG_INFO(
         "Demo3D 启动 [WASD/右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
@@ -624,7 +632,7 @@ static int run_demo3d() {
     // 拖拽时启用相对鼠标模式（ImGui 未占用时）
     pump.on_mouse_button_down(
         [&](const lumen::platform::EventMouseButtonDown &e) {
-            if (ImGui::GetIO().WantCaptureMouse)
+            if (lumen::ui::imgui_wants_mouse())
                 return;
             if (e.button == lumen::platform::MouseButton::Left ||
                 e.button == lumen::platform::MouseButton::Right) {
@@ -646,7 +654,7 @@ static int run_demo3d() {
         }
     });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
-        if (ImGui::GetIO().WantCaptureMouse)
+        if (lumen::ui::imgui_wants_mouse())
             return;
         orbitRadius = glm::clamp(orbitRadius - e.deltaY * kZoomSpeed,
                                  kMinOrbitRadius, kMaxOrbitRadius);
@@ -790,8 +798,7 @@ static int run_demo3d() {
         }
 
         const auto &inp = pump.input();
-        const bool imguiWantsInput = ImGui::GetIO().WantCaptureMouse ||
-                                     ImGui::GetIO().WantCaptureKeyboard;
+        const bool imguiWantsInput = lumen::ui::imgui_wants_any_input();
         if (!imguiWantsInput) {
             if (inp.is_key_down(lumen::platform::Key::A))
                 orbitYaw += kOrbitSpeed * dt;

@@ -12,6 +12,7 @@
 #include "platform/input.hpp"
 
 #include <functional>
+#include <vector>
 
 namespace lumen {
 namespace platform {
@@ -55,7 +56,15 @@ public:
     void on_window_resize(WindowResizeFn f) {
         on_window_resize_ = std::move(f);
     }
-    void on_sdl_event(SDLEventFn f) { on_sdl_event_ = std::move(f); }
+    /// 设置唯一 SDL 事件回调（会清除此前 add_sdl_event_handler 添加的）
+    void on_sdl_event(SDLEventFn f) {
+        sdl_event_handlers_.clear();
+        sdl_event_handlers_.push_back(std::move(f));
+    }
+    /// 添加 SDL 事件回调（与 on_sdl_event 互斥，后者会清空此列表）
+    void add_sdl_event_handler(SDLEventFn f) {
+        sdl_event_handlers_.push_back(std::move(f));
+    }
 
     /**
      * @brief 轮询事件、更新 Input、分发回调
@@ -80,7 +89,7 @@ private:
     MouseMoveFn on_mouse_move_;
     MouseWheelFn on_mouse_wheel_;
     WindowResizeFn on_window_resize_;
-    SDLEventFn on_sdl_event_;
+    std::vector<SDLEventFn> sdl_event_handlers_;
 };
 
 } // namespace platform
