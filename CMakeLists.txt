@@ -54,5 +54,5 @@ add_subdirectory(third_party)
 
 add_subdirectory(engine)
 add_subdirectory(sandbox)
-# add_subdirectory(examples)
+add_subdirectory(shadertoy)
 add_subdirectory(test)

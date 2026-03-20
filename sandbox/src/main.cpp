@@ -33,6 +33,7 @@ struct UBO {
     float rotation { 0.0f };
     float _pad; // std140 对齐到 16 字节
 };
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -298,7 +299,7 @@ static int run_sandbox() {
 
     LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环 [WASD] 移动 [QE] 旋转");
     float lastLoggedTime = -10.0f;        // 用于限速调试日志
-    uint64_t frameCount = 0;              // 用于限速调试日志
+    uint64_t frameCount = 0;       // 用于限速调试日志
     glm::vec2 rectPos { 0.0f, 0.0f };
     float rectRotation { 0.0f };
     double lastTime = lumen::core::get_time_seconds();
@@ -340,7 +341,7 @@ static int run_sandbox() {
     pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel &e) {
         LUMEN_APP_LOG_DEBUG("滚轮: dx={:.1f} dy={:.1f}", e.deltaX, e.deltaY);
     });
-    pump.on_mouse_move([&](const lumen::platform::EventMouseMove &e) {
+    pump.on_mouse_move([](const lumen::platform::EventMouseMove &e) {
         LUMEN_APP_LOG_DEBUG("鼠标移动: ({:.0f}, {:.0f})", e.x, e.y);
     });
     pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
@@ -349,7 +350,7 @@ static int run_sandbox() {
         needRecreateSwapchain = true;
         LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
     });
-
+ 
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
     constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
 
@@ -395,9 +396,9 @@ static int run_sandbox() {
         double now = lumen::core::get_time_seconds();
         float dt = static_cast<float>(now - lastTime);
         lastTime = now;
-        const auto& inp = pump.input();
+        const auto &inp = pump.input();
         if (inp.is_key_down(lumen::platform::Key::W))
-            rectPos.y -= kMoveSpeed * dt;  // Vulkan NDC Y 向下，减为上
+            rectPos.y -= kMoveSpeed * dt; // Vulkan NDC Y 向下，减为上
         if (inp.is_key_down(lumen::platform::Key::S))
             rectPos.y += kMoveSpeed * dt;
         if (inp.is_key_down(lumen::platform::Key::A))

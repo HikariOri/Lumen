@@ -56,7 +56,18 @@
 
 ---
 
-## 四、事件系统
+## 四、Shadertoy 项目
+
+Shadertoy 已提取为独立可执行项目 `shadertoy/`：
+
+- **运行**：构建后执行 `shadertoy` 可执行文件
+- **着色器**：`shadertoy/shaders/shadertoy.vert`、`shadertoy.frag`
+- **Uniform**：`ShadertoyUBO` 含 `iResolution`、`iTime`、`iTimeDelta`、`iFrame`、`iMouse`
+- **复用代码**：将 Shadertoy 的 `mainImage` 实现粘贴到 `shadertoy.frag` 中
+
+---
+
+## 五、事件系统
 
 ### 4.1 `std::variant` + `emplace_back`
 
