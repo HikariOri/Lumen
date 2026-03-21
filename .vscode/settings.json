@@ -13,4 +13,7 @@
     },
     "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}/${buildType}",
     "cmake.copyCompileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "conventionalCommits.scopes": [
+        "Log"
+    ],
 }

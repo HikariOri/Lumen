@@ -43,7 +43,7 @@ struct LoggerConfig {
 
 /**
  * @class Logger
- * @brief 单例：引擎内 (lumen) 与外部 (app) 双 logger，程序退出时自动 shutdown
+ * @brief 单例：引擎内 (lumen) 与外部 (app) 双 logger
  */
 class Logger {
 public:
