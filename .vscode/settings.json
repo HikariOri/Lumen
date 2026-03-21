@@ -14,6 +14,20 @@
     "cmake.buildDirectory": "${workspaceFolder}/build/${buildKit}/${buildType}",
     "cmake.copyCompileCommands": "${workspaceFolder}/build/compile_commands.json",
     "conventionalCommits.scopes": [
-        "Log"
+        "renderer ",
+        "vulkan",
+        "rendergraph",
+        "pipeline",
+        "shader",
+        "resource",
+        "memory",
+        "descriptor",
+        "sync",
+        "framegraph",
+        "scene",
+        "math",
+        "core",
+        "platform",
+        "tools"
     ],
 }
