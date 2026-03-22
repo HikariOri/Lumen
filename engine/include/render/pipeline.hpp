@@ -52,7 +52,7 @@ struct GraphicsPipelineConfig {
     VkCullModeFlags cullMode { VK_CULL_MODE_BACK_BIT };
     VkFrontFace frontFace {
         VK_FRONT_FACE_CLOCKWISE
-    }; // 与 proj[1][1]*=-1 配合，见 docs/GLM_VULKAN.md
+    }; // 与 proj[1][1]*=-1 配合，见 docs/reference/glm-vulkan.md
     bool depthTest { true };
     bool depthWrite { true };
     VkCompareOp depthCompareOp { VK_COMPARE_OP_LESS };

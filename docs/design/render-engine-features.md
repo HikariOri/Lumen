@@ -1,6 +1,6 @@
 # 渲染引擎 — 功能特性清单与开发阶段速查
 
-本文档是 [RENDER_ENGINE_PLAN.md](RENDER_ENGINE_PLAN.md) 的补充，提供按模块的勾选清单与按阶段的实现顺序，便于排期与验收。总体规划、架构与风险见 PLAN。
+本文档是 [render-engine-roadmap.md](render-engine-roadmap.md) 的补充，提供按模块的勾选清单与按阶段的实现顺序，便于排期与验收。总体规划、架构与风险见 PLAN。
 
 **导航**：一、功能总览（0–17） → 二、阶段顺序（Phase 0–6） → 三、模块与接口对应 → 四、推荐阅读
 
@@ -193,7 +193,7 @@
 
 ## 二、按阶段的实现顺序（建议）
 
-### Phase 0：Vulkan 最小可运行
+### Phase 0：Vulkan 1.4 最小可运行
 
 1. Instance + Validation Layer  
 2. Physical Device + Logical Device + Queue  
@@ -317,4 +317,5 @@
 - PBR：LearnOpenGL PBR 章节、Filament/Unreal 文档  
 - ImGui：ImGui 仓库 Vulkan 示例  
 
-完成某阶段后，在本清单中勾选对应项，并同步更新 [RENDER_ENGINE_PLAN.md](RENDER_ENGINE_PLAN.md) 第 8 节「开发阶段与里程碑」。
+完成某阶段后，在本清单中勾选对应项，并同步更新 [render-engine-roadmap.md](render-engine-roadmap.md) 第 8 节「开发阶段与里程碑」。
+

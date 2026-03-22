@@ -2,6 +2,8 @@
 
 > 引擎 ImGui 后端封装使用说明与注意事项。
 
+正文排版见 [中文文案排版指北](../guides/chinese-typography.md)；示例代码风格见 [C++ 编码风格参考](../reference/cpp-style.md)（与 `lumen::` API 保持一致）。
+
 ## 1. 架构概览
 
 ```
@@ -17,7 +19,7 @@ engine/
     └── gpu_capabilities_panel.cpp
 ```
 
-可复用面板详见 [UI_PANELS.md](UI_PANELS.md)。
+可复用面板详见 [ui-panels.md](ui-panels.md)。
 
 - **平台**：SDL3 窗口 + 输入
 - **渲染**：Vulkan 后端
@@ -34,8 +36,9 @@ info.ctx = &ctx;
 info.swapchain = &swapchain;
 info.renderPass = renderPass.handle();
 info.window = window.sdl_window();
-if (!lumen::ui::imgui_backend_init(info))
+if (!lumen::ui::imgui_backend_init(info)) {
     return -1;
+}
 
 // 转发 SDL 事件给 ImGui（imgui_backend_init 之后）
 #include "ui/input_bridge.hpp"
@@ -102,7 +105,7 @@ if (!lumen::ui::imgui_wants_any_input()) {
 }
 ```
 
-详见 [EVENT_SYSTEM.md](EVENT_SYSTEM.md) 第 4 节。
+详见 [../reference/event-input.md](../reference/event-input.md) 第 4 节。
 
 ### 3.4 RenderPass 兼容性
 
@@ -127,7 +130,7 @@ pump.on_mouse_button_down([&](const EventMouseButtonDown& e) {
 1. **离屏渲染**：创建离屏 framebuffer（颜色 + 深度），`finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`
 2. **注册纹理**：`imgui_backend_add_texture(sampler, imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)` 获取 `ImTextureID`
 3. **渲染流程**：先渲染 3D 到离屏，再渲染到 swapchain（clear + ImGui）
-4. **Scene 窗口**：使用 `imgui_texture_view_panel("Scene", sceneTextureId, &outW, &outH)`（见 [UI_PANELS.md](UI_PANELS.md)）；**不要**使用 `ImVec2(0,1), ImVec2(1,0)` 做 Y 翻转（见下方注意事项）
+4. **Scene 窗口**：使用 `imgui_texture_view_panel("Scene", sceneTextureId, &outW, &outH)`（见 [ui-panels.md](ui-panels.md)）；**不要**使用 `ImVec2(0,1), ImVec2(1,0)` 做 Y 翻转（见下方注意事项）
 5. **Resize**：先 `imgui_backend_remove_texture(oldId)`，重建离屏资源后再 `imgui_backend_add_texture` 获取新 ID
 
 ### 4.1 ImGui::Image 与 Vulkan 纹理方向（避免上下颠倒）
@@ -150,8 +153,9 @@ ImGui::Image(sceneTextureId, size);  // uv0=(0,0), uv1=(1,1)，不翻转
 
 ## 5. 参考
 
-- [EVENT_SYSTEM.md](EVENT_SYSTEM.md) — 事件与分层输入系统
-- [UI_PANELS.md](UI_PANELS.md) — 纹理预览、GPU 信息等面板
+- [../reference/event-input.md](../reference/event-input.md) — 事件与分层输入系统
+- [ui-panels.md](ui-panels.md) — 纹理预览、GPU 信息等面板
 - [Dear ImGui](https://github.com/ocornut/imgui)
 - [ImGui Vulkan 后端](https://github.com/ocornut/imgui/blob/master/backends/imgui_impl_vulkan.cpp)
-- [GLM 与 Vulkan 适配](GLM_VULKAN.md)
+- [GLM 与 Vulkan 适配](../reference/glm-vulkan.md)
+

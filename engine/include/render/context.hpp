@@ -3,7 +3,7 @@
  * @brief Vulkan 上下文：Instance、PhysicalDevice、LogicalDevice、Queue、Surface
  *
  * 负责 Vulkan 的初始化与核心对象的生命周期管理。
- * 根据 RENDER_ENGINE_PLAN 的 VkContext 模块设计。
+ * 根据 docs/design/render-engine-roadmap.md 中 VkContext 模块设计。
  */
 
 #pragma once

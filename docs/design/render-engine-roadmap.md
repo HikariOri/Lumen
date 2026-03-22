@@ -1,6 +1,6 @@
 # Vulkan 渲染引擎 — 总体规划与功能文档
 
-本文档为基于 Vulkan 的渲染引擎提供整体规划、架构设计、功能特性清单与开发阶段建议，便于按阶段实现 UI、PBR 及更多高级特性。配套清单与阶段拆解见 [RENDER_ENGINE_FEATURES.md](RENDER_ENGINE_FEATURES.md)。
+本文档为基于 Vulkan 的渲染引擎提供整体规划、架构设计、功能特性清单与开发阶段建议，便于按阶段实现 UI、PBR 及更多高级特性。配套清单与阶段拆解见 [render-engine-features.md](render-engine-features.md)。
 
 **目录**：1 概述与目标 → 2 技术栈 → 3 架构设计 → 4 渲染管线 → 5 UI → 6 功能特性清单 → 7 目录结构 → 8 开发阶段 → 9 风险与注意事项 → 10 文档与后续
 
@@ -13,7 +13,7 @@
 - **类型**：实时 3D 渲染引擎（可嵌入游戏/工具/编辑器）
 - **图形 API**：Vulkan 1.4（使用 Properties2/Features2 链，支持 descriptor indexing、timeline semaphore 等）
 - **目标平台**：Windows（主）、可选 Linux / macOS
-- **语言**：C++17/20，引擎核心 C++，着色器 GLSL 或 HLSL（经 glslang/glslc 或 DXC 编译）
+- **语言**：**C++23**（与根目录 `CMakeLists.txt` 中 `CMAKE_CXX_STANDARD` 一致），着色器 GLSL 或 HLSL（经 glslang/glslc 或 DXC 编译）
 
 ### 1.2 核心目标
 
@@ -460,7 +460,7 @@
 
 ## 7. 建议目录结构
 
-以下为按领域划分、头源分离的目录布局，便于扩展与测试；根目录以 `engine/` 为例，可替换为实际工程名。对应文件级清单与阶段拆解见 [RENDER_ENGINE_FEATURES.md](RENDER_ENGINE_FEATURES.md)。
+以下为按领域划分、头源分离的目录布局，便于扩展与测试；根目录以 `engine/` 为例，可替换为实际工程名。对应文件级清单与阶段拆解见 [render-engine-features.md](render-engine-features.md)。
 
 ### 7.1 设计原则
 
@@ -608,9 +608,9 @@ engine/
 
 ## 8. 开发阶段与里程碑
 
-### Phase 0：基础 Vulkan（若尚未完成）
+### Phase 0：基础 Vulkan 1.4（若尚未完成）
 
-- Vulkan Instance、Device、Queue、Surface、Swapchain。
+- Vulkan 1.4 Instance、Device、Queue、Surface、Swapchain（含 `VK_API_VERSION_1_4` 及所需扩展）。
 - 双缓冲/三缓冲、Fence/Semaphore 同步。
 - 最小 RenderPass：单色或三角形，能 Present。
 
@@ -680,9 +680,10 @@ engine/
 
 ## 10. 文档与后续
 
-- **本文档**：总体规划与功能清单；随实现进展可增删优先级与阶段。**配套**：[RENDER_ENGINE_FEATURES.md](RENDER_ENGINE_FEATURES.md) 提供按模块的勾选清单与按阶段的实现顺序。
+- **本文档**：总体规划与功能清单；随实现进展可增删优先级与阶段。**配套**：[render-engine-features.md](render-engine-features.md) 提供按模块的勾选清单与按阶段的实现顺序。
 - **建议补充文档**：
   - API 设计：各模块对外接口（类、方法、参数）。
   - 着色器规范：UBO 布局、Descriptor Set 绑定、Push Constant 布局。
   - 资源格式约定：模型坐标系、纹理约定（Y 翻转、sRGB）、命名规范。
 - 可按需再拆出更细的「第一步实现清单」（如 VkContext + Forward PBR Pass + ImGui 窗口），便于按任务拆 PR/Commit。
+

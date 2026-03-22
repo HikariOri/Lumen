@@ -2,7 +2,7 @@
  * @file render.hpp
  * @brief 渲染模块统一入口：Vulkan 封装
  *
- * 根据 RENDER_ENGINE_PLAN 的 Vulkan 实现层设计，
+ * 根据 docs/design/render-engine-roadmap.md 的 Vulkan 实现层设计，
  * 包含 Context、Swapchain、资源、管线、Pass 等。
  */
 #pragma once

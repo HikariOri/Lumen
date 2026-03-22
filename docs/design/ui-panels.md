@@ -7,7 +7,7 @@
 ```
 engine/include/ui/
 ├── imgui_backend.hpp      # ImGui 后端封装（Vulkan + SDL3）
-├── input_bridge.hpp       # SDL→ImGui 事件、WantCapture 查询（见 EVENT_SYSTEM.md）
+├── input_bridge.hpp       # SDL→ImGui 事件、WantCapture 查询（见 ../reference/event-input.md）
 ├── texture_view_panel.hpp # 纹理预览面板（Scene/Wireframe/Normal/Depth）
 └── gpu_capabilities_panel.hpp  # GPU 信息面板
 
@@ -81,7 +81,7 @@ lumen::ui::imgui_texture_view_panel("Wireframe", wireframeTextureId,
 2. **帧间**：检查 `sceneTarget.extent()` 与 `nextSceneW/nextSceneH` 是否一致
 3. **若需 resize**：`ctx.wait_idle()` → `sceneTarget.resize(ctx, nextSceneW, nextSceneH)` → `imgui_backend_remove_texture(oldId)` → `imgui_backend_add_texture(...)` 获取新 ID
 
-详见 [ImGui 3D 场景渲染到窗口](IMGUI_INTEGRATION.md#4-3d-场景渲染到-imgui-窗口)。
+详见 [ImGui 3D 场景渲染到窗口](imgui-integration.md#4-3d-场景渲染到-imgui-窗口)。
 
 ### 视口鼠标状态（ViewportMouseState）
 
@@ -170,11 +170,12 @@ lumen::ui::imgui_gpu_capabilities_panel(ctx);
 2. **每帧**：`imgui_backend_new_frame()` → 绘制各面板 → `imgui_backend_render(cmd)`（在 RenderPass 内）
 3. **纹理注册**：离屏目标创建/重建后，`imgui_backend_add_texture()` 获取 `ImTextureID`；resize 前需 `imgui_backend_remove_texture(oldId)`
 
-详见 [ImGui Vulkan + SDL3 集成说明](IMGUI_INTEGRATION.md)。
+详见 [ImGui Vulkan + SDL3 集成说明](imgui-integration.md)。
 
 ---
 
 ## 5. 参考
 
-- [IMGUI_INTEGRATION.md](IMGUI_INTEGRATION.md) — 后端与 3D 渲染到 ImGui
+- [imgui-integration.md](imgui-integration.md) — 后端与 3D 渲染到 ImGui
 - [Dear ImGui](https://github.com/ocornut/imgui)
+

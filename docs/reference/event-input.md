@@ -250,7 +250,7 @@ lumen::platform::modifier_name(Modifier::Shift);
 
 ### 10.5 相对鼠标模式
 
-启用 `SDL_SetWindowRelativeMouseMode` 前，应先检查 `imgui_wants_mouse()`，避免在 ImGui 控件上拖拽时误启相对模式。详见 [IMGUI_INTEGRATION.md](IMGUI_INTEGRATION.md)。
+启用 `SDL_SetWindowRelativeMouseMode` 前，应先检查 `imgui_wants_mouse()`，避免在 ImGui 控件上拖拽时误启相对模式。详见 [../design/imgui-integration.md](../design/imgui-integration.md)。
 
 ## 11. Window::poll_events 兼容
 
@@ -280,3 +280,4 @@ lumen::platform::add_input_debug_handler(pump);
 - 新增事件类型：在 `event.hpp` 增加结构体，并加入 `Event` variant、`dispatch_` 和 `event_type_name`
 - 新增回调：在 EventPump 增加 `on_xxx` 与对应 `xxxFn` 类型
 - 多后端：若需支持其他窗口库，可新增对应 `event_pump_xxx.cpp`
+

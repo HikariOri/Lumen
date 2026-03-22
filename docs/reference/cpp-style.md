@@ -1,4 +1,4 @@
-# mcpp-style-ref
+# C++ 编码风格参考（mcpp-style-ref）
 
 > Modern C++ Style Reference | 现代 C++ 编码风格参考
 
@@ -36,8 +36,7 @@ int main() {
   - 2.8 [Range views 惰性视图](#28-range-views-惰性视图)
   - 2.9 [Concepts 概念约束](#29-concepts-概念约束)
 - 三、配置文件
-  - 3.0 [Clang-Format 配置](./clang-format.md)
-  - 3.1 [Clang-Tidy 配置](./clang-tidy.md)
+  - 3.0 工程内 `.clang-format` / `.clang-tidy`
 
 ## 一、标识符命名风格
 
@@ -405,5 +404,4 @@ void apply(int x, F&& f) {
 
 ## 三、配置文件
 
-- [Clang-Format 配置](./clang-format.md) — 代码格式化
-- [Clang-Tidy 配置](./clang-tidy.md) — 静态检查
+仓库若提供 `.clang-format`、`.clang-tidy`（通常在根目录），以该配置为格式化与静态检查依据。上游 mcpp 文档中的独立配置文件链接本仓库 `docs` 内未必附带，请直接以根目录配置为准。

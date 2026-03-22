@@ -1,0 +1,120 @@
+# Cursor 索引 / AI 上下文忽略（语法与 .gitignore 相同）
+# 文档：https://cursor.com/docs/context/ignore-files
+# 原则：忽略构建产物、依赖目录、巨型生成文件与本地机密，减少噪声与误索引。
+
+# --- 构建产物与 CMake 生成文件 ---
+build/
+out/
+/dist/
+/bin/
+cmake-build-*/
+**/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+Makefile
+_deps/
+CMakeScripts/
+install_manifest.txt
+# 若希望 AI/索引使用编译数据库，可删下一行（文件往往很大）
+compile_commands.json
+
+# --- 其它语言 / 工具常见构建目录（通用）---
+target/
+.gradle/
+**/xcodeproj/xcuserdata/
+
+# --- 包管理与依赖缓存 ---
+node_modules/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+**/.venv/
+**/venv/
+**/.tox/
+.conan/
+vcpkg_installed/
+
+# --- IDE / 本地配置 ---
+.idea/
+# 忽略 .vscode 内机器私有状态；共享配置用 negation（勿写成忽略整个 .vscode/）
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.vs/
+*.vcxproj.user
+CMakeLists.txt.user
+CMakeUserPresets.json
+*.code-workspace
+
+# --- 缓存 ---
+.cache/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.parcel-cache/
+.turbo/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+
+# --- 日志、临时与备份 ---
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~
+
+# --- 常见二进制与中间文件（减小索引体积）---
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+*.pdb
+*.obj
+*.o
+*.ilk
+*.exp
+*.idb
+*.ipdb
+*.iobj
+*.pch
+*.gch
+
+# --- 测试与覆盖率生成物 ---
+coverage/
+.coverage
+*.gcno
+*.gcda
+*.gcov
+htmlcov/
+
+# --- 文档站点 / 静态站生成输出 ---
+_site/
+.docusaurus/
+.vuepress/dist/
+
+# --- 本地环境与机密（勿索引进 AI 上下文）---
+.env
+.env.local
+.env.*.local
+*.pem
+*.p12
+
+# --- 系统杂项 ---
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -69,7 +69,7 @@ Shadertoy 已提取为独立可执行项目 `shadertoy/`：
 
 ## 五、事件系统
 
-### 4.1 `std::variant` + `emplace_back`
+### 5.1 `std::variant` + `emplace_back`
 
 - `EventList` 为 `std::vector<std::variant<...>>`
 - 需用 `emplace_back(std::in_place_type<EventType>, args...)` 就地构造
@@ -77,25 +77,25 @@ Shadertoy 已提取为独立可执行项目 `shadertoy/`：
 
 ---
 
-## 五、Pipeline 配置
+## 六、Pipeline 配置
 
-### 5.1 聚合类型与 `emplace_back`
+### 6.1 聚合类型与 `emplace_back`
 
 - `ShaderStage`、`VertexInputBinding`、`VertexInputAttribute` 为聚合类型，无显式构造函数
 - 使用 `push_back({ a, b, c })`，不要用 `emplace_back(a, b, c)`（会匹配 `initializer_list` 导致编译错误）
 
 ---
 
-## 六、资源销毁顺序
+## 七、资源销毁顺序
 
 - **Swapchain** 需在 **Surface** 之前销毁
 - 其他 Vulkan 资源：先销毁依赖方（如 Framebuffer），再销毁被依赖方（如 Swapchain）
 
 ---
 
-## 七、Vulkan NDC 坐标
+## 八、Vulkan NDC 坐标
 
-### 7.1 与 OpenGL 的区别
+### 8.1 与 OpenGL 的区别
 
 Vulkan 的 **NDC（Normalized Device Coordinates）** 与 OpenGL 不同：
 
@@ -105,7 +105,7 @@ Vulkan 的 **NDC（Normalized Device Coordinates）** 与 OpenGL 不同：
 | Y | **下为正** | 上为正 |
 | Z | 近为 0，远为 1（右手系） | 近为 -1，远为 1 |
 
-### 7.2 常见注意点
+### 8.2 常见注意点
 
 - **Y 轴向下**：屏幕坐标系中“向上”对应 NDC 中 **Y 减小**
 - 做平移、方向控制时：

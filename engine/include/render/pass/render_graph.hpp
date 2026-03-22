@@ -3,7 +3,7 @@
  * @brief RenderGraph：用资源读写依赖描述渲染流程，自动推导执行顺序与同步
  *
  * 核心：声明 reads/writes，系统自动完成拓扑排序、PipelineBarrier、Layout 转换。
- * 参考 docs/RenderGraph.md
+ * 参考 docs/design/render-graph.md
  */
 
 #pragma once

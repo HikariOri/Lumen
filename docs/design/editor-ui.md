@@ -35,9 +35,6 @@ UI 系统属于：
 * Runtime Gameplay
 
 ---
-
----
-
 ## 1.3 ImGui 的本质（必须理解）
 
 ---
@@ -58,39 +55,26 @@ ImGui 是：
 
 ---
 
-👉 即 UI 是“代码执行结果”，不是对象树
+即 UI 是“代码执行结果”，不是对象树
 
-👉 每一帧都会重新生成 UI
-([Unity 文档][1])
-
----
+每一帧都会重新生成 UI（参见 [Unity 文档][1]）。
 
 ---
-
 ## 1.4 ImGui 的正确用途
 
 ---
 
 适用于：
 
-```text
-✔ 编辑器 UI
-✔ Debug 工具
-✔ 内部工具
-```
-
----
+- 编辑器 UI
+- Debug 工具
+- 内部工具
 
 不适用于：
 
-```text
-❌ 游戏正式 UI
-```
+- 面向玩家的正式游戏 UI（应使用独立 UI 方案或保留专门管线）
 
 ---
-
----
-
 # 2. Editor UI 总体架构
 
 ---
@@ -107,14 +91,11 @@ EditorUI
 
 ---
 
-👉 核心思想：
+核心思想：
 
-# 👉 UI = Panel + State + Command
-
----
+# UI = Panel + State + Command
 
 ---
-
 # 3. Panel 系统（UI核心）
 
 ---
@@ -126,17 +107,14 @@ EditorUI
 ```cpp
 class IPanel {
 public:
-    virtual void OnImGuiRender() = 0;
+    virtual void on_imgui_render() = 0;
 
-    bool open = true;
+    bool open { true };
     std::string name;
 };
 ```
 
 ---
-
----
-
 ## 3.2 PanelManager
 
 ---
@@ -144,43 +122,38 @@ public:
 ```cpp
 class PanelManager {
 public:
-    void Register(IPanel* panel);
-    void RenderAll();
+    void register_panel(IPanel* panel);
+    void render_all();
 
 private:
-    std::vector<IPanel*> panels;
+    std::vector<IPanel*> panels_;
 };
 ```
 
 ---
-
----
-
 ## 3.3 渲染流程
 
 ---
 
 ```cpp
-void PanelManager::RenderAll() {
-    for (auto* p : panels) {
-        if (p->open)
-            p->OnImGuiRender();
+void PanelManager::render_all() {
+    for (auto* p : panels_) {
+        if (p->open) {
+            p->on_imgui_render();
+        }
     }
 }
 ```
 
 ---
 
-👉 本质：
+本质：
 
 ```text
 UI = 多个 Panel 的组合
 ```
 
 ---
-
----
-
 # 4. 核心面板设计
 
 ---
@@ -196,9 +169,6 @@ UI = 多个 Panel 的组合
 ```
 
 ---
-
----
-
 ## 4.2 Inspector Panel
 
 ---
@@ -210,9 +180,6 @@ UI = 多个 Panel 的组合
 ```
 
 ---
-
----
-
 ## 4.3 Scene Panel
 
 ---
@@ -224,9 +191,6 @@ UI = 多个 Panel 的组合
 ```
 
 ---
-
----
-
 ## 4.4 Console Panel（重点）
 
 ---
@@ -238,9 +202,6 @@ UI = 多个 Panel 的组合
 ```
 
 ---
-
----
-
 # 5. UI State（关键）
 
 ---
@@ -256,9 +217,6 @@ ImGui 不存 UI 状态：
 ```
 
 ---
-
----
-
 ## 5.2 状态结构
 
 ---
@@ -271,9 +229,6 @@ struct UIState {
 ```
 
 ---
-
----
-
 ## 5.3 数据流
 
 ---
@@ -284,9 +239,6 @@ UIState → 驱动UI显示
 ```
 
 ---
-
----
-
 # 6. Console 系统设计
 
 ---
@@ -309,9 +261,6 @@ struct LogEntry {
 ```
 
 ---
-
----
-
 # 6.2 LogSystem
 
 ---
@@ -329,9 +278,6 @@ private:
 ```
 
 ---
-
----
-
 # 6.3 Console Panel
 
 ---
@@ -345,9 +291,6 @@ private:
 ```
 
 ---
-
----
-
 # 6.4 Console 输入机制
 
 ---
@@ -359,12 +302,9 @@ ImGui::InputText("##input", buffer, size,
 
 ---
 
-👉 Enter 后执行命令
+Enter 后执行命令
 
 ---
-
----
-
 # 7. Command 系统（核心架构）
 
 ---
@@ -376,7 +316,7 @@ ImGui::InputText("##input", buffer, size,
 避免：
 
 ```text
-UI 直接修改 ECS ❌
+UI 直接修改 ECS（应避免）
 ```
 
 ---
@@ -388,9 +328,6 @@ UI → Command → ECS
 ```
 
 ---
-
----
-
 ## 7.2 Command 接口
 
 ---
@@ -403,9 +340,6 @@ public:
 ```
 
 ---
-
----
-
 ## 7.3 CommandQueue
 
 ---
@@ -422,9 +356,6 @@ private:
 ```
 
 ---
-
----
-
 ## 7.4 Command 执行流程
 
 ---
@@ -434,9 +365,6 @@ UI提交 → Queue → 执行 → 修改ECS
 ```
 
 ---
-
----
-
 # 8. 常见 Command 示例
 
 ---
@@ -452,9 +380,6 @@ class SetPositionCommand : public ICommand {
 ```
 
 ---
-
----
-
 ## 8.2 创建 Entity
 
 ---
@@ -466,9 +391,6 @@ class CreateEntityCommand : public ICommand {
 ```
 
 ---
-
----
-
 # 9. Command Parser（控制台核心）
 
 ---
@@ -482,9 +404,6 @@ class CreateEntityCommand : public ICommand {
 ```
 
 ---
-
----
-
 ## 9.2 示例
 
 ---
@@ -498,9 +417,6 @@ if (cmd.starts_with("log "))
 ```
 
 ---
-
----
-
 ## 9.3 示例命令
 
 ---
@@ -512,9 +428,6 @@ log hello
 ```
 
 ---
-
----
-
 # 10. Console + Command 融合
 
 ---
@@ -533,14 +446,11 @@ ECS 修改
 
 ---
 
-👉 Console 是：
+Console 是：
 
-# 👉 编辑器“控制入口”
-
----
+# 编辑器“控制入口”
 
 ---
-
 # 11. Selection 系统
 
 ---
@@ -556,9 +466,6 @@ struct Selection {
 ```
 
 ---
-
----
-
 ## 11.2 数据流
 
 ---
@@ -572,19 +479,13 @@ Inspector 显示
 ```
 
 ---
-
----
-
 # 12. UI 封装层（强烈推荐）
 
 ---
 
-## ❗ 不要直接用 ImGui API
+## **注意：** 不要直接用 ImGui API
 
 ---
-
----
-
 ## 封装
 
 ---
@@ -599,9 +500,6 @@ bool Vec3Control(const char* name, Vec3& v);
 ```
 
 ---
-
----
-
 ## 优点
 
 ---
@@ -613,9 +511,6 @@ bool Vec3Control(const char* name, Vec3& v);
 ```
 
 ---
-
----
-
 # 13. Docking 系统
 
 ---
@@ -629,9 +524,6 @@ ImGui::DockSpaceOverViewport();
 ```
 
 ---
-
----
-
 ## 作用
 
 ---
@@ -643,9 +535,6 @@ ImGui::DockSpaceOverViewport();
 ```
 
 ---
-
----
-
 # 14. 完整系统流程
 
 ---
@@ -653,7 +542,7 @@ ImGui::DockSpaceOverViewport();
 ```text
 Frame Begin
  ↓
-PanelManager::RenderAll
+PanelManager::render_all
  ↓
 Console 输入
  ↓
@@ -665,9 +554,6 @@ Render
 ```
 
 ---
-
----
-
 # 15. 关键设计原则
 
 ---
@@ -679,9 +565,6 @@ UI 只负责输入和展示
 ```
 
 ---
-
----
-
 ## 15.2 Command 解耦
 
 ```text
@@ -689,9 +572,6 @@ UI ≠ ECS
 ```
 
 ---
-
----
-
 ## 15.3 状态外置
 
 ```text
@@ -699,9 +579,6 @@ UIState = 单一数据源
 ```
 
 ---
-
----
-
 ## 15.4 Immediate Mode 特性
 
 ---
@@ -712,27 +589,21 @@ UI 每帧重建
 ```
 
 ---
-
----
-
 # 16. 常见错误
 
 ---
 
-## ❌ UI 直接修改 ECS
+## 反模式：UI 直接修改 ECS
 
-## ❌ 没有 Command 系统
+## 反模式：没有 Command 系统
 
-## ❌ 状态散落
+## 反模式：状态散落
 
-## ❌ Panel 无管理
+## 反模式：Panel 无管理
 
-## ❌ 滥用 ImGui API
-
----
+## 反模式：滥用 ImGui API
 
 ---
-
 # 17. 最终架构总结
 
 ---
@@ -747,9 +618,6 @@ Editor
 ```
 
 ---
-
----
-
 # 🚀 最终总结
 
 ---
@@ -764,10 +632,7 @@ Editor
 > ECS = 数据层**
 
 ---
-
----
-
-# 🔥 终极理解
+# 终极理解
 
 ---
 
@@ -783,4 +648,4 @@ Editor
 
 ---
 
-[1]: https://docs.unity3d.com/cn/2018.3/Manual/GUIScriptingGuide.html?utm_source=chatgpt.com "Immediate Mode GUI (IMGUI) - Unity Manual"
+[1]: https://docs.unity3d.com/cn/2018.3/Manual/GUIScriptingGuide.html "Immediate Mode GUI (IMGUI) - Unity Manual"

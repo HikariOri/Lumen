@@ -74,17 +74,16 @@ viewport.height = -height;
 GLM 与 GLSL 都是列主序，但 std140 有严格对齐：
 
 ```cpp
-// ❌ vec3 后 implicit padding 易错
-struct UBO {
+// 不推荐：std140 中 vec3 按 16 字节对齐，易与 GLSL 侧 layout 不一致
+struct Ubo {
     glm::mat4 model;
     glm::vec3 color;
 };
 
-// ✅ vec3 后显式 pad，或改用 vec4
-struct UBO {
+// 推荐：改用 vec4，或按 std140 规则显式插入对齐占位
+struct Ubo {
     glm::mat4 model;
-    float _pad[3];
-    glm::vec3 color;
+    glm::vec4 color;
 };
 ```
 
@@ -116,8 +115,9 @@ proj[1][1] *= -1;
 // 视图（无需改）
 glm::mat4 view = glm::lookAt(eye, center, up);
 
-// 管线配置
-pipeConfig.frontFace = VK_FRONT_FACE_CLOCKWISE;
+// 管线光栅化状态（字段名以 Vulkan API 为准）
+VkPipelineRasterizationStateCreateInfo rasterizer{};
+rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 ```
 
 ---
