@@ -11,11 +11,12 @@
 #include "render/resource/image.hpp"
 #include "render/resource/sampler.hpp"
 
-
 #include <stb_image.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 namespace lumen::render {
 
@@ -41,9 +42,12 @@ uint32_t calculate_mip_levels(uint32_t width, uint32_t height) {
            1;
 }
 
-void transition_image_layout(VkCommandBuffer cmd, VkImage image,
-                             VkImageLayout oldLayout, VkImageLayout newLayout,
-                             uint32_t baseMipLevel, uint32_t levelCount) {
+void transition_image_subresource(VkCommandBuffer cmd, VkImage image,
+                                  VkImageLayout oldLayout,
+                                  VkImageLayout newLayout,
+                                  uint32_t baseMipLevel, uint32_t levelCount,
+                                  uint32_t baseArrayLayer,
+                                  uint32_t layerCount) {
     VkImageMemoryBarrier barrier { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     barrier.oldLayout = oldLayout;
     barrier.newLayout = newLayout;
@@ -53,8 +57,8 @@ void transition_image_layout(VkCommandBuffer cmd, VkImage image,
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = baseMipLevel;
     barrier.subresourceRange.levelCount = levelCount;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.baseArrayLayer = baseArrayLayer;
+    barrier.subresourceRange.layerCount = layerCount;
 
     VkPipelineStageFlags srcStage, dstStage;
 
@@ -88,6 +92,13 @@ void transition_image_layout(VkCommandBuffer cmd, VkImage image,
 
     vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
                          &barrier);
+}
+
+void transition_image_layout(VkCommandBuffer cmd, VkImage image,
+                             VkImageLayout oldLayout, VkImageLayout newLayout,
+                             uint32_t baseMipLevel, uint32_t levelCount) {
+    transition_image_subresource(cmd, image, oldLayout, newLayout,
+                                 baseMipLevel, levelCount, 0, 1);
 }
 
 void generate_mipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width,
@@ -133,6 +144,51 @@ void generate_mipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width,
     transition_image_layout(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                             mipLevels - 1, 1);
+}
+
+void generate_mipmaps_cube(VkCommandBuffer cmd, VkImage image, uint32_t dim,
+                           uint32_t mipLevels) {
+    for (uint32_t face = 0; face < 6; ++face) {
+        int32_t mipWidth = static_cast<int32_t>(dim);
+        int32_t mipHeight = static_cast<int32_t>(dim);
+        for (uint32_t i = 1; i < mipLevels; ++i) {
+            transition_image_subresource(
+                cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, i - 1, 1, face, 1);
+            transition_image_subresource(
+                cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, i, 1, face, 1);
+
+            VkImageBlit blit {};
+            blit.srcOffsets[0] = { 0, 0, 0 };
+            blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.srcSubresource.mipLevel = i - 1;
+            blit.srcSubresource.baseArrayLayer = face;
+            blit.srcSubresource.layerCount = 1;
+            blit.dstOffsets[0] = { 0, 0, 0 };
+            blit.dstOffsets[1] = { std::max(1, mipWidth / 2),
+                                   std::max(1, mipHeight / 2), 1 };
+            blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.dstSubresource.mipLevel = i;
+            blit.dstSubresource.baseArrayLayer = face;
+            blit.dstSubresource.layerCount = 1;
+
+            vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                           VK_FILTER_LINEAR);
+
+            transition_image_subresource(
+                cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, i - 1, 1, face, 1);
+
+            mipWidth = std::max(1, mipWidth / 2);
+            mipHeight = std::max(1, mipHeight / 2);
+        }
+        transition_image_subresource(
+            cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels - 1, 1, face, 1);
+    }
 }
 
 } // namespace
@@ -395,6 +451,159 @@ bool Texture::create(const Context &ctx, const ImageCreateInfo &info,
     }
 
     return create_sampler_(ctx, samplerConfig);
+}
+
+bool Texture::create_cubemap_from_rgba8_faces(const Context &ctx,
+                                              const void *const faces[6],
+                                              uint32_t faceSize,
+                                              VkQueue transferQueue,
+                                              CommandPool &cmdPool,
+                                              const SamplerConfig &samplerConfig) {
+    for (uint32_t i = 0; i < 6; ++i) {
+        if (faces[i] == nullptr) {
+            return false;
+        }
+    }
+    if (faceSize == 0) {
+        return false;
+    }
+
+    destroy_();
+
+    const size_t face_bytes =
+        static_cast<size_t>(faceSize) * faceSize * 4u;
+    const size_t total_bytes = face_bytes * 6u;
+    mipLevels_ = calculate_mip_levels(faceSize, faceSize);
+    format_ = VK_FORMAT_R8G8B8A8_SRGB;
+    width_ = faceSize;
+    height_ = faceSize;
+    device_ = ctx.device();
+
+    Buffer staging;
+    BufferCreateInfo stagingInfo { total_bytes, BufferUsage::Staging, true };
+    if (!staging.create(ctx, stagingInfo)) {
+        return false;
+    }
+    std::vector<uint8_t> concat(total_bytes);
+    for (uint32_t f = 0; f < 6; ++f) {
+        std::memcpy(concat.data() + f * face_bytes, faces[f], face_bytes);
+    }
+    staging.upload(concat.data(), total_bytes);
+
+    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = faceSize;
+    imageInfo.extent.height = faceSize;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = mipLevels_;
+    imageInfo.arrayLayers = 6;
+    imageInfo.format = format_;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &image_);
+    if (result != VK_SUCCESS) {
+        device_ = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(device_, image_, &memReqs);
+
+    VkMemoryAllocateInfo allocInfo { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex =
+        find_memory_type(ctx.physical_device(), memReqs.memoryTypeBits,
+                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory_);
+    if (result != VK_SUCCESS) {
+        vkDestroyImage(device_, image_, nullptr);
+        image_ = VK_NULL_HANDLE;
+        return false;
+    }
+
+    vkBindImageMemory(device_, image_, memory_, 0);
+
+    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    viewInfo.image = image_;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.format = format_;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = mipLevels_;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 6;
+
+    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
+    if (result != VK_SUCCESS) {
+        destroy_();
+        return false;
+    }
+
+    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    if (buffers.empty()) {
+        destroy_();
+        return false;
+    }
+    VkCommandBuffer cmd = buffers[0];
+
+    VkCommandBufferBeginInfo beginInfo {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0,
+                                 6);
+
+    for (uint32_t f = 0; f < 6; ++f) {
+        VkBufferImageCopy region {};
+        region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = f;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = { 0, 0, 0 };
+        region.imageExtent = { faceSize, faceSize, 1 };
+
+        vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
+
+    if (mipLevels_ > 1) {
+        generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
+    } else {
+        transition_image_subresource(
+            cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
+    }
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(transferQueue);
+
+    cmdPool.free(buffers);
+
+    if (!create_sampler_(ctx, samplerConfig)) {
+        destroy_();
+        return false;
+    }
+    return true;
 }
 
 bool Texture::create_sampler_(const Context &ctx, const SamplerConfig &config) {

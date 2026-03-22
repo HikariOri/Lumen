@@ -1,12 +1,8 @@
 #version 450
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec2 inUV;
-layout(location = 2) in vec3 inNormal;
 
-layout(location = 0) out vec2 fragUV;
-layout(location = 1) out vec3 fragNormal;
-layout(location = 2) out vec3 fragWorldPos;
+layout(location = 0) out vec3 vWorldRay;
 
 struct GPULight {
     vec4 position;
@@ -29,9 +25,7 @@ layout(set = 0, binding = 0) uniform UBO {
 } ubo;
 
 void main() {
-    vec4 world = ubo.model * vec4(inPosition, 1.0);
-    fragWorldPos = world.xyz;
-    gl_Position = ubo.mvp * vec4(inPosition, 1.0);
-    fragUV = inUV;
-    fragNormal = mat3(ubo.normalMatrix) * inNormal;
+    vec4 clip = ubo.skyMvp * vec4(inPosition, 1.0);
+    gl_Position = clip.xyww;
+    vWorldRay = (ubo.skyOrientInv * vec4(inPosition, 0.0)).xyz;
 }

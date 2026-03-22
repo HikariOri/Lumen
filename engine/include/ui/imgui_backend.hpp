@@ -27,10 +27,15 @@ struct ImGuiBackendInitInfo {
     VkRenderPass renderPass { VK_NULL_HANDLE };
     SDL_Window *window { nullptr };
 
-    /// 含中文等 CJK 的字体文件路径（.ttf / .otf / .ttc），UTF-8 编码。
-    /// 非空则作为默认字体加载，并包含常用简体字形（见 ImGui
-    /// GetGlyphRangesChineseSimplifiedCommon）。Windows 示例：`C:/Windows/Fonts/msyh.ttc`
+    /// 含中文等 CJK 的主字体文件路径（.ttf / .otf / .ttc），UTF-8 编码。
+    /// - 若 `cjk_font_japanese_merge_path` 为空：按原逻辑仅加载常用简体（
+    ///   GetGlyphRangesChineseSimplifiedCommon）。
+    /// - 若二者均非空：先用本路径加载默认拉丁，再 MergeMode 合并
+    ///   GetGlyphRangesChineseFull，再 MergeMode 合并日文字形（见
+    ///   `cjk_font_japanese_merge_path`）。中文合并优先于日文。
     const char *cjk_font_ttf_path { nullptr };
+    /// 与简体主字体合并的日文字体路径；仅在与 `cjk_font_ttf_path` 同时非空时生效。
+    const char *cjk_font_japanese_merge_path { nullptr };
     /// 与 cjk_font_ttf_path 配套的字号（像素）；<=0 时用 18
     float cjk_font_size_pixels { 18.0f };
 };

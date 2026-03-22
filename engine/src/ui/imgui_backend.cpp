@@ -122,12 +122,46 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     {
-        ImFontConfig font_cfg {};
         const float size =
             info.cjk_font_size_pixels > 0.0f ? info.cjk_font_size_pixels
                                              : 18.0f;
-        if (info.cjk_font_ttf_path != nullptr &&
-            info.cjk_font_ttf_path[0] != '\0') {
+        const bool has_sc =
+            info.cjk_font_ttf_path != nullptr &&
+            info.cjk_font_ttf_path[0] != '\0';
+        const bool has_jp_merge =
+            info.cjk_font_japanese_merge_path != nullptr &&
+            info.cjk_font_japanese_merge_path[0] != '\0';
+
+        if (has_sc && has_jp_merge) {
+            // 思源黑体：先拉丁 + 再合并中文全量（同一 SC 文件），再合并日文 OTF
+            ImFont *base = io.Fonts->AddFontFromFileTTF(
+                info.cjk_font_ttf_path, size, nullptr,
+                io.Fonts->GetGlyphRangesDefault());
+            if (!base) {
+                LUMEN_LOG_WARN(
+                    "ImGui: failed to load primary CJK font ({}); "
+                    "falling back to default font",
+                    info.cjk_font_ttf_path);
+                io.Fonts->AddFontDefault();
+            } else {
+                ImFontConfig merge_cfg {};
+                merge_cfg.MergeMode = true;
+                merge_cfg.PixelSnapH = true;
+                io.Fonts->AddFontFromFileTTF(
+                    info.cjk_font_ttf_path, size, &merge_cfg,
+                    io.Fonts->GetGlyphRangesChineseFull());
+                ImFont *jp = io.Fonts->AddFontFromFileTTF(
+                    info.cjk_font_japanese_merge_path, size, &merge_cfg,
+                    io.Fonts->GetGlyphRangesJapanese());
+                if (!jp) {
+                    LUMEN_LOG_WARN(
+                        "ImGui: failed to merge Japanese font ({}); "
+                        "Japanese glyphs may be missing",
+                        info.cjk_font_japanese_merge_path);
+                }
+            }
+        } else if (has_sc) {
+            ImFontConfig font_cfg {};
             ImFont *loaded = io.Fonts->AddFontFromFileTTF(
                 info.cjk_font_ttf_path, size, &font_cfg,
                 io.Fonts->GetGlyphRangesChineseSimplifiedCommon());

@@ -14,7 +14,7 @@
 namespace lumen {
 namespace scene {
 
-/// 与 `examples/demo3d/shaders/cube.frag` 中 `lights[]` 长度一致
+/// 与 `examples/demo3d/shaders/cube.frag` / `skybox.*` 中 UBO 的 `lights[]` 长度一致
 inline constexpr std::size_t kMaxLightsUbo { 8 };
 
 /**

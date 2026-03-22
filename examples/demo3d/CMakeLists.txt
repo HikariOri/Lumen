@@ -1,4 +1,6 @@
-add_executable(demo3d src/main.cpp)
+add_executable(demo3d src/main.cpp src/pbr_resources.cpp)
+
+target_include_directories(demo3d PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
 
 target_link_libraries(demo3d PRIVATE engine)
 
@@ -17,6 +19,12 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/cube.frag"
           -o "$<TARGET_FILE_DIR:demo3d>/shaders/cube.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/skybox.vert"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/skybox.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/skybox.frag"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/skybox.frag.spv"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "$<TARGET_FILE_DIR:engine>/shaders/light_icon.vert.spv"
           "$<TARGET_FILE_DIR:demo3d>/shaders/light_icon.vert.spv"
