@@ -32,11 +32,13 @@
 #include "ui/texture_view_panel.hpp"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <SDL3/SDL.h>
+#include <imgui.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -65,6 +67,28 @@ constexpr uint32_t kMaxFramesInFlight { 2 };
 constexpr const char *kObjPath { "assets/meshes/monkey/monkey.obj" };
 constexpr float kMinOrbitRadius { 0.8f };
 constexpr float kMaxOrbitRadius { 20.0f };
+
+/// 与 Unity Scene 视图一致：Q 视图、W 移动、E 旋转、R 缩放
+enum class SceneGizmoTool : std::uint8_t {
+    View,
+    Move,
+    Rotate,
+    Scale,
+};
+
+ImGuizmo::OPERATION scene_gizmo_to_operation(SceneGizmoTool t) {
+    switch (t) {
+    case SceneGizmoTool::Move:
+        return ImGuizmo::TRANSLATE;
+    case SceneGizmoTool::Rotate:
+        return ImGuizmo::ROTATE;
+    case SceneGizmoTool::Scale:
+        return ImGuizmo::SCALE;
+    case SceneGizmoTool::View:
+    default:
+        return ImGuizmo::TRANSLATE;
+    }
+}
 
 } // namespace
 
@@ -323,7 +347,7 @@ static int run_demo3d() {
     glm::mat4 scene_view { 1.0f };
     glm::mat4 scene_proj { 1.0f };
     glm::mat4 model_matrix { 1.0f };
-    ImGuizmo::OPERATION gizmo_operation { ImGuizmo::ROTATE };
+    SceneGizmoTool scene_gizmo_tool { SceneGizmoTool::Rotate };
     bool gizmo_world_mode { false };
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
@@ -561,11 +585,13 @@ static int run_demo3d() {
                     "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect,
                     ImVec2(0, 0), ImVec2(1, 1),
                     [&](const lumen::ui::TextureViewRect &r) {
-                        lumen::ui::imguizmo_manipulate(
-                            r, scene_view, scene_proj, &model_matrix,
-                            gizmo_operation,
-                            gizmo_world_mode ? ImGuizmo::WORLD
-                                             : ImGuizmo::LOCAL);
+                        if (scene_gizmo_tool != SceneGizmoTool::View) {
+                            lumen::ui::imguizmo_manipulate(
+                                r, scene_view, scene_proj, &model_matrix,
+                                scene_gizmo_to_operation(scene_gizmo_tool),
+                                gizmo_world_mode ? ImGuizmo::WORLD
+                                                 : ImGuizmo::LOCAL);
+                        }
                     });
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
@@ -597,20 +623,25 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
-                ImGui::Text("Gizmo");
-                if (ImGui::RadioButton("Translate",
-                                      gizmo_operation == ImGuizmo::TRANSLATE)) {
-                    gizmo_operation = ImGuizmo::TRANSLATE;
+                ImGui::Text("Gizmo (Unity: Q/W/E/R)");
+                if (ImGui::RadioButton("View (Q)",
+                                      scene_gizmo_tool == SceneGizmoTool::View)) {
+                    scene_gizmo_tool = SceneGizmoTool::View;
                 }
                 ImGui::SameLine();
-                if (ImGui::RadioButton("Rotate",
-                                      gizmo_operation == ImGuizmo::ROTATE)) {
-                    gizmo_operation = ImGuizmo::ROTATE;
+                if (ImGui::RadioButton("Move (W)",
+                                      scene_gizmo_tool == SceneGizmoTool::Move)) {
+                    scene_gizmo_tool = SceneGizmoTool::Move;
                 }
                 ImGui::SameLine();
-                if (ImGui::RadioButton("Scale",
-                                      gizmo_operation == ImGuizmo::SCALE)) {
-                    gizmo_operation = ImGuizmo::SCALE;
+                if (ImGui::RadioButton("Rotate (E)",
+                                      scene_gizmo_tool == SceneGizmoTool::Rotate)) {
+                    scene_gizmo_tool = SceneGizmoTool::Rotate;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Scale (R)",
+                                      scene_gizmo_tool == SceneGizmoTool::Scale)) {
+                    scene_gizmo_tool = SceneGizmoTool::Scale;
                 }
                 ImGui::Checkbox("World mode", &gizmo_world_mode);
                 ImGui::Separator();
@@ -635,7 +666,8 @@ static int run_demo3d() {
     lumen::platform::add_input_debug_handler(pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
     LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [WASD/右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
+        "Demo3D 启动 [A/D/↑/↓] 相机偏航/俯仰 [右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
+        "[Q/W/E/R] Gizmo 视图/移动/旋转/缩放（与 Unity Scene 一致） "
         "[0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
     constexpr float kMouseSensitivity { 0.007f };
@@ -758,6 +790,26 @@ static int run_demo3d() {
 
         lumen::ui::imgui_backend_new_frame();
 
+        // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询：poll() 里
+        // imgui_wants_keyboard() 在 Dock 焦点下几乎恒为 true，会挡掉 on_key_down。
+        {
+            const ImGuiIO &io = ImGui::GetIO();
+            if (!io.WantTextInput) {
+                if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+                    scene_gizmo_tool = SceneGizmoTool::View;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
+                    scene_gizmo_tool = SceneGizmoTool::Move;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+                    scene_gizmo_tool = SceneGizmoTool::Rotate;
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+                    scene_gizmo_tool = SceneGizmoTool::Scale;
+                }
+            }
+        }
+
         // 根据上一帧 UI 计算的显示尺寸调整离屏渲染分辨率（wait_idle
         // 避免多帧并发时资源冲突）
         const bool needSceneResize =
@@ -840,15 +892,19 @@ static int run_demo3d() {
         const bool imguiBlocksKb = lumen::ui::imgui_wants_keyboard();
         const bool imguiBlocksMouse =
             lumen::ui::imgui_wants_mouse() && !sceneNavMouse.inViewport;
+        if (scene_gizmo_tool == SceneGizmoTool::View) {
+            lumen::ui::imguizmo_reset_interaction_state();
+        }
         if (!imguiBlocksKb) {
             if (inp.is_key_down(lumen::platform::Key::A))
                 orbitYaw += kOrbitSpeed * dt;
             if (inp.is_key_down(lumen::platform::Key::D))
                 orbitYaw -= kOrbitSpeed * dt;
-            if (inp.is_key_down(lumen::platform::Key::W))
+            // 俯仰用方向键，避免与 Unity 式 W（移动 Gizmo）冲突
+            if (inp.is_key_down(lumen::platform::Key::Up))
                 orbitPitch =
                     glm::clamp(orbitPitch + kOrbitSpeed * dt, 0.1f, 1.4f);
-            if (inp.is_key_down(lumen::platform::Key::S))
+            if (inp.is_key_down(lumen::platform::Key::Down))
                 orbitPitch =
                     glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
         }

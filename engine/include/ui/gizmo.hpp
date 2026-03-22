@@ -24,7 +24,8 @@ namespace ui {
  * @param view 与离屏渲染相同的视图矩阵（列主序）
  * @param proj 与离屏渲染相同的投影矩阵（列主序，含 Vulkan NDC 的 `proj[1][1] *= -1`）。
  *             内部会再抵消该 Y 翻转后传给 ImGuizmo（其按 OpenGL 风格 NDC 计算）。
- * @param object_world 物体世界矩阵，输入输出
+ * @param object_world 物体世界矩阵，输入输出。每次调用后会对各轴缩放绝对值做下限钳制
+ *                    （默认 1e-2），避免缩放过小导致矩阵奇异、无法再放大。
  */
 void imguizmo_manipulate(const TextureViewRect &viewport_rect,
                          const glm::mat4 &view, const glm::mat4 &proj,
@@ -37,6 +38,10 @@ bool imguizmo_is_using();
 
 /// 上一帧 imguizmo_manipulate 调用后，鼠标是否悬停在 Gizmo 上
 bool imguizmo_is_over();
+
+/// 本帧不调用 imguizmo_manipulate 时（如 Unity 式 Q 视图工具），须调用以清除
+/// IsUsing/IsOver 缓存，避免误挡相机/模型输入路由。
+void imguizmo_reset_interaction_state();
 
 } // namespace ui
 } // namespace lumen
