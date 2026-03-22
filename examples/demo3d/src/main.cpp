@@ -24,12 +24,20 @@
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
+#include "scene/components.hpp"
+#include "scene/scene.hpp"
+#include "scene/transform.hpp"
+#include "ui/editor_selection.hpp"
 #include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/input_bridge.hpp"
 #include "ui/log_panel.hpp"
+#include "ui/scene_hierarchy_panel.hpp"
+#include "ui/scene_inspector_panel.hpp"
 #include "ui/texture_view_panel.hpp"
+
+#include <entt/entt.hpp>
 
 #include <algorithm>
 #include <array>
@@ -67,10 +75,10 @@ struct PushConstants {
 
 namespace {
 
-
-
 constexpr uint32_t kMaxFramesInFlight { 2 };
-constexpr const char *kObjPath { "assets/model/Mythra (Pyra Costume)_1.00/Mythra (Pyra Costume)_1.00.obj" };
+constexpr const char *kObjPath {
+    "assets/model/Mythra (Pyra Costume)_1.00/Mythra (Pyra Costume)_1.00.obj"
+};
 constexpr float kMinOrbitRadius { 0.8f };
 constexpr float kMaxOrbitRadius { 20.0f };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
@@ -407,7 +415,6 @@ static int run_demo3d() {
     float orbitRadius { 2.5f };
     glm::mat4 scene_view { 1.0f };
     glm::mat4 scene_proj { 1.0f };
-    glm::mat4 model_matrix { 1.0f };
     SceneGizmoTool scene_gizmo_tool { SceneGizmoTool::Rotate };
     bool gizmo_world_mode { false };
     int fbWidth { w }, fbHeight { h };
@@ -444,9 +451,21 @@ static int run_demo3d() {
         return -1;
     }
 
+    lumen::scene::Scene ecs_scene;
+    lumen::ui::EditorSelection editor_selection;
+    const ::entt::entity ecs_model_entity = ecs_scene.create_entity("Model");
+    ecs_scene.registry().emplace<lumen::scene::DrawableTag>(ecs_model_entity);
+    // const ::entt::entity ecs_child_entity = ecs_scene.create_entity("Child");
+    // ecs_scene.set_parent(ecs_child_entity, ecs_model_entity);
+    editor_selection.entity = ecs_model_entity;
+
     lumen::ui::PanelManager ui_panels;
     ui_panels.add(std::make_unique<lumen::ui::LogPanel>());
     ui_panels.add(std::make_unique<lumen::ui::GpuCapabilitiesPanel>(ctx));
+    ui_panels.add(std::make_unique<lumen::ui::SceneHierarchyPanel>(
+        &ecs_scene, &editor_selection));
+    ui_panels.add(std::make_unique<lumen::ui::SceneInspectorPanel>(
+        &ecs_scene, &editor_selection));
 
     auto sceneTextureId =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
@@ -644,12 +663,34 @@ static int run_demo3d() {
                     "Scene", sceneTextureId, &nextSceneW, &nextSceneH,
                     &sceneRect, ImVec2(0, 0), ImVec2(1, 1),
                     [&](const lumen::ui::TextureViewRect &r) {
-                        if (scene_gizmo_tool != SceneGizmoTool::View) {
-                            lumen::ui::imguizmo_manipulate(
-                                r, scene_view, scene_proj, &model_matrix,
-                                scene_gizmo_to_operation(scene_gizmo_tool),
-                                gizmo_world_mode ? ImGuizmo::WORLD
-                                                 : ImGuizmo::LOCAL);
+                        if (scene_gizmo_tool == SceneGizmoTool::View) {
+                            return;
+                        }
+                        ::entt::registry &reg = ecs_scene.registry();
+                        const ::entt::entity ge = editor_selection.entity;
+                        if (!reg.valid(ge) ||
+                            !reg.all_of<lumen::scene::Transform>(ge)) {
+                            return;
+                        }
+                        glm::mat4 world = lumen::scene::world_matrix(reg, ge);
+                        lumen::ui::imguizmo_manipulate(
+                            r, scene_view, scene_proj, &world,
+                            scene_gizmo_to_operation(scene_gizmo_tool),
+                            gizmo_world_mode ? ImGuizmo::WORLD
+                                             : ImGuizmo::LOCAL);
+                        if (lumen::ui::imguizmo_is_using()) {
+                            auto &local = reg.get<lumen::scene::Transform>(ge);
+                            if (const auto *p =
+                                    reg.try_get<lumen::scene::ParentComponent>(
+                                        ge);
+                                p && p->parent != ::entt::null &&
+                                reg.valid(p->parent)) {
+                                const glm::mat4 pw =
+                                    lumen::scene::world_matrix(reg, p->parent);
+                                local.matrix = glm::inverse(pw) * world;
+                            } else {
+                                local.matrix = world;
+                            }
                         }
                     });
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
@@ -706,36 +747,8 @@ static int run_demo3d() {
                 }
                 ImGui::Checkbox("World mode", &gizmo_world_mode);
                 ImGui::Separator();
-                if (ImGui::CollapsingHeader("Model Transform",
-                                            ImGuiTreeNodeFlags_DefaultOpen)) {
-                    float tr[3];
-                    float rotDeg[3];
-                    float sc[3];
-                    ImGuizmo::DecomposeMatrixToComponents(
-                        glm::value_ptr(model_matrix), tr, rotDeg, sc);
-                    bool trsEdited = false;
-                    trsEdited |= ImGui::DragFloat3("Position", tr, 0.01f, 0.0f,
-                                                   0.0f, "%.3f");
-                    trsEdited |= ImGui::DragFloat3("Rotation (deg)", rotDeg,
-                                                   0.5f, 0.0f, 0.0f, "%.2f");
-                    trsEdited |= ImGui::DragFloat3("Scale", sc, 0.01f, 1e-2f,
-                                                   1e3f, "%.3f");
-                    if (trsEdited) {
-                        ImGuizmo::RecomposeMatrixFromComponents(
-                            tr, rotDeg, sc, glm::value_ptr(model_matrix));
-                    }
-                    ImGui::Spacing();
-                    ImGui::TextDisabled("Same TRS as ImGuizmo (Euler degrees). "
-                                        "Edits write back to model_matrix.");
-                    if (ImGui::TreeNode("mat4 (column-major)")) {
-                        for (int r = 0; r < 4; ++r) {
-                            ImGui::Text("%7.4f  %7.4f  %7.4f  %7.4f",
-                                        model_matrix[0][r], model_matrix[1][r],
-                                        model_matrix[2][r], model_matrix[3][r]);
-                        }
-                        ImGui::TreePop();
-                    }
-                }
+                ImGui::TextDisabled(
+                    "Transform: use Inspector or Scene Gizmo on selection.");
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
@@ -780,9 +793,10 @@ static int run_demo3d() {
     lumen::platform::add_input_debug_handler(
         pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
-    LUMEN_APP_LOG_INFO("Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] "
-                       "仅控制相机；模型仅能通过 Scene Gizmo（Q/W/E/R）"
-                       " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+    LUMEN_APP_LOG_INFO(
+        "Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] 相机；模型：Hierarchy 选中 + "
+        "Inspector / Scene Gizmo（Q/W/E/R）"
+        " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
     constexpr float kMouseSensitivity { 0.007f };
     constexpr float kZoomSpeed { 0.25f };
@@ -1046,6 +1060,12 @@ static int run_demo3d() {
                              0.1f, 100.0f);
         scene_proj[1][1] *=
             -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
+        glm::mat4 model_matrix { 1.0f };
+        const ::entt::entity drawable = ecs_scene.primary_drawable();
+        if (drawable != ::entt::null && ecs_scene.registry().valid(drawable)) {
+            model_matrix =
+                lumen::scene::world_matrix(ecs_scene.registry(), drawable);
+        }
         UBO ubo {};
         ubo.mvp = scene_proj * scene_view * model_matrix;
         ubo.normalMatrix =

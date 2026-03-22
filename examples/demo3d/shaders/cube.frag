@@ -41,7 +41,8 @@ void main() {
     }
     // mode 0: 多光源 + 纹理 + modelColor
     vec3 n = normalize(fragNormal);
-    float ambient = 0.5;
+    // 基础环境光 + 微弱半球项（朝上略亮），整体比纯定向光更均匀
+    float ambient = 0.68 + 0.18 * clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
     float diff = 0.0;
     diff += max(0.0, dot(n, normalize(ubo.light0.xyz))) * ubo.light0.w;
     diff += max(0.0, dot(n, normalize(ubo.light1.xyz))) * ubo.light1.w;

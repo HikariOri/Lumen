@@ -9,20 +9,34 @@ engine/include/ui/
 ├── imgui_backend.hpp       # ImGui 后端封装（Vulkan + SDL3）
 ├── input_bridge.hpp        # SDL→ImGui 事件、WantCapture 查询（见 ../reference/event-input.md）
 ├── panel.hpp               # IPanel、PanelManager（集中绘制、可选默认 Dock）
+├── editor_selection.hpp    # 当前选中实体（供 Hierarchy / Inspector / Gizmo 共享）
+├── scene_hierarchy_panel.hpp
+├── scene_inspector_panel.hpp
 ├── log_panel.hpp           # 日志面板（读 LogViewBuffer）
 ├── texture_view_panel.hpp  # 纹理预览面板（Scene/Wireframe/Normal/Depth）
 └── gpu_capabilities_panel.hpp  # GPU 信息：自由函数 + GpuCapabilitiesPanel
 
+engine/include/scene/       # EnTT 场景（与渲染解耦）
+├── components.hpp          # ObjectId（uint32 id，Pick 约定见头文件）、Name、Transform…
+├── scene.hpp               # Scene 封装 registry、父子、环检测
+└── transform.hpp           # world_matrix（层级链）
+
 engine/src/ui/
 ├── imgui_backend.cpp
 ├── panel_manager.cpp
+├── scene_hierarchy_panel.cpp
+├── scene_inspector_panel.cpp
 ├── log_panel.cpp
 ├── texture_view_panel.cpp
 └── gpu_capabilities_panel.cpp
+
+engine/src/scene/
+├── scene.cpp
+└── transform.cpp
 ```
 
 * **自由函数面板**（如 `imgui_texture_view_panel`）：由调用方在帧内直接调用。
-* **PanelManager**：统一对实现了 `IPanel` 的面板调用 `on_imgui_render()`，适合日志、GPU 信息等可注册窗口。
+* **PanelManager**：统一对实现了 `IPanel` 的面板调用 `on_imgui_render()`，适合日志、GPU 信息、**Hierarchy / Inspector**（数据源为 `lumen::scene::Scene` + `EditorSelection`）等可注册窗口。
 
 所有 ImGui 绘制**需在 ImGui 帧内**完成（`imgui_backend_new_frame()` 之后、`imgui_backend_render(cmd)` 之前）。
 

@@ -1,6 +1,6 @@
 /**
  * @file panel.hpp
- * @brief ImGui 面板接口与集中绘制（无指令行、无 ECS；编辑器阶段可扩展菜单显隐）
+ * @brief ImGui 面板接口与集中绘制（无指令行；ECS 相关面板见 scene_*_panel）
  */
 
 #pragma once
