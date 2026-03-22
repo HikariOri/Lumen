@@ -11,6 +11,8 @@
 
 #include <ImGuizmo.h>
 
+#include <cstdint>
+
 #include <glm/mat4x4.hpp>
 
 #include "ui/texture_view_panel.hpp"
@@ -42,6 +44,19 @@ bool imguizmo_is_over();
 /// 本帧不调用 imguizmo_manipulate 时（如 Unity 式 Q 视图工具），须调用以清除
 /// IsUsing/IsOver 缓存，避免误挡相机/模型输入路由。
 void imguizmo_reset_interaction_state();
+
+/**
+ * @brief 方向立方体 (ImGuizmo::ViewManipulate)，用于快速对齐轴向视角
+ *
+ * 在屏幕固定矩形内绘制；使用前景 DrawList，宜在主视口 Dock 之后调用。
+ * 会就地修改 @a view；应用侧宜随后根据 view 同步轨道相机参数（yaw/pitch/radius）。
+ *
+ * @param length 相机到观察目标距离（与 lookAt 的 orbit 半径一致）
+ * @param background_rgba 背景色，建议用 `IM_COL32(r,g,b,a)` 传入
+ */
+void imguizmo_view_manipulate(glm::mat4 *view, float length, float region_x,
+                              float region_y, float region_w, float region_h,
+                              std::uint32_t background_rgba = 0xCC101010u);
 
 } // namespace ui
 } // namespace lumen

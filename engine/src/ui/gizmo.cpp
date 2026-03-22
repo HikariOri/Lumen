@@ -87,5 +87,19 @@ void imguizmo_reset_interaction_state() {
     g_last_over = false;
 }
 
+void imguizmo_view_manipulate(glm::mat4 *view, float length, float region_x,
+                              float region_y, float region_w, float region_h,
+                              std::uint32_t background_rgba) {
+    if (!view) {
+        return;
+    }
+    ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
+    ImGuizmo::ViewManipulate(glm::value_ptr(*view), length,
+                             ImVec2(region_x, region_y),
+                             ImVec2(region_w, region_h),
+                             static_cast<ImU32>(background_rgba));
+    ImGuizmo::SetDrawlist(nullptr);
+}
+
 } // namespace ui
 } // namespace lumen

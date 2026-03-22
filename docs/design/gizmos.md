@@ -30,10 +30,13 @@
 | `imguizmo_is_using()` | 上一帧 `Manipulate` 调用后，用户是否正在拖拽 Gizmo（映射 `ImGuizmo::IsUsing()`） |
 | `imguizmo_is_over()` | 鼠标是否悬停在 Gizmo 上（映射 `ImGuizmo::IsOver()`） |
 | `imguizmo_reset_interaction_state()` | 本帧不调用 `Manipulate` 时清除 IsUsing/IsOver 缓存（如 Unity 式 Q 仅视图） |
+| `imguizmo_view_manipulate(...)` | `ImGuizmo::ViewManipulate`：右上角方向立方体，快速切主轴视角；就地改 `view` |
 
 **缩放下限**：每次 `Manipulate` 之后用 `glm::decompose` 读取各轴缩放，将绝对值钳制到不小于 `1e-2`，避免缩放过小导致矩阵奇异、缩放手柄无法再次拾取从而「缩到最小后放不大」。
 
 **输入互斥**：相机旋转、模型拖拽等应在 `!imguizmo_is_using()`（或对上一帧状态的缓存）时处理，避免与 Gizmo 抢鼠标。与 ImGui 的 `WantCapture` 组合方式见 [imgui-integration.md](imgui-integration.md) 第 3 节与第 6 节。Demo3D 中与 Unity Scene 一致用 **Q/W/E/R** 切换视图（无 Gizmo）/移动/旋转/缩放；快捷键应在 **`imgui_backend_new_frame()` 之后** 用 `ImGui::IsKeyPressed(ImGuiKey_*)` 处理——若在 `EventPump::on_key_down` 里用 `imgui_wants_keyboard()` 过滤，Dock 获得焦点时 `WantCaptureKeyboard` 常为 true，会导致按键永远不生效。不绘制 Gizmo 的帧须调用 `imguizmo_reset_interaction_state()`；相机俯仰用 **↑/↓** 以免与 **W** 冲突。
+
+**方向立方体**：`imguizmo_view_manipulate` 用前景 DrawList；Demo3D 将位置锚在 **Scene 面板 `TextureViewRect` 右上角内侧**，并预留 `RightBleed`（绘制会略宽于传入矩形），避免贴 Dock 右缘时「出界」；Scene 区域过小时回退到主 `Work` 视口并同样钳位。与离屏 Scene 共用 `view` / `orbit` 半径；滞后一帧与 Gizmo 相同。操作后需用 `inverse(view)` 同步 **yaw / pitch / radius**。ViewManipulate 涉及 Autodesk 专利说明，商用请注意合规。
 
 **矩阵**：`view` 与离屏 Scene 渲染一致。`projection` 传入与渲染相同的矩阵（含 Vulkan 常用的 `proj[1][1] *= -1`）；`imguizmo_manipulate` 内部会再抵消该 Y 翻转以匹配 ImGuizmo 的 OpenGL 风格 NDC（见 [glm-vulkan.md](../reference/glm-vulkan.md)、[ImGuizmo#154](https://github.com/CedricGuillemet/ImGuizmo/issues/154)）。另默认调用 `AllowAxisFlip(false)`，避免轴为可读性自动翻面导致「轴向不对」的主观感受。
 

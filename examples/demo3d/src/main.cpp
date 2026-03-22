@@ -31,7 +31,9 @@
 #include "ui/input_bridge.hpp"
 #include "ui/texture_view_panel.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -40,7 +42,9 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 using Vertex = lumen::core::ObjVertex;
 
@@ -67,6 +71,65 @@ constexpr uint32_t kMaxFramesInFlight { 2 };
 constexpr const char *kObjPath { "assets/meshes/monkey/monkey.obj" };
 constexpr float kMinOrbitRadius { 0.8f };
 constexpr float kMaxOrbitRadius { 20.0f };
+/// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
+constexpr float kViewCubeSize { 96.0f };
+constexpr float kViewCubeMargin { 8.0f };
+/// 控件实际绘制会略超出传入矩形，右侧需额外内缩避免「出界」
+constexpr float kViewCubeRightBleed { 22.0f };
+
+/// 将 ViewManipulate 放在矩形右上角内侧（优先 Scene 视口屏幕矩形）
+void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
+                               const ImGuiViewport &mainVp, float &outX,
+                               float &outY) {
+    const float sz = kViewCubeSize;
+    const float m = kViewCubeMargin;
+    const float br = kViewCubeRightBleed;
+    const auto try_rect = [&](float rx, float ry, float rw, float rh) -> bool {
+        if (!std::isfinite(rw) || !std::isfinite(rh) || rw < sz + m * 2 + br ||
+            rh < sz + m * 2) {
+            return false;
+        }
+        const float minX = rx + m;
+        const float minY = ry + m;
+        const float maxX = rx + rw - sz - m - br;
+        const float maxY = ry + rh - sz - m;
+        if (maxX < minX || maxY < minY) {
+            return false;
+        }
+        const float preferX = rx + rw - sz - m - br;
+        const float preferY = ry + m;
+        outX = std::clamp(preferX, minX, maxX);
+        outY = std::clamp(preferY, minY, maxY);
+        return true;
+    };
+
+    const float sw = sceneRect.width();
+    const float sh = sceneRect.height();
+    if (try_rect(sceneRect.minX, sceneRect.minY, sw, sh)) {
+        return;
+    }
+    if (try_rect(mainVp.WorkPos.x, mainVp.WorkPos.y, mainVp.WorkSize.x,
+                 mainVp.WorkSize.y)) {
+        return;
+    }
+    outX = mainVp.WorkPos.x + m;
+    outY = mainVp.WorkPos.y + m;
+}
+
+/// 将 lookAt 视图矩阵还原为 Demo3D 轨道参数（目标为原点），供 ViewManipulate 之后同步
+void sync_orbit_from_scene_view(const glm::mat4 &view, float &orbitYaw,
+                                float &orbitPitch, float &orbitRadius) {
+    const glm::mat4 inv = glm::inverse(view);
+    const glm::vec3 eye(inv[3]);
+    const float r = glm::length(eye);
+    if (r < 1e-5f) {
+        return;
+    }
+    orbitRadius = glm::clamp(r, kMinOrbitRadius, kMaxOrbitRadius);
+    orbitPitch = glm::asin(glm::clamp(eye.y / r, -1.0f, 1.0f));
+    orbitPitch = glm::clamp(orbitPitch, 0.1f, 1.4f);
+    orbitYaw = std::atan2(eye.x, eye.z);
+}
 
 /// 与 Unity Scene 视图一致：Q 视图、W 移动、E 旋转、R 缩放
 enum class SceneGizmoTool : std::uint8_t {
@@ -645,6 +708,39 @@ static int run_demo3d() {
                 }
                 ImGui::Checkbox("World mode", &gizmo_world_mode);
                 ImGui::Separator();
+                if (ImGui::CollapsingHeader("Model Transform",
+                                            ImGuiTreeNodeFlags_DefaultOpen)) {
+                    float tr[3];
+                    float rotDeg[3];
+                    float sc[3];
+                    ImGuizmo::DecomposeMatrixToComponents(
+                        glm::value_ptr(model_matrix), tr, rotDeg, sc);
+                    bool trsEdited = false;
+                    trsEdited |= ImGui::DragFloat3("Position", tr, 0.01f, 0.0f,
+                                                   0.0f, "%.3f");
+                    trsEdited |= ImGui::DragFloat3("Rotation (deg)", rotDeg, 0.5f,
+                                                   0.0f, 0.0f, "%.2f");
+                    trsEdited |= ImGui::DragFloat3("Scale", sc, 0.01f, 1e-2f,
+                                                   1e3f, "%.3f");
+                    if (trsEdited) {
+                        ImGuizmo::RecomposeMatrixFromComponents(
+                            tr, rotDeg, sc, glm::value_ptr(model_matrix));
+                    }
+                    ImGui::Spacing();
+                    ImGui::TextDisabled(
+                        "Same TRS as ImGuizmo (Euler degrees). "
+                        "Edits write back to model_matrix.");
+                    if (ImGui::TreeNode("mat4 (column-major)")) {
+                        for (int r = 0; r < 4; ++r) {
+                            ImGui::Text(
+                                "%7.4f  %7.4f  %7.4f  %7.4f",
+                                model_matrix[0][r], model_matrix[1][r],
+                                model_matrix[2][r], model_matrix[3][r]);
+                        }
+                        ImGui::TreePop();
+                    }
+                }
+                ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
                 const auto sceneMouseState =
@@ -653,7 +749,26 @@ static int run_demo3d() {
                         pump.input().mouse_y());
                 lumen::ui::imgui_viewport_mouse_debug(sceneRect, sceneMouseState,
                                                      "Scene");
+                ImGui::TextDisabled(
+                    "Scene top-right: orientation cube (ViewManipulate), "
+                    "inset to stay inside the viewport.");
                 ImGui::End();
+
+                {
+                    const ImGuiViewport *mainVp = ImGui::GetMainViewport();
+                    if (mainVp) {
+                        float cubeX { 0 };
+                        float cubeY { 0 };
+                        place_view_cube_top_right(sceneRect, *mainVp, cubeX,
+                                                  cubeY);
+                        lumen::ui::imguizmo_view_manipulate(
+                            &scene_view, orbitRadius, cubeX, cubeY,
+                            kViewCubeSize, kViewCubeSize,
+                            IM_COL32(28, 28, 32, 200));
+                        sync_orbit_from_scene_view(scene_view, orbitYaw,
+                                                   orbitPitch, orbitRadius);
+                    }
+                }
 
                 ui_panels.render_all();
 
@@ -666,9 +781,8 @@ static int run_demo3d() {
     lumen::platform::add_input_debug_handler(pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
     LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [A/D/↑/↓] 相机偏航/俯仰 [右键拖拽] 相机 [左键拖拽] 模型 [滚轮] 缩放 "
-        "[Q/W/E/R] Gizmo 视图/移动/旋转/缩放（与 Unity Scene 一致） "
-        "[0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+        "Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] 仅控制相机；模型仅能通过 Scene Gizmo（Q/W/E/R）"
+        " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
     constexpr float kMouseSensitivity { 0.007f };
     constexpr float kZoomSpeed { 0.25f };
@@ -692,30 +806,20 @@ static int run_demo3d() {
         fbHeight = r.height;
         needRecreateSwapchain = true;
     });
-    // 拖拽时启用相对鼠标模式（ImGui 未占用时）
+    // 仅右键拖拽相机时启用相对鼠标；左键留给 Scene 内 ImGui / Gizmo
     pump.on_mouse_button_down(
         [&](const lumen::platform::EventMouseButtonDown &e) {
             const auto sceneHover = lumen::ui::viewport_mouse_state(
                 sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
             if (lumen::ui::imgui_wants_mouse() && !sceneHover.inViewport)
                 return;
-            if (e.button == lumen::platform::MouseButton::Left ||
-                e.button == lumen::platform::MouseButton::Right) {
+            if (e.button == lumen::platform::MouseButton::Right) {
                 SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
             }
         });
     pump.on_mouse_button_up([&](const lumen::platform::EventMouseButtonUp &e) {
-        if (e.button == lumen::platform::MouseButton::Left ||
-            e.button == lumen::platform::MouseButton::Right) {
-            const auto &inp = pump.input();
-            bool otherDown = (e.button == lumen::platform::MouseButton::Left
-                                  ? inp.is_mouse_button_down(
-                                        lumen::platform::MouseButton::Right)
-                                  : inp.is_mouse_button_down(
-                                        lumen::platform::MouseButton::Left));
-            if (!otherDown) {
-                SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
-            }
+        if (e.button == lumen::platform::MouseButton::Right) {
+            SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
         }
     });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
@@ -909,20 +1013,7 @@ static int run_demo3d() {
                     glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
         }
 
-        // 左键拖拽模型、右键拖拽相机（与启动日志一致；Scene Image 上仍允许导航）
-        if (!imguiBlocksMouse && !lumen::ui::imguizmo_is_using() &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
-            model_matrix =
-                glm::rotate(glm::mat4(1.0f),
-                            -inp.mouse_delta_x() * kMouseSensitivity,
-                            glm::vec3(0.0f, 1.0f, 0.0f)) *
-                model_matrix;
-            model_matrix =
-                glm::rotate(glm::mat4(1.0f),
-                            inp.mouse_delta_y() * kMouseSensitivity,
-                            glm::vec3(1.0f, 0.0f, 0.0f)) *
-                model_matrix;
-        }
+        // 模型变换仅由 Scene Gizmo 写入 model_matrix；鼠标仅右键拖拽轨道相机
         if (!imguiBlocksMouse &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
             orbitYaw -= inp.mouse_delta_x() * kMouseSensitivity;
