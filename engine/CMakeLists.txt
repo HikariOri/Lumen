@@ -31,5 +31,24 @@ target_link_libraries(${ENGINE_TARGET} PRIVATE EnTT::EnTT)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 
-
+add_custom_command(
+  TARGET ${ENGINE_TARGET}
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_icon.vert"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/light_icon.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_icon.frag"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/light_icon.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_debug.vert"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/light_debug.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_debug.frag"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/light_debug.frag.spv"
+  COMMENT "Compile engine light viewport gizmo shaders"
+  VERBATIM
+)
 
