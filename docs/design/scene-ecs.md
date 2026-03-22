@@ -37,6 +37,7 @@ Scene 是：
 * GPU 渲染
 * Vulkan 同步
 * RenderGraph
+* 编辑器视口相机逻辑（轨道 / 输入）— 实现置于 `lumen::scene` 仅为与 Transform、取景共用模块，设计见 [scene-camera.md](scene-camera.md)
 
 ---
 

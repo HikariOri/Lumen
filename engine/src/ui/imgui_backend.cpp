@@ -13,6 +13,99 @@
 #include <imgui_impl_vulkan.h>
 
 namespace lumen::ui {
+namespace {
+
+/**
+ * @brief Lumen 编辑器默认 ImGui 样式：深蓝灰底、冷色强调，与 3D 视口常见清屏色协调
+ */
+void apply_lumen_imgui_style() {
+    ImGuiStyle &style = ImGui::GetStyle();
+    ImGui::StyleColorsDark(&style);
+
+    style.WindowRounding = 8.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 5.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.GrabRounding = 4.0f;
+    style.TabRounding = 5.0f;
+
+    style.WindowPadding = ImVec2(10.0f, 10.0f);
+    style.FramePadding = ImVec2(8.0f, 5.0f);
+    style.CellPadding = ImVec2(6.0f, 4.0f);
+    style.ItemSpacing = ImVec2(8.0f, 6.0f);
+    style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+    style.IndentSpacing = 22.0f;
+    style.ScrollbarSize = 14.0f;
+    style.GrabMinSize = 12.0f;
+
+    style.WindowBorderSize = 1.0f;
+    style.ChildBorderSize = 1.0f;
+    style.PopupBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+    style.TabBorderSize = 0.0f;
+
+    ImVec4 *c = style.Colors;
+    const ImVec4 accent { 0.38f, 0.62f, 0.98f, 1.0f };
+    const ImVec4 accent_h { 0.50f, 0.72f, 1.00f, 1.0f };
+    const ImVec4 accent_muted { 0.28f, 0.42f, 0.62f, 1.0f };
+    const ImVec4 bg_root { 0.07f, 0.08f, 0.11f, 1.0f };
+    const ImVec4 bg_panel { 0.10f, 0.11f, 0.15f, 1.0f };
+    const ImVec4 bg_frame { 0.14f, 0.15f, 0.20f, 1.0f };
+    const ImVec4 border { 0.22f, 0.24f, 0.32f, 1.0f };
+    const ImVec4 text { 0.93f, 0.94f, 0.96f, 1.0f };
+    const ImVec4 text_dim { 0.52f, 0.55f, 0.62f, 1.0f };
+
+    c[ImGuiCol_Text] = text;
+    c[ImGuiCol_TextDisabled] = text_dim;
+    c[ImGuiCol_WindowBg] = bg_root;
+    c[ImGuiCol_ChildBg] = bg_panel;
+    c[ImGuiCol_PopupBg] = ImVec4(0.11f, 0.12f, 0.16f, 0.98f);
+    c[ImGuiCol_Border] = border;
+    c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    c[ImGuiCol_FrameBg] = bg_frame;
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.18f, 0.20f, 0.27f, 1.0f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.22f, 0.25f, 0.34f, 1.0f);
+    c[ImGuiCol_TitleBg] = bg_panel;
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.13f, 0.15f, 0.21f, 1.0f);
+    c[ImGuiCol_TitleBgCollapsed] = bg_panel;
+    c[ImGuiCol_MenuBarBg] = bg_panel;
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.06f, 0.07f, 0.09f, 0.72f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.32f, 0.34f, 0.42f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.42f, 0.44f, 0.52f, 1.0f);
+    c[ImGuiCol_ScrollbarGrabActive] = accent_muted;
+    c[ImGuiCol_CheckMark] = accent;
+    c[ImGuiCol_SliderGrab] = accent;
+    c[ImGuiCol_SliderGrabActive] = accent_h;
+    c[ImGuiCol_Button] = ImVec4(0.20f, 0.22f, 0.30f, 1.0f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.34f, 0.46f, 1.0f);
+    c[ImGuiCol_ButtonActive] = ImVec4(0.32f, 0.40f, 0.55f, 1.0f);
+    c[ImGuiCol_Header] = ImVec4(0.22f, 0.28f, 0.40f, 0.72f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.30f, 0.42f, 0.62f, 0.62f);
+    c[ImGuiCol_HeaderActive] = ImVec4(0.34f, 0.48f, 0.70f, 0.78f);
+    c[ImGuiCol_Separator] = border;
+    c[ImGuiCol_SeparatorHovered] = accent_muted;
+    c[ImGuiCol_SeparatorActive] = accent;
+    c[ImGuiCol_ResizeGrip] = ImVec4(accent.x, accent.y, accent.z, 0.22f);
+    c[ImGuiCol_ResizeGripHovered] = ImVec4(accent.x, accent.y, accent.z, 0.58f);
+    c[ImGuiCol_ResizeGripActive] = accent;
+    c[ImGuiCol_Tab] = ImVec4(0.12f, 0.13f, 0.17f, 1.0f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.32f, 0.48f, 0.72f, 0.86f);
+    c[ImGuiCol_TabActive] = ImVec4(0.16f, 0.18f, 0.24f, 1.0f);
+    c[ImGuiCol_TabUnfocused] = c[ImGuiCol_Tab];
+    c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.14f, 0.15f, 0.20f, 1.0f);
+    c[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.32f);
+    c[ImGuiCol_DockingEmptyBg] = ImVec4(0.06f, 0.07f, 0.09f, 1.0f);
+    c[ImGuiCol_PlotLines] = accent;
+    c[ImGuiCol_PlotLinesHovered] = accent_h;
+    c[ImGuiCol_PlotHistogram] = accent;
+    c[ImGuiCol_PlotHistogramHovered] = accent_h;
+    c[ImGuiCol_TextSelectedBg] = ImVec4(accent.x, accent.y, accent.z, 0.38f);
+    c[ImGuiCol_NavHighlight] = accent;
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.04f, 0.05f, 0.07f, 0.62f);
+}
+
+} // namespace
 
 bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     if (!info.ctx || !info.swapchain || !info.renderPass || !info.window) {
@@ -22,6 +115,8 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    apply_lumen_imgui_style();
+
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;

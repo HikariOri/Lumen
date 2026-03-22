@@ -8,7 +8,7 @@
 |------|------|
 | sandbox | 2D 纹理矩形，WASD 移动 / QE 旋转 |
 | shadertoy | 全屏 Shadertoy 效果，拖鼠标控制相机 |
-| demo3d | 3D 纹理立方体，WASD 轨道相机 |
+| demo3d | 3D OBJ + 场景视口；`SceneOrbitCamera` / `SceneCameraController`（见 [scene-camera.md](../design/scene-camera.md)） |
 
 构建后对应可执行文件位于 `build/<Config>/` 下。
 
@@ -25,6 +25,7 @@
 | 时间 | `lumen::core::steady_seconds()`、`FrameDeltaClock`（见 [time.md](../reference/time.md)） |
 | 日志 | `LUMEN_APP_LOG_*`（应用层）|
 | 设备等待 | `ctx.wait_idle()` |
+| 场景轨道相机 | `lumen::scene::SceneOrbitCamera`、`SceneCameraController`、`frame_orbit_on_drawable`（见 [scene-camera.md](../design/scene-camera.md)） |
 | Swapchain 重建 | `recreate_swapchain_resources(ctx, swapchain, framebuffers, frameSync, renderPass.handle(), w, h, framesInFlight, depthImageView)` |
 
 ## 文档索引

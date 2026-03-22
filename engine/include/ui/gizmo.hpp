@@ -53,6 +53,9 @@ void imguizmo_reset_interaction_state();
  *
  * @param length 相机到观察目标距离（与 lookAt 的 orbit 半径一致）
  * @param background_rgba 背景色，建议用 `IM_COL32(r,g,b,a)` 传入
+ *
+ * 调用后请用 `lumen::scene::SceneOrbitCamera::sync_orbit_from_view` 将视图矩阵
+ * 同步回轨道参数（见 `docs/design/scene-camera.md`）。
  */
 void imguizmo_view_manipulate(glm::mat4 *view, float length, float region_x,
                               float region_y, float region_w, float region_h,

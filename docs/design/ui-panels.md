@@ -17,8 +17,10 @@ engine/include/ui/
 └── gpu_capabilities_panel.hpp  # GPU 信息：自由函数 + GpuCapabilitiesPanel
 
 engine/include/scene/       # EnTT 场景（与渲染解耦）
-├── components.hpp          # ObjectId、Name、Transform、DirectionalLight…
-├── directional_light.hpp   # pack_directional_lights_for_ubo（对齐 cube.frag UBO）
+├── components.hpp          # ObjectId、Name、Transform、Light…
+├── light.hpp               # GPULight、pack_lights_for_ubo
+├── scene_orbit_camera.hpp  # 编辑器轨道相机（见 scene-camera.md）
+├── scene_camera_controller.hpp
 ├── scene.hpp               # Scene 封装 registry、父子、环检测
 └── transform.hpp           # world_matrix（层级链）
 
@@ -34,7 +36,9 @@ engine/src/ui/
 engine/src/scene/
 ├── scene.cpp
 ├── transform.cpp
-└── directional_light.cpp
+├── light.cpp
+├── scene_orbit_camera.cpp
+└── scene_camera_controller.cpp
 ```
 
 * **自由函数面板**（如 `imgui_texture_view_panel`）：由调用方在帧内直接调用。

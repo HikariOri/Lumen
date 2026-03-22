@@ -27,6 +27,8 @@
 #include "scene/components.hpp"
 #include "scene/light.hpp"
 #include "scene/scene.hpp"
+#include "scene/scene_camera_controller.hpp"
+#include "scene/scene_orbit_camera.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
 #include "ui/gizmo.hpp"
@@ -80,8 +82,6 @@ constexpr uint32_t kMaxFramesInFlight { 2 };
 constexpr const char *kObjPath {
     "assets/model/Mythra (Pyra Costume)_1.00/Mythra (Pyra Costume)_1.00.obj"
 };
-constexpr float kMinOrbitRadius { 0.8f };
-constexpr float kMaxOrbitRadius { 20.0f };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
 constexpr float kViewCubeSize { 96.0f };
 constexpr float kViewCubeMargin { 8.0f };
@@ -125,25 +125,6 @@ void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
     }
     outX = mainVp.WorkPos.x + m;
     outY = mainVp.WorkPos.y + m;
-}
-
-/// 将 lookAt 视图矩阵还原为轨道参数（枢轴为 orbit_target），供 ViewManipulate
-/// 之后同步
-void sync_orbit_from_scene_view(const glm::mat4 &view,
-                                const glm::vec3 &orbit_target, float &orbitYaw,
-                                float &orbitPitch, float &orbitRadius) {
-    const glm::mat4 inv = glm::inverse(view);
-    const glm::vec3 eye(inv[3]);
-    const glm::vec3 v = eye - orbit_target;
-    const float r = glm::length(v);
-    if (r < 1e-5f) {
-        return;
-    }
-    orbitRadius = glm::clamp(r, kMinOrbitRadius, kMaxOrbitRadius);
-    const glm::vec3 d = v / orbitRadius;
-    orbitPitch = glm::asin(glm::clamp(d.y, -1.0f, 1.0f));
-    orbitPitch = glm::clamp(orbitPitch, 0.1f, 1.4f);
-    orbitYaw = std::atan2(d.x, d.z);
 }
 
 /// 与 Unity Scene 视图一致：Q 视图、W 移动、E 旋转、R 缩放
@@ -294,6 +275,19 @@ static int run_demo3d() {
         return -1;
     }
 
+    glm::vec3 mesh_center_local { 0.0f };
+    glm::vec3 mesh_half_extents_local { 0.0f };
+    {
+        glm::vec3 mn = mesh.vertices[0].position;
+        glm::vec3 mx = mn;
+        for (const Vertex &v : mesh.vertices) {
+            mn = glm::min(mn, v.position);
+            mx = glm::max(mx, v.position);
+        }
+        mesh_center_local = 0.5f * (mn + mx);
+        mesh_half_extents_local = 0.5f * (mx - mn);
+    }
+
     // 顶点 / 索引缓冲
     lumen::render::VertexBuffer vertexBuffer;
     lumen::render::IndexBuffer indexBuffer;
@@ -414,10 +408,8 @@ static int run_demo3d() {
 
     lumen::platform::EventPump pump;
     uint32_t renderMode { 0 };
-    float orbitYaw { 0.0f };
-    float orbitPitch { 0.3f };
-    float orbitRadius { 2.5f };
-    glm::vec3 orbit_target { 0.0f };
+    lumen::scene::SceneOrbitCamera scene_cam;
+    lumen::scene::SceneCameraController scene_cam_ctrl;
     glm::mat4 scene_view { 1.0f };
     glm::mat4 scene_proj { 1.0f };
     SceneGizmoTool scene_gizmo_tool { SceneGizmoTool::Rotate };
@@ -486,6 +478,9 @@ static int run_demo3d() {
         }
     }
     editor_selection.entity = ecs_model_entity;
+    lumen::scene::frame_orbit_on_drawable(
+        scene_cam, ecs_scene.registry(), ecs_model_entity, mesh_center_local,
+        mesh_half_extents_local);
 
     lumen::ui::PanelManager ui_panels;
     ui_panels.add(std::make_unique<lumen::ui::LogPanel>());
@@ -750,11 +745,18 @@ static int run_demo3d() {
                 ImGui::ColorEdit4("Clear Color", glm::value_ptr(clearColor));
                 ImGui::ColorEdit4("Model Color", glm::value_ptr(modelColor));
                 ImGui::Separator();
-                ImGui::SliderFloat("Camera Distance", &orbitRadius,
-                                   kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
-                ImGui::TextDisabled("Scene：Alt+左键 轨道 | Alt+中键 平移 | "
-                                    "Alt+右键/滚轮 缩放 | "
-                                    "右键+移动 环视，右键+WASD 平移、E/Q 升降");
+                {
+                    float r = scene_cam.radius();
+                    const auto lim = scene_cam.limits();
+                    if (ImGui::SliderFloat("Camera Distance", &r, lim.min_radius,
+                                           lim.max_radius, "%.1f")) {
+                        scene_cam.set_radius(r);
+                    }
+                }
+                ImGui::TextDisabled(
+                    "Scene：[F] 枢轴对准选中网格中心 | Alt+左键 环绕 | "
+                    "Alt+中键 平移 | Alt+右键/滚轮 缩放 | "
+                    "右键+移动 环视，右键+WASD 平移、E/Q 升降");
                 ImGui::Text("Gizmo (Unity: Q/W/E/R)");
                 if (ImGui::RadioButton("View (Q)", scene_gizmo_tool ==
                                                        SceneGizmoTool::View)) {
@@ -806,12 +808,10 @@ static int run_demo3d() {
                         place_view_cube_top_right(sceneRect, *mainVp, cubeX,
                                                   cubeY);
                         lumen::ui::imguizmo_view_manipulate(
-                            &scene_view, orbitRadius, cubeX, cubeY,
+                            &scene_view, scene_cam.radius(), cubeX, cubeY,
                             kViewCubeSize, kViewCubeSize,
                             IM_COL32(28, 28, 32, 200));
-                        sync_orbit_from_scene_view(scene_view, orbit_target,
-                                                   orbitYaw, orbitPitch,
-                                                   orbitRadius);
+                        scene_cam.sync_orbit_from_view(scene_view);
                     }
                 }
 
@@ -828,17 +828,12 @@ static int run_demo3d() {
 
     LUMEN_APP_LOG_INFO(
         "Demo3D 启动 Scene 相机（类 "
-        "Unity）：Alt+左键轨道、Alt+中键平移、Alt+右键"
+        "Unity）：轨道枢轴默认在模型包围盒中心；[F] "
+        "对准选中 Drawable 中心。Alt+左键环绕、Alt+中键平移、Alt+右键"
         "或滚轮缩放；右键+移动环视，右键+WASD 平移枢轴、E/Q "
         "升降。模型：Hierarchy + "
         "Inspector / Gizmo（Q/W/E/R） [0]–[3] 渲染模式 [ESC] 退出");
 
-    constexpr float kAltOrbitSensitivity { 0.007f };
-    constexpr float kRmbLookSensitivity { 0.007f };
-    constexpr float kPanSensitivity { 0.004f };
-    constexpr float kAltRmbZoomSensitivity { 0.01f };
-    constexpr float kFlyMoveSpeed { 3.0f };
-    constexpr float kFlyMoveSpeedFast { 9.0f };
     constexpr float kZoomSpeed { 0.25f };
 
     pump.on_quit([&] {
@@ -856,6 +851,15 @@ static int run_demo3d() {
             renderMode = 2;
         } else if (e.key == lumen::platform::Key::Num3) {
             renderMode = 3;
+        } else if (e.key == lumen::platform::Key::F) {
+            ::entt::registry &reg = ecs_scene.registry();
+            ::entt::entity fe = editor_selection.entity;
+            if (fe == ::entt::null || !reg.valid(fe) ||
+                !reg.all_of<lumen::scene::DrawableTag>(fe)) {
+                fe = ecs_scene.primary_drawable();
+            }
+            lumen::scene::frame_orbit_on_drawable(
+                scene_cam, reg, fe, mesh_center_local, mesh_half_extents_local);
         }
     });
     pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
@@ -868,8 +872,7 @@ static int run_demo3d() {
             sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
         if (lumen::ui::imgui_wants_mouse() && !sceneHover.inViewport)
             return;
-        orbitRadius = glm::clamp(orbitRadius - e.deltaY * kZoomSpeed,
-                                 kMinOrbitRadius, kMaxOrbitRadius);
+        scene_cam.apply_scroll_zoom(e.deltaY, kZoomSpeed);
     });
 
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
@@ -1059,77 +1062,32 @@ static int run_demo3d() {
 
         if (cam_nav_ok && inp.has_alt() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
-            orbitYaw -= mdx * kAltOrbitSensitivity;
-            orbitPitch =
-                glm::clamp(orbitPitch + mdy * kAltOrbitSensitivity, 0.1f, 1.4f);
+            scene_cam_ctrl.apply_alt_orbit(scene_cam, mdx, mdy);
         }
 
         if (cam_nav_ok && inp.has_alt() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Middle)) {
-            const glm::vec3 orbit_off =
-                orbitRadius *
-                glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
-                          std::sin(orbitPitch),
-                          std::cos(orbitYaw) * std::cos(orbitPitch));
-            const glm::vec3 cam_pos = orbit_target + orbit_off;
-            glm::vec3 forward = glm::normalize(orbit_target - cam_pos);
-            const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
-            glm::vec3 right = glm::normalize(glm::cross(forward, world_up));
-            if (glm::length(right) < 1e-5f) {
-                right = glm::vec3(1.0f, 0.0f, 0.0f);
-            }
-            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
-            const float pan_scale = orbitRadius * kPanSensitivity;
-            orbit_target += (-mdx * pan_scale) * right + (mdy * pan_scale) * up;
+            scene_cam_ctrl.apply_alt_pan(scene_cam, mdx, mdy);
         }
 
         if (cam_nav_ok && inp.has_alt() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
-            orbitRadius =
-                glm::clamp(orbitRadius * (1.0f + mdy * kAltRmbZoomSensitivity),
-                           kMinOrbitRadius, kMaxOrbitRadius);
+            scene_cam_ctrl.apply_alt_zoom_drag(scene_cam, mdy);
         }
 
         if (!imgui_blocks_mouse && scene_fly) {
-            orbitYaw -= mdx * kRmbLookSensitivity;
-            orbitPitch =
-                glm::clamp(orbitPitch + mdy * kRmbLookSensitivity, 0.1f, 1.4f);
-
-            const glm::vec3 orbit_off =
-                orbitRadius *
-                glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
-                          std::sin(orbitPitch),
-                          std::cos(orbitYaw) * std::cos(orbitPitch));
-            const glm::vec3 cam_pos = orbit_target + orbit_off;
-            const glm::vec3 view_fwd = glm::normalize(orbit_target - cam_pos);
-            glm::vec3 flat_fwd(view_fwd.x, 0.0f, view_fwd.z);
-            if (glm::length(flat_fwd) > 1e-5f) {
-                flat_fwd = glm::normalize(flat_fwd);
-            } else {
-                flat_fwd = glm::vec3(0.0f, 0.0f, -1.0f);
-            }
-            const glm::vec3 flat_right = glm::normalize(
-                glm::cross(flat_fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
-            const float fly_step =
-                (inp.has_shift() ? kFlyMoveSpeedFast : kFlyMoveSpeed) * dt;
-            if (inp.is_key_down(lumen::platform::Key::W)) {
-                orbit_target += flat_fwd * fly_step;
-            }
-            if (inp.is_key_down(lumen::platform::Key::S)) {
-                orbit_target -= flat_fwd * fly_step;
-            }
-            if (inp.is_key_down(lumen::platform::Key::A)) {
-                orbit_target -= flat_right * fly_step;
-            }
-            if (inp.is_key_down(lumen::platform::Key::D)) {
-                orbit_target += flat_right * fly_step;
-            }
-            if (inp.is_key_down(lumen::platform::Key::E)) {
-                orbit_target += glm::vec3(0.0f, 1.0f, 0.0f) * fly_step;
-            }
-            if (inp.is_key_down(lumen::platform::Key::Q)) {
-                orbit_target -= glm::vec3(0.0f, 1.0f, 0.0f) * fly_step;
-            }
+            scene_cam_ctrl.apply_rmb_look(scene_cam, mdx, mdy);
+            lumen::scene::SceneCameraFlyInput fly {};
+            fly.move_forward =
+                inp.is_key_down(lumen::platform::Key::W);
+            fly.move_back = inp.is_key_down(lumen::platform::Key::S);
+            fly.move_left = inp.is_key_down(lumen::platform::Key::A);
+            fly.move_right = inp.is_key_down(lumen::platform::Key::D);
+            fly.move_up = inp.is_key_down(lumen::platform::Key::E);
+            fly.move_down = inp.is_key_down(lumen::platform::Key::Q);
+            fly.fast_modifier = inp.has_shift();
+            fly.delta_seconds = dt;
+            scene_cam_ctrl.apply_fly_pan(scene_cam, fly);
         }
 
         uint32_t imageIndex = swapchain.acquire_next_image(
@@ -1139,21 +1097,13 @@ static int run_demo3d() {
             continue;
 
         // MVP 矩阵（与 Scene 视口 Gizmo 共用 view / proj）
-        const glm::vec3 camera_offset =
-            orbitRadius * glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
-                                    std::sin(orbitPitch),
-                                    std::cos(orbitYaw) * std::cos(orbitPitch));
-        const glm::vec3 cameraPos = orbit_target + camera_offset;
-        scene_view =
-            glm::lookAt(cameraPos, orbit_target, glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::vec3 cameraPos = scene_cam.eye_position();
+        scene_view = scene_cam.view_matrix();
         const VkExtent2D sceneExtentForProj = sceneTarget.extent();
-        scene_proj =
-            glm::perspective(glm::radians(42.0f),
-                             static_cast<float>(sceneExtentForProj.width) /
-                                 static_cast<float>(sceneExtentForProj.height),
-                             0.1f, 100.0f);
-        scene_proj[1][1] *=
-            -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
+        const float scene_aspect =
+            static_cast<float>(sceneExtentForProj.width) /
+            static_cast<float>(sceneExtentForProj.height);
+        scene_proj = scene_cam.projection_matrix(scene_aspect);
         glm::mat4 model_matrix { 1.0f };
         const ::entt::entity drawable = ecs_scene.primary_drawable();
         if (drawable != ::entt::null && ecs_scene.registry().valid(drawable)) {
