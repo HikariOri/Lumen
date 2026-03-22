@@ -83,6 +83,13 @@ void LogPanel::on_imgui_render() {
         if (line.level < min_level) {
             continue;
         }
+        if (!line.time.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                                  ImVec4(0.50f, 0.52f, 0.58f, 1.0f));
+            ImGui::TextUnformatted(line.time.c_str());
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0, 6.0f);
+        }
         ImGui::PushStyleColor(ImGuiCol_Text, level_color(line.level));
         ImGui::TextUnformatted("[");
         ImGui::SameLine(0, 0);

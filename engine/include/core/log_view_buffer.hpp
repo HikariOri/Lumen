@@ -18,6 +18,8 @@ namespace core {
 
 struct LogViewLine {
     spdlog::level::level_enum level { spdlog::level::off };
+    /// 本地时间，与控制台 pattern 中 `%Y-%m-%d %H:%M:%S.%e` 对齐（毫秒）
+    std::string time;
     std::string logger;
     std::string message;
 };
@@ -29,8 +31,8 @@ public:
     void set_capacity(std::size_t max_lines);
     std::size_t capacity() const;
 
-    void push_line(spdlog::level::level_enum level, std::string logger_name,
-                   std::string message);
+    void push_line(spdlog::level::level_enum level, std::string time_str,
+                   std::string logger_name, std::string message);
     void clear();
 
     std::vector<LogViewLine> snapshot() const;

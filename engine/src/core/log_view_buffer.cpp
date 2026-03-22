@@ -26,10 +26,11 @@ std::size_t LogViewBuffer::capacity() const {
 }
 
 void LogViewBuffer::push_line(spdlog::level::level_enum level,
-                              std::string logger_name, std::string message) {
+                              std::string time_str, std::string logger_name,
+                              std::string message) {
     std::lock_guard lock(mutex_);
-    lines_.push_back(LogViewLine { level, std::move(logger_name),
-                                  std::move(message) });
+    lines_.push_back(LogViewLine { level, std::move(time_str),
+                                  std::move(logger_name), std::move(message) });
     while (lines_.size() > max_lines_) {
         lines_.pop_front();
     }
