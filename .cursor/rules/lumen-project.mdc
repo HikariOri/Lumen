@@ -1,0 +1,23 @@
+---
+description: Lumen 项目栈、文档与提交约定（全局）
+alwaysApply: true
+---
+
+# Lumen 项目
+
+- **语言**：C++23（`CMAKE_CXX_STANDARD`）；**图形**：Vulkan 1.4（如 `VK_API_VERSION_1_4`、`Features2`/`Properties2` 链，见 `engine/include/render/context.hpp`）。
+- **窗口/输入**：SDL3；构建依赖见根目录 `vcpkg.json`、`README.md`。
+- **平台**：当前以 **Windows + MSVC** 为主；修改构建/路径时避免破坏该环境。
+
+## 文档（写作与引用）
+
+- 中文正文遵循 `docs/guides/chinese-typography.md`（中英文空格、标点等）。
+- 文内 C++ 示例与命名习惯对齐 `docs/reference/cpp-style.md`（类型 PascalCase、函数 snake_case、`{}` 初始化等）。
+- 设计/流程：`docs/README.md`、`docs/guides/ai-assisted-workflow.md`；快速 API：`docs/guides/quick-reference.md`。
+- 不要写「合并版/旧对话导出」等元叙述；提交说明遵循 `docs/guides/git-commit-convention.md`（Conventional Commits + 必填 scope）。
+
+## 代码改动原则
+
+- **范围**：优先改与当前任务直接相关的代码；避免夹带与任务无关的顺手改动。若任务本身就是重构/换架构，允许大范围修改，但宜 **分步、尽量保持中间状态可编译**，并在说明里写清动机与影响面。
+- 不要随意删除与任务无关的注释或无关文件。
+- 优先与现有 `lumen::` 模块风格一致；新增公开 API 需与头文件分层（渲染不绑游戏逻辑）一致，见 `docs/guides/project-notes.md`。

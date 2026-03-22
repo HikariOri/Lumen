@@ -1,0 +1,32 @@
+---
+description: engine/examples/test 中 C++ 与 Vulkan 实现约定
+globs:
+  - "engine/**/*.cpp"
+  - "engine/**/*.hpp"
+  - "examples/**/*.cpp"
+  - "examples/**/*.hpp"
+  - "test/**/*.cpp"
+  - "test/**/*.hpp"
+alwaysApply: false
+---
+
+# C++ / Vulkan（Lumen）
+
+## 命名与风格
+
+- 与 `docs/reference/cpp-style.md` 一致：类型/类 **PascalCase**，函数 **snake_case**，私有成员可 **`name_`**。
+- 优先 `{}` 初始化；优先 `std::make_unique` / `std::make_shared`；只读字符串参数可用 `std::string_view`（注意生命周期）。
+
+## Vulkan
+
+- 目标 **1.4**：创建实例/设备时与项目现有 `Context` 配置对齐；扩展与特性用 **链式结构**（`pNext`），勿臆造未在代码中启用的扩展。
+- 同步：尊重 `FrameSync`、swapchain 重建与 `wait_idle` 使用场景；多帧飞行时注意 semaphore/fence 与 UBO 对应关系（见 `docs/guides/project-notes.md`）。
+- 坐标/投影：GLM 与 NDC、`frontFace` 与 Y 翻转见 `docs/reference/glm-vulkan.md`。
+
+## 着色器与资源
+
+- 着色器编译与路径约定以仓库 CMake 与 `get_resource_path` 为准；SPIR-V 输出路径与运行时加载保持一致。
+
+## 日志
+
+- 引擎内：`LUMEN_LOG_*`；应用/示例：`LUMEN_APP_LOG_*`。详见 `docs/reference/logging.md`。

@@ -1,0 +1,12 @@
+---
+description: docs/ 下 Markdown 的排版与语气
+globs: "docs/**/*.md"
+alwaysApply: false
+---
+
+# Lumen 文档
+
+- **排版**：`docs/guides/chinese-typography.md`（中文与英文/数字间空格、全角标点、专有名词大小写）。
+- **代码块**：示例 C++ 与仓库一致（C++23、与 `docs/reference/cpp-style.md` 对齐）；Vulkan API 字段名保持 Khronos 命名。
+- **语气**：技术说明文档；避免对话体、避免「👉」「超详细版」等口号式小节标题；不写文档合并/归档类元信息。
+- **版本**：表述与工程一致：**C++23**、**Vulkan 1.4**；不确定时写明以 `CMakeLists.txt` 或 `engine/include/render/context.hpp` 为准。
