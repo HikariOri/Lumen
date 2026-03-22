@@ -7,6 +7,7 @@
 
 #include "core/logger.hpp"
 
+#include <ImGuizmo.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
@@ -107,6 +108,7 @@ void imgui_backend_new_frame() {
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
 }
 
 void imgui_backend_render(VkCommandBuffer cmd) {

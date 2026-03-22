@@ -41,6 +41,7 @@ UI 系统属于：
 本阶段引擎侧已提供：
 
 * **`PanelManager` + `IPanel`**：在 `imgui_backend_new_frame()` 之后集中调用各面板的 `on_imgui_render()`，并可设置默认 Dock 空间 ID（与 `DockSpaceOverViewport` 配合）。
+* **视口 Gizmo**：`imgui_backend_new_frame()` 内调用 `ImGuizmo::BeginFrame()`；`imguizmo_manipulate` 等与离屏 Scene 矩形配合使用，见 [gizmos.md](gizmos.md)。
 * **只读日志面板**：`LogPanel` 读取 `LogViewBuffer`；`Logger::init` 在 `LoggerConfig::logView.enable` 为真时为 engine / app 两个 logger 挂载同一 `make_log_view_sink()`，将格式化前的消息副本写入环形缓冲。
 
 **本阶段刻意不包含**：Console 命令输入、Command 解析 / 队列、与 ECS 绑定的 Hierarchy / Inspector。上述内容仍以下文「递进版」设计为准，落地时单独迭代。

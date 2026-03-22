@@ -51,3 +51,4 @@
 | [imgui-integration.md](design/imgui-integration.md) | ImGui 后端与 3D 纹理绘制 |
 | [ui-panels.md](design/ui-panels.md) | UI 面板与资源面板约定 |
 | [editor-ui.md](design/editor-ui.md) | Editor UI（Console、Command 等）递进设计 |
+| [gizmos.md](design/gizmos.md) | ImGuizmo 视口 Gizmo 与帧序约定 |

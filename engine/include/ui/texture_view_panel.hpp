@@ -13,6 +13,7 @@
 #include <imgui.h>
 
 #include <cstdint>
+#include <functional>
 
 namespace lumen {
 namespace ui {
@@ -76,13 +77,14 @@ void imgui_viewport_mouse_debug(const TextureViewRect &rect,
  * @param outRect 输出 Image 屏幕坐标矩形，可为 nullptr
  * @param uv0 纹理左下 UV，默认 (0,0)
  * @param uv1 纹理右上 UV，默认 (1,1)，Vulkan 离屏通常不需 Y 翻转
+ * @param after_image 可选；在 Image 之后、End 之前调用（如绘制 Gizmo），参数为
+ *                    与 outRect 一致的屏幕矩形
  */
-void imgui_texture_view_panel(const char *title, ImTextureID textureId,
-                              uint32_t *outWidth = nullptr,
-                              uint32_t *outHeight = nullptr,
-                              TextureViewRect *outRect = nullptr,
-                              const ImVec2 &uv0 = ImVec2(0, 0),
-                              const ImVec2 &uv1 = ImVec2(1, 1));
+void imgui_texture_view_panel(
+    const char *title, ImTextureID textureId, uint32_t *outWidth = nullptr,
+    uint32_t *outHeight = nullptr, TextureViewRect *outRect = nullptr,
+    const ImVec2 &uv0 = ImVec2(0, 0), const ImVec2 &uv1 = ImVec2(1, 1),
+    const std::function<void(const TextureViewRect &)> &after_image = {});
 
 } // namespace ui
 } // namespace lumen

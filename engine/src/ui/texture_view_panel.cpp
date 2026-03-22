@@ -62,10 +62,11 @@ void imgui_viewport_mouse_debug(const TextureViewRect &rect,
     }
 }
 
-void imgui_texture_view_panel(const char *title, ImTextureID textureId,
-                              uint32_t *outWidth, uint32_t *outHeight,
-                              TextureViewRect *outRect, const ImVec2 &uv0,
-                              const ImVec2 &uv1) {
+void imgui_texture_view_panel(
+    const char *title, ImTextureID textureId, uint32_t *outWidth,
+    uint32_t *outHeight, TextureViewRect *outRect, const ImVec2 &uv0,
+    const ImVec2 &uv1,
+    const std::function<void(const TextureViewRect &)> &after_image) {
     ImGui::Begin(title);
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const uint32_t w_px = content_avail_to_pixel_dim(avail.x);
@@ -79,13 +80,20 @@ void imgui_texture_view_panel(const char *title, ImTextureID textureId,
     if (outHeight) {
         *outHeight = h_px;
     }
-    if (outRect) {
+    TextureViewRect rect {};
+    {
         const ImVec2 minP = ImGui::GetItemRectMin();
         const ImVec2 maxP = ImGui::GetItemRectMax();
-        outRect->minX = minP.x;
-        outRect->minY = minP.y;
-        outRect->maxX = maxP.x;
-        outRect->maxY = maxP.y;
+        rect.minX = minP.x;
+        rect.minY = minP.y;
+        rect.maxX = maxP.x;
+        rect.maxY = maxP.y;
+    }
+    if (outRect) {
+        *outRect = rect;
+    }
+    if (after_image) {
+        after_image(rect);
     }
     ImGui::End();
 }

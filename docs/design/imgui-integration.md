@@ -14,12 +14,14 @@ engine/
 │   ├── panel.hpp                  # IPanel、PanelManager
 │   ├── log_panel.hpp              # 日志面板（LogViewBuffer）
 │   ├── texture_view_panel.hpp     # 纹理预览面板（Scene/Wireframe 等）
+│   ├── gizmo.hpp                  # ImGuizmo 视口操作轴封装
 │   └── gpu_capabilities_panel.hpp # GPU 信息（函数 + GpuCapabilitiesPanel）
 └── src/ui/
     ├── imgui_backend.cpp
     ├── panel_manager.cpp
     ├── log_panel.cpp
     ├── texture_view_panel.cpp
+    ├── gizmo.cpp
     └── gpu_capabilities_panel.cpp
 ```
 
@@ -166,10 +168,17 @@ ImGui::Image(sceneTextureId, size);  // uv0=(0,0), uv1=(1,1)，不翻转
 
 若仍颠倒，再检查离屏 RenderPass、viewport 或投影矩阵的 Y 方向。
 
-## 5. 参考
+## 5. 视口 Gizmo（ImGuizmo）
+
+离屏 Scene 上叠加平移 / 旋转 / 缩放轴时，使用 `ImGuizmo`，并由 `imgui_backend_new_frame()` 在每帧调用 `ImGuizmo::BeginFrame()`。视口矩形、`Manipulate` 调用顺序及与 3D 渲染的时序见 [gizmos.md](gizmos.md)。
+
+与相机 / 模型鼠标拖拽并存时，请结合 `imguizmo_is_using()`（或应用侧缓存的上一帧状态）与 `viewport_mouse_state`、`imgui_wants_mouse()` 做互斥。
+
+## 6. 参考
 
 - [../reference/event-input.md](../reference/event-input.md) — 事件与分层输入系统
 - [ui-panels.md](ui-panels.md) — 纹理预览、GPU 信息等面板
+- [gizmos.md](gizmos.md) — ImGuizmo 集成与 API
 - [Dear ImGui](https://github.com/ocornut/imgui)
 - [ImGui Vulkan 后端](https://github.com/ocornut/imgui/blob/master/backends/imgui_impl_vulkan.cpp)
 - [GLM 与 Vulkan 适配](../reference/glm-vulkan.md)

@@ -72,13 +72,15 @@ struct TextureViewRect {
     float height();     // maxY - minY
 };
 
-void imgui_texture_view_panel(const char *title, ImTextureID textureId,
-                              uint32_t *outWidth = nullptr,
-                              uint32_t *outHeight = nullptr,
-                              TextureViewRect *outRect = nullptr,
-                              const ImVec2 &uv0 = ImVec2(0, 0),
-                              const ImVec2 &uv1 = ImVec2(1, 1));
+void imgui_texture_view_panel(
+    const char *title, ImTextureID textureId,
+    uint32_t *outWidth = nullptr, uint32_t *outHeight = nullptr,
+    TextureViewRect *outRect = nullptr, const ImVec2 &uv0 = ImVec2(0, 0),
+    const ImVec2 &uv1 = ImVec2(1, 1),
+    const std::function<void(const TextureViewRect &)> &after_image = {});
 ```
+
+可选参数 `after_image(rect)`：在 `Image` 之后、`End` 之前调用，用于 ImGuizmo 等叠加绘制，见 [gizmos.md](gizmos.md)。
 
 | 参数 | 说明 |
 |------|------|
@@ -88,6 +90,7 @@ void imgui_texture_view_panel(const char *title, ImTextureID textureId,
 | `outHeight` | 输出本帧显示高度；`nullptr` 则不输出（同上，由引擎保证可安全用于 `resize`） |
 | `outRect` | 输出 Image 屏幕坐标矩形（左上 min、右下 max），用于射线拾取等；`nullptr` 则不输出 |
 | `uv0`, `uv1` | 纹理 UV 范围，默认 `(0,0)-(1,1)`，Vulkan 离屏通常不需 Y 翻转 |
+| `after_image` | 可选；在 `Image` 之后调用，参数为与 `outRect` 相同的 `TextureViewRect`（见 [gizmos.md](gizmos.md)） |
 
 ### 典型用法：Scene / 多视口
 

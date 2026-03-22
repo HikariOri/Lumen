@@ -24,6 +24,7 @@
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
+#include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/log_panel.hpp"
@@ -319,8 +320,11 @@ static int run_demo3d() {
     float orbitYaw { 0.0f };
     float orbitPitch { 0.3f };
     float orbitRadius { 2.5f };
-    float modelYaw { 0.0f };
-    float modelPitch { 0.0f };
+    glm::mat4 scene_view { 1.0f };
+    glm::mat4 scene_proj { 1.0f };
+    glm::mat4 model_matrix { 1.0f };
+    ImGuizmo::OPERATION gizmo_operation { ImGuizmo::ROTATE };
+    bool gizmo_world_mode { false };
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
@@ -554,7 +558,15 @@ static int run_demo3d() {
                 ui_panels.set_default_dock_id(dockspaceId);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
-                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect);
+                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect,
+                    ImVec2(0, 0), ImVec2(1, 1),
+                    [&](const lumen::ui::TextureViewRect &r) {
+                        lumen::ui::imguizmo_manipulate(
+                            r, scene_view, scene_proj, &model_matrix,
+                            gizmo_operation,
+                            gizmo_world_mode ? ImGuizmo::WORLD
+                                             : ImGuizmo::LOCAL);
+                    });
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
                     "Wireframe", wireframeTextureId, &nextWireframeW,
@@ -585,10 +597,22 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
-                ImGui::SliderFloat("Model Yaw", &modelYaw, -3.14f, 3.14f,
-                                   "%.2f");
-                ImGui::SliderFloat("Model Pitch", &modelPitch, -1.5f, 1.5f,
-                                   "%.2f");
+                ImGui::Text("Gizmo");
+                if (ImGui::RadioButton("Translate",
+                                      gizmo_operation == ImGuizmo::TRANSLATE)) {
+                    gizmo_operation = ImGuizmo::TRANSLATE;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Rotate",
+                                      gizmo_operation == ImGuizmo::ROTATE)) {
+                    gizmo_operation = ImGuizmo::ROTATE;
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Scale",
+                                      gizmo_operation == ImGuizmo::SCALE)) {
+                    gizmo_operation = ImGuizmo::SCALE;
+                }
+                ImGui::Checkbox("World mode", &gizmo_world_mode);
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
@@ -830,11 +854,18 @@ static int run_demo3d() {
         }
 
         // 左键拖拽模型、右键拖拽相机（与启动日志一致；Scene Image 上仍允许导航）
-        if (!imguiBlocksMouse &&
+        if (!imguiBlocksMouse && !lumen::ui::imguizmo_is_using() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
-            modelYaw -= inp.mouse_delta_x() * kMouseSensitivity;
-            modelPitch += inp.mouse_delta_y() * kMouseSensitivity;
-            modelPitch = glm::clamp(modelPitch, -1.5f, 1.5f);
+            model_matrix =
+                glm::rotate(glm::mat4(1.0f),
+                            -inp.mouse_delta_x() * kMouseSensitivity,
+                            glm::vec3(0.0f, 1.0f, 0.0f)) *
+                model_matrix;
+            model_matrix =
+                glm::rotate(glm::mat4(1.0f),
+                            inp.mouse_delta_y() * kMouseSensitivity,
+                            glm::vec3(1.0f, 0.0f, 0.0f)) *
+                model_matrix;
         }
         if (!imguiBlocksMouse &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
@@ -850,26 +881,24 @@ static int run_demo3d() {
         if (imageIndex == UINT32_MAX)
             continue;
 
-        // MVP 矩阵
+        // MVP 矩阵（与 Scene 视口 Gizmo 共用 view / proj）
         glm::vec3 cameraPos =
             orbitRadius * glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
                                     std::sin(orbitPitch),
                                     std::cos(orbitYaw) * std::cos(orbitPitch));
-        glm::mat4 view = glm::lookAt(cameraPos, glm::vec3(0.0f),
-                                     glm::vec3(0.0f, 1.0f, 0.0f));
+        scene_view = glm::lookAt(cameraPos, glm::vec3(0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f));
         const VkExtent2D sceneExtentForProj = sceneTarget.extent();
-        glm::mat4 proj =
+        scene_proj =
             glm::perspective(glm::radians(42.0f),
                              static_cast<float>(sceneExtentForProj.width) /
                                  static_cast<float>(sceneExtentForProj.height),
                              0.1f, 100.0f);
-        proj[1][1] *= -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::rotate(model, modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::rotate(model, modelPitch, glm::vec3(1.0f, 0.0f, 0.0f));
+        scene_proj[1][1] *= -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
         UBO ubo {};
-        ubo.mvp = proj * view * model;
-        ubo.normalMatrix = glm::mat3(glm::transpose(glm::inverse(model)));
+        ubo.mvp = scene_proj * scene_view * model_matrix;
+        ubo.normalMatrix =
+            glm::mat3(glm::transpose(glm::inverse(model_matrix)));
         // 多光源：方向为从表面指向光源，Blender 猴头正面朝 -Z
         ubo.light0 = glm::vec4(0.0f, 0.5f, -1.0f, 1.2f); // 主光：正前方偏上，强
         ubo.light1 = glm::vec4(-0.6f, 0.5f, -0.6f, 0.7f); // 填充：左前方
