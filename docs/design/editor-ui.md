@@ -43,7 +43,7 @@ UI 系统属于：
 * **`PanelManager` + `IPanel`**：在 `imgui_backend_new_frame()` 之后集中调用各面板的 `on_imgui_render()`，并可设置默认 Dock 空间 ID（与 `DockSpaceOverViewport` 配合）。
 * **视口 Gizmo**：`imgui_backend_new_frame()` 内调用 `ImGuizmo::BeginFrame()`；`imguizmo_manipulate` 等与离屏 Scene 矩形配合使用，见 [gizmos.md](gizmos.md)。
 * **只读日志面板**：`LogPanel` 读取 `LogViewBuffer`；`Logger::init` 在 `LoggerConfig::logView.enable` 为真时为 engine / app 两个 logger 挂载同一 `make_log_view_sink()`，将格式化前的消息副本写入环形缓冲。
-* **EnTT 场景与编辑器面板**：`lumen::scene::Scene`（`engine/include/scene/`）+ `EditorSelection`；`SceneHierarchyPanel` / `SceneInspectorPanel` 实现层级树与属性编辑。`Scene::create_entity` 会为实体附加 `ObjectId`（`uint32_t id`，**0 保留为 Pick 未命中**；与 `Scene::object_id_for` / `Scene::entity_from_object_id` 成对使用）与 `Transform`（及 `NameComponent`）。`demo3d` 已注册两面板，并与 Scene Gizmo、网格绘制矩阵同步。
+* **EnTT 场景与编辑器面板**：`lumen::scene::Scene`（`engine/include/scene/`）+ `EditorSelection`；`SceneHierarchyPanel` / `SceneInspectorPanel` 实现层级树与属性编辑。`Scene::create_entity` 会为实体附加 `ObjectId`（`uint32_t id`，**0 保留为 Pick 未命中**；与 `Scene::object_id_for` / `Scene::entity_from_object_id` 成对使用）与 `Transform`（及 `NameComponent`）。**定向光**：`DirectionalLightComponent` + `pack_directional_lights_for_ubo` 与 demo3d `cube.frag` 的 `light0..3` 对齐。`demo3d` 已注册两面板，并与 Scene Gizmo、网格绘制矩阵同步。
 
 **本阶段刻意不包含**：Console 命令输入、Command 解析 / 队列。与 ECS 相关的进阶能力（系统调度、序列化等）仍以下文「递进版」为准，按需迭代。
 

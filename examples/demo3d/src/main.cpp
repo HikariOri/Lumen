@@ -25,6 +25,7 @@
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
 #include "scene/components.hpp"
+#include "scene/directional_light.hpp"
 #include "scene/scene.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
@@ -455,8 +456,19 @@ static int run_demo3d() {
     lumen::ui::EditorSelection editor_selection;
     const ::entt::entity ecs_model_entity = ecs_scene.create_entity("Model");
     ecs_scene.registry().emplace<lumen::scene::DrawableTag>(ecs_model_entity);
-    // const ::entt::entity ecs_child_entity = ecs_scene.create_entity("Child");
-    // ecs_scene.set_parent(ecs_child_entity, ecs_model_entity);
+    {
+        auto &reg = ecs_scene.registry();
+        auto add_dir = [&](const char *name, glm::vec3 dir, float intensity) {
+            const ::entt::entity le = ecs_scene.create_entity(name);
+            auto &L = reg.emplace<lumen::scene::DirectionalLightComponent>(le);
+            L.direction = dir;
+            L.intensity = intensity;
+        };
+        add_dir("Dir Key", { 0.0f, 0.5f, -1.0f }, 1.2f);
+        add_dir("Dir Fill", { -0.6f, 0.5f, -0.6f }, 0.7f);
+        add_dir("Dir Rim", { 0.5f, 0.3f, -0.8f }, 0.6f);
+        add_dir("Dir Bounce", { 0.0f, -0.5f, -0.9f }, 0.5f);
+    }
     editor_selection.entity = ecs_model_entity;
 
     lumen::ui::PanelManager ui_panels;
@@ -1070,11 +1082,13 @@ static int run_demo3d() {
         ubo.mvp = scene_proj * scene_view * model_matrix;
         ubo.normalMatrix =
             glm::mat3(glm::transpose(glm::inverse(model_matrix)));
-        // 多光源：方向为从表面指向光源，Blender 猴头正面朝 -Z
-        ubo.light0 = glm::vec4(0.0f, 0.5f, -1.0f, 1.2f); // 主光：正前方偏上，强
-        ubo.light1 = glm::vec4(-0.6f, 0.5f, -0.6f, 0.7f); // 填充：左前方
-        ubo.light2 = glm::vec4(0.5f, 0.3f, -0.8f, 0.6f);  // 右前方补光
-        ubo.light3 = glm::vec4(0.0f, -0.5f, -0.9f, 0.5f); // 底光：照下巴
+        glm::vec4 packed_lights[4];
+        lumen::scene::pack_directional_lights_for_ubo(ecs_scene.registry(),
+                                                      packed_lights);
+        ubo.light0 = packed_lights[0];
+        ubo.light1 = packed_lights[1];
+        ubo.light2 = packed_lights[2];
+        ubo.light3 = packed_lights[3];
         uniformBuffers[currentFrame].update(ubo);
 
         VkCommandBuffer cmd = cmdBuffers[currentFrame];

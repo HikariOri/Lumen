@@ -81,6 +81,24 @@ void SceneInspectorPanel::on_imgui_render() {
         ImGui::TextUnformatted("Parent: (none)");
     }
 
+    if (auto *dir = reg.try_get<lumen::scene::DirectionalLightComponent>(e)) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Directional light");
+        ImGui::DragFloat3("To-light (local)", glm::value_ptr(dir->direction),
+                          0.01f, 0.0f, 0.0f, "%.3f");
+        ImGui::DragFloat("Intensity", &dir->intensity, 0.02f, 0.0f, 32.0f,
+                         "%.2f");
+        ImGui::TextDisabled(
+            "Direction is in local space; world uses entity Transform.");
+        if (ImGui::Button("Remove directional light")) {
+            reg.remove<lumen::scene::DirectionalLightComponent>(e);
+        }
+    } else {
+        if (ImGui::Button("Add directional light")) {
+            reg.emplace<lumen::scene::DirectionalLightComponent>(e);
+        }
+    }
+
     if (auto *tr = reg.try_get<lumen::scene::Transform>(e)) {
         ImGui::Separator();
         ImGui::TextUnformatted("Transform (local)");

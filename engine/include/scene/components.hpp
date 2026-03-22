@@ -10,6 +10,7 @@
 
 #include <entt/entt.hpp>
 #include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 
 namespace lumen {
 namespace scene {
@@ -49,6 +50,18 @@ struct ParentComponent {
 
 /// 标记参与当前 demo 网格绘制的实体（首个带此标记者用于主视图矩阵）
 struct DrawableTag {};
+
+/**
+ * @brief 定向光（与 demo3d `cube.frag` 中 `vec4 lightN` 约定一致）
+ *
+ * - `direction`：**局部空间**下从表面指向光源的向量（与原先手写 UBO 的 xyz 语义相同）；
+ *   提交 GPU 时用实体 **世界矩阵的线性部分** 变换到世界空间（见 `pack_directional_lights_for_ubo`）。
+ * - `intensity`：对应 shader 中 `lightN.w`，与 `dot(n, normalize(xyz))` 相乘。
+ */
+struct DirectionalLightComponent {
+    glm::vec3 direction { 0.0f, 0.5f, -1.0f };
+    float intensity { 1.0f };
+};
 
 } // namespace scene
 } // namespace lumen
