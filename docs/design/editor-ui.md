@@ -35,6 +35,19 @@ UI 系统属于：
 * Runtime Gameplay
 
 ---
+
+## 1.2a 当前仓库落地范围（与实现对齐）
+
+本阶段引擎侧已提供：
+
+* **`PanelManager` + `IPanel`**：在 `imgui_backend_new_frame()` 之后集中调用各面板的 `on_imgui_render()`，并可设置默认 Dock 空间 ID（与 `DockSpaceOverViewport` 配合）。
+* **只读日志面板**：`LogPanel` 读取 `LogViewBuffer`；`Logger::init` 在 `LoggerConfig::logView.enable` 为真时为 engine / app 两个 logger 挂载同一 `make_log_view_sink()`，将格式化前的消息副本写入环形缓冲。
+
+**本阶段刻意不包含**：Console 命令输入、Command 解析 / 队列、与 ECS 绑定的 Hierarchy / Inspector。上述内容仍以下文「递进版」设计为准，落地时单独迭代。
+
+详见 [ui-panels.md](ui-panels.md)、[imgui-integration.md](imgui-integration.md) 与 [日志系统说明](../reference/logging.md)。
+
+---
 ## 1.3 ImGui 的本质（必须理解）
 
 ---
@@ -107,12 +120,12 @@ EditorUI
 ```cpp
 class IPanel {
 public:
+    virtual ~IPanel() = default;
     virtual void on_imgui_render() = 0;
-
-    bool open { true };
-    std::string name;
 };
 ```
+
+（可选的窗口显隐、关闭后重开等由后续菜单或面板自行维护；当前实现以集中绘制为主。）
 
 ---
 ## 3.2 PanelManager
@@ -122,11 +135,13 @@ public:
 ```cpp
 class PanelManager {
 public:
-    void register_panel(IPanel* panel);
+    void add(std::unique_ptr<IPanel> panel);
+    void set_default_dock_id(unsigned int dock_id);
     void render_all();
 
 private:
-    std::vector<IPanel*> panels_;
+    std::vector<std::unique_ptr<IPanel>> panels_;
+    unsigned int default_dock_id_ { 0 };
 };
 ```
 
@@ -137,10 +152,11 @@ private:
 
 ```cpp
 void PanelManager::render_all() {
-    for (auto* p : panels_) {
-        if (p->open) {
-            p->on_imgui_render();
+    for (auto& p : panels_) {
+        if (default_dock_id_ != 0) {
+            ImGui::SetNextWindowDockID(default_dock_id_, ImGuiCond_FirstUseEver);
         }
+        p->on_imgui_render();
     }
 }
 ```
@@ -195,11 +211,13 @@ UI = 多个 Panel 的组合
 
 ---
 
-作用：
+作用（目标形态）：
 
 ```text
 日志显示 + 命令输入
 ```
+
+**当前仓库**：仅实现「日志显示」路径——`LogPanel` + `LogViewBuffer` + spdlog UI sink，**无命令输入框、无 Command 管线**。命令输入与 Parser 见下文第 7、10 节，待后续里程碑接入。
 
 ---
 # 5. UI State（关键）

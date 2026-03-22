@@ -26,10 +26,12 @@
 #include "render/swapchain.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
+#include "ui/log_panel.hpp"
 #include "ui/input_bridge.hpp"
 #include "ui/texture_view_panel.hpp"
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -347,6 +349,10 @@ static int run_demo3d() {
         return -1;
     }
 
+    lumen::ui::PanelManager ui_panels;
+    ui_panels.add(std::make_unique<lumen::ui::LogPanel>());
+    ui_panels.add(std::make_unique<lumen::ui::GpuCapabilitiesPanel>(ctx));
+
     auto sceneTextureId =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(), sceneTarget.color_view(),
@@ -541,6 +547,7 @@ static int run_demo3d() {
 
                 ImGuiID dockspaceId =
                     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+                ui_panels.set_default_dock_id(dockspaceId);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
                     "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect);
@@ -589,10 +596,7 @@ static int run_demo3d() {
                                                      "Scene");
                 ImGui::End();
 
-                ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowPos(ImVec2(10, 300), ImGuiCond_FirstUseEver);
-                ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
-                lumen::ui::imgui_gpu_capabilities_panel(ctx);
+                ui_panels.render_all();
 
                 lumen::ui::imgui_backend_render(cmd);
                 vkCmdEndRenderPass(cmd);

@@ -4,13 +4,14 @@
 
 ## 当前实现（仓库）
 
-Lumen 日志系统基于 spdlog，将**引擎内部日志**与**应用层日志**分离，支持控制台彩色输出与按大小轮转的文件输出。使用自封装的 `LogLevel`，不直接暴露 spdlog 类型。
+Lumen 日志系统基于 spdlog，将**引擎内部日志**与**应用层日志**分离，支持控制台彩色输出与按大小轮转的文件输出，以及可选的 **ImGui 日志视图缓冲**（与控制台命令输入无关）。使用自封装的 `LogLevel`，不直接暴露 spdlog 类型。
 
 ### 架构
 
 - **双 Logger**：`engine`（引擎内部）与 `app`（应用层）独立配置
 - **单例模式**：`Logger` 采用 Meyers 单例，通过静态 `init()` / `shutdown()` 管理
 - **谁创建谁销毁**：调用 `init()` 的代码必须调用 `shutdown()`
+- **LogView（可选）**：`LoggerConfig::logView` 为真时，向两个 logger 各挂载同一个 `make_log_view_sink()`，将日志行写入 `LogViewBuffer`，供 `lumen::ui::LogPanel` 显示
 
 ### 核心类型
 
@@ -18,7 +19,8 @@ Lumen 日志系统基于 spdlog，将**引擎内部日志**与**应用层日志*
 |------|------|
 | `LogLevel` | 日志级别：`Trace`、`Debug`、`Info`、`Warn`、`Error`、`Critical` |
 | `LoggerPathConfig` | 单个 logger 配置：级别、启用、文件路径、大小限制 |
-| `LoggerConfig` | 整体配置：控制台、engine、app 的 `LoggerPathConfig` |
+| `LoggerConfig` | 整体配置：控制台、engine、app 的 `LoggerPathConfig`，以及 `logView` |
+| `LogViewSinkConfig` | `enable`、`maxLines`（环形缓冲容量下限为 64） |
 
 ### 宏分类
 
@@ -59,6 +61,8 @@ config.app.level = lumen::core::LogLevel::Warn;
 config.engine.filePath = "logs/my_engine.log";
 config.app.filePath = "logs/my_app.log";
 config.engine.maxFileSize = 10 * 1024 * 1024;
+config.logView.enable = true;
+config.logView.maxLines = 8192;
 
 if (!lumen::core::Logger::init(config)) {
     return -1;
@@ -80,8 +84,15 @@ if (!lumen::core::Logger::init(config)) {
 ```
 engine/
 ├── include/core/logger.hpp
-└── src/core/logger.cpp
+├── include/core/log_view_buffer.hpp
+├── include/core/log_ui_sink.hpp
+└── src/core/
+    ├── logger.cpp
+    ├── log_view_buffer.cpp
+    └── log_ui_sink.cpp
 ```
+
+UI 侧消费方式见 [ui-panels.md](../design/ui-panels.md) 与 [imgui-integration.md](../design/imgui-integration.md)。
 
 ---
 
@@ -91,7 +102,7 @@ engine/
 
 | 方向 | 说明 |
 |------|------|
-| 多 Sink | 除控制台、文件外，可扩展 ImGui 视窗、网络等 |
+| 多 Sink | 除控制台、文件外，已有 ImGui 视窗缓冲（`LogViewBuffer`）；可再扩展网络等 |
 | 异步日志 | 主线程入队、后台 worker 写 IO；队列策略如 `overrun_oldest` |
 | Tag / 分类 | 按模块、Pass 名等结构化过滤 |
 | GPU / 调试 | Validation、Debug Utils Label 与日志联动 |

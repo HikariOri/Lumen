@@ -9,17 +9,21 @@
 ```
 engine/
 ├── include/ui/
-│   ├── imgui_backend.hpp         # ImGui 后端封装
-│   ├── input_bridge.hpp          # SDL→ImGui 事件、WantCapture 查询
-│   ├── texture_view_panel.hpp    # 纹理预览面板（Scene/Wireframe 等）
-│   └── gpu_capabilities_panel.hpp# GPU 信息面板
+│   ├── imgui_backend.hpp          # ImGui 后端封装
+│   ├── input_bridge.hpp           # SDL→ImGui 事件、WantCapture 查询
+│   ├── panel.hpp                  # IPanel、PanelManager
+│   ├── log_panel.hpp              # 日志面板（LogViewBuffer）
+│   ├── texture_view_panel.hpp     # 纹理预览面板（Scene/Wireframe 等）
+│   └── gpu_capabilities_panel.hpp # GPU 信息（函数 + GpuCapabilitiesPanel）
 └── src/ui/
     ├── imgui_backend.cpp
+    ├── panel_manager.cpp
+    ├── log_panel.cpp
     ├── texture_view_panel.cpp
     └── gpu_capabilities_panel.cpp
 ```
 
-可复用面板详见 [ui-panels.md](ui-panels.md)。
+可复用面板与 Dock 注册方式详见 [ui-panels.md](ui-panels.md)。日志写入 UI 缓冲见 [logging.md](../reference/logging.md)。
 
 - **平台**：SDL3 窗口 + 输入
 - **渲染**：Vulkan 后端

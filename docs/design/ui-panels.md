@@ -1,23 +1,54 @@
 # UI 面板组件
 
-> 引擎提供的 ImGui 可复用面板，用于 Scene 视口、GPU 信息等常见 UI。
+> 引擎提供的 ImGui 可复用面板，用于 Scene 视口、日志、GPU 信息等常见 UI。本阶段**不包含**控制台命令输入与 Command 系统（见 [editor-ui.md](editor-ui.md) 1.2a）。
 
 ## 1. 架构概览
 
 ```
 engine/include/ui/
-├── imgui_backend.hpp      # ImGui 后端封装（Vulkan + SDL3）
-├── input_bridge.hpp       # SDL→ImGui 事件、WantCapture 查询（见 ../reference/event-input.md）
-├── texture_view_panel.hpp # 纹理预览面板（Scene/Wireframe/Normal/Depth）
-└── gpu_capabilities_panel.hpp  # GPU 信息面板
+├── imgui_backend.hpp       # ImGui 后端封装（Vulkan + SDL3）
+├── input_bridge.hpp        # SDL→ImGui 事件、WantCapture 查询（见 ../reference/event-input.md）
+├── panel.hpp               # IPanel、PanelManager（集中绘制、可选默认 Dock）
+├── log_panel.hpp           # 日志面板（读 LogViewBuffer）
+├── texture_view_panel.hpp  # 纹理预览面板（Scene/Wireframe/Normal/Depth）
+└── gpu_capabilities_panel.hpp  # GPU 信息：自由函数 + GpuCapabilitiesPanel
 
 engine/src/ui/
 ├── imgui_backend.cpp
+├── panel_manager.cpp
+├── log_panel.cpp
 ├── texture_view_panel.cpp
 └── gpu_capabilities_panel.cpp
 ```
 
-所有面板**需在 ImGui 帧内调用**（`imgui_backend_new_frame()` 之后、`imgui_backend_render(cmd)` 之前）。
+* **自由函数面板**（如 `imgui_texture_view_panel`）：由调用方在帧内直接调用。
+* **PanelManager**：统一对实现了 `IPanel` 的面板调用 `on_imgui_render()`，适合日志、GPU 信息等可注册窗口。
+
+所有 ImGui 绘制**需在 ImGui 帧内**完成（`imgui_backend_new_frame()` 之后、`imgui_backend_render(cmd)` 之前）。
+
+### 1.1 PanelManager 与 Dock
+
+典型顺序：先 `DockSpaceOverViewport` 得到 `dockspaceId`，再 `panel_manager.set_default_dock_id(dockspaceId)`，然后绘制纹理视口等自定义窗口，最后 `panel_manager.render_all()`。`render_all()` 会在每个面板前设置 `SetNextWindowDockID`（`FirstUseEver`），便于首次布局进同一 Dock 空间。
+
+```cpp
+#include "ui/panel.hpp"
+#include "ui/log_panel.hpp"
+#include "ui/gpu_capabilities_panel.hpp"
+
+lumen::ui::PanelManager panels;
+panels.add(std::make_unique<lumen::ui::LogPanel>());
+panels.add(std::make_unique<lumen::ui::GpuCapabilitiesPanel>(ctx));
+
+// 每帧 UI 通道内：
+ImGuiID dockId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+panels.set_default_dock_id(dockId);
+// ... 其他 ImGui 窗口 ...
+panels.render_all();
+```
+
+### 1.2 日志面板（LogPanel）
+
+日志文本来自 `lumen::core::LogViewBuffer`，由 spdlog 的 UI sink 在 `Logger::init` 时挂载（见 [logging.md](../reference/logging.md)）。`LogPanel` 提供最低级别过滤、自动滚底、清空缓冲等，**不包含**命令行输入。
 
 ---
 
@@ -138,13 +169,21 @@ lumen::ui::imgui_texture_view_panel("Preview", textureId);
 
 ```cpp
 void imgui_gpu_capabilities_panel(const render::Context &ctx,
-                                  const char *title = "GPU Capabilities");
+                                  const char *title = "GPU Capabilities",
+                                  bool *p_open = nullptr);
+
+class GpuCapabilitiesPanel final : public IPanel {
+public:
+    explicit GpuCapabilitiesPanel(const render::Context &ctx);
+    void on_imgui_render() override;
+};
 ```
 
 | 参数 | 说明 |
 |------|------|
 | `ctx` | 已初始化 Device 的 `Context` |
 | `title` | 窗口标题，默认 `"GPU Capabilities"` |
+| `p_open` | 非空时显示关闭按钮；为 `false` 时不再展开内容 |
 
 ### 显示内容
 
@@ -155,9 +194,12 @@ void imgui_gpu_capabilities_panel(const render::Context &ctx,
 
 ### 用法示例
 
+与 `PanelManager` 一起使用时，一般由 `GpuCapabilitiesPanel` 负责首次窗口大小；仅需 `set_default_dock_id` + `render_all()`。
+
+仍可直接调用自由函数：
+
 ```cpp
 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-ImGui::SetNextWindowPos(ImVec2(10, 300), ImGuiCond_FirstUseEver);
 ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_FirstUseEver);
 lumen::ui::imgui_gpu_capabilities_panel(ctx);
 ```

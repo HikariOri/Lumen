@@ -32,6 +32,12 @@ struct LoggerPathConfig {
     size_t maxFiles { 3 };
 };
 
+/// ImGui 日志面板等 UI 用的环形缓冲（由 spdlog sink 写入）
+struct LogViewSinkConfig {
+    bool enable { true };
+    std::size_t maxLines { 4096 };
+};
+
 /// 日志配置：引擎与外部分别配置，默认均为 debug 级别
 struct LoggerConfig {
     bool enableConsole { true };
@@ -39,6 +45,8 @@ struct LoggerConfig {
     LoggerPathConfig engine { LogLevel::Debug, true, "logs/engine.log" };
     /// 外部调用日志（应用层）
     LoggerPathConfig app { LogLevel::Debug, true, "logs/app.log" };
+    /// 将 engine 与 app 的日志副本写入 `LogViewBuffer`（供 `LogPanel` 显示）
+    LogViewSinkConfig logView {};
 };
 
 /**

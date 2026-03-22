@@ -4,6 +4,8 @@
  */
 
 #include "core/logger.hpp"
+#include "core/log_ui_sink.hpp"
+#include "core/log_view_buffer.hpp"
 
 #include <ghc/filesystem.hpp>
 #include <string>
@@ -55,9 +57,10 @@ spdlog::sink_ptr make_file_sink(const LoggerPathConfig &cfg) {
     return std::make_shared<spdlog::sinks::basic_file_sink_mt>(cfg.filePath);
 }
 
-std::shared_ptr<spdlog::logger> create_logger(const char *name,
-                                              const LoggerConfig &config,
-                                              const LoggerPathConfig &pathCfg) {
+std::shared_ptr<spdlog::logger> create_logger(
+    const char *name, const LoggerConfig &config,
+    const LoggerPathConfig &pathCfg,
+    const spdlog::sink_ptr &shared_log_view_sink) {
     std::vector<spdlog::sink_ptr> sinks;
     if (config.enableConsole) {
         sinks.emplace_back(make_console_sink());
@@ -65,6 +68,9 @@ std::shared_ptr<spdlog::logger> create_logger(const char *name,
     if (auto file = make_file_sink(pathCfg)) {
         file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%l] [%s:%#] %v");
         sinks.emplace_back(std::move(file));
+    }
+    if (shared_log_view_sink) {
+        sinks.emplace_back(shared_log_view_sink);
     }
     if (sinks.empty()) {
         return nullptr;
@@ -91,14 +97,21 @@ bool Logger::init(const LoggerConfig &config) {
 bool Logger::init_(const LoggerConfig &config) {
     spdlog::shutdown();
 
-    auto engineLogger =
-        create_logger(k_engine_logger_name, config, config.engine);
+    spdlog::sink_ptr log_view_sink;
+    if (config.logView.enable) {
+        LogViewBuffer::instance().set_capacity(config.logView.maxLines);
+        log_view_sink = make_log_view_sink();
+    }
+
+    auto engineLogger = create_logger(k_engine_logger_name, config,
+                                        config.engine, log_view_sink);
     if (!engineLogger) {
         return false;
     }
     spdlog::register_logger(engineLogger);
 
-    auto appLogger = create_logger(k_app_logger_name, config, config.app);
+    auto appLogger =
+        create_logger(k_app_logger_name, config, config.app, log_view_sink);
     if (appLogger) {
         spdlog::register_logger(appLogger);
     }

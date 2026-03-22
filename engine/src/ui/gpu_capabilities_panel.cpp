@@ -13,11 +13,20 @@ namespace lumen {
 namespace ui {
 
 void imgui_gpu_capabilities_panel(const render::Context& ctx,
-                                  const char* title) {
+                                  const char* title, bool* p_open) {
     if (!ctx.has_device()) {
         return;
     }
-    ImGui::Begin(title);
+    bool began = false;
+    if (p_open) {
+        began = ImGui::Begin(title, p_open);
+    } else {
+        began = ImGui::Begin(title);
+    }
+    if (!began) {
+        ImGui::End();
+        return;
+    }
     const auto gpuInfo = ctx.physical_device_info();
     ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "%s",
                        gpuInfo.deviceName.c_str());
@@ -44,6 +53,15 @@ void imgui_gpu_capabilities_panel(const render::Context& ctx,
     ImGui::Text("maxPushConstantsSize: %u bytes",
                 limits.maxPushConstantsSize);
     ImGui::End();
+}
+
+GpuCapabilitiesPanel::GpuCapabilitiesPanel(const render::Context& ctx)
+    : ctx_(&ctx) {}
+
+void GpuCapabilitiesPanel::on_imgui_render() {
+    ImGui::SetNextWindowSize(ImVec2(320.0f, 0.0f),
+                             ImGuiCond_FirstUseEver);
+    imgui_gpu_capabilities_panel(*ctx_, "GPU Capabilities", nullptr);
 }
 
 } // namespace ui
