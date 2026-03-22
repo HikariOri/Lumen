@@ -84,8 +84,8 @@ void imgui_texture_view_panel(const char *title, ImTextureID textureId,
 |------|------|
 | `title` | 窗口标题，如 `"Scene"`, `"Wireframe"`, `"Normal"`, `"Depth"` |
 | `textureId` | `ImTextureID`，来自 `imgui_backend_add_texture()` |
-| `outWidth` | 输出本帧显示宽度，供下一帧 resize 离屏目标；`nullptr` 则不输出 |
-| `outHeight` | 输出本帧显示高度；`nullptr` 则不输出 |
+| `outWidth` | 输出本帧显示宽度，供下一帧 resize 离屏目标；`nullptr` 则不输出。引擎内已处理 ImGui 可用区域为负/非有限等情况，**应用侧不必再钳位** |
+| `outHeight` | 输出本帧显示高度；`nullptr` 则不输出（同上，由引擎保证可安全用于 `resize`） |
 | `outRect` | 输出 Image 屏幕坐标矩形（左上 min、右下 max），用于射线拾取等；`nullptr` 则不输出 |
 | `uv0`, `uv1` | 纹理 UV 范围，默认 `(0,0)-(1,1)`，Vulkan 离屏通常不需 Y 翻转 |
 

@@ -6,9 +6,25 @@
 #include "ui/texture_view_panel.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace lumen {
 namespace ui {
+namespace {
+
+/// ImGui::GetContentRegionAvail() 在窗口过窄、Dock 首帧等情况下可能为负或非有限值；
+/// 直接 static_cast<uint32_t> 会无符号回绕，进而把离屏 resize 撑爆。
+uint32_t content_avail_to_pixel_dim(float v) {
+    if (!std::isfinite(v) || v < 1.0f) {
+        return 1u;
+    }
+    constexpr float kMaxReasonable = 16384.0f;
+    const float c = std::min(v, kMaxReasonable);
+    const auto as_u32 = static_cast<uint32_t>(c);
+    return std::max(1u, as_u32);
+}
+
+} // namespace
 
 ViewportMouseState viewport_mouse_state(const TextureViewRect &rect,
                                         float mouseX, float mouseY) {
@@ -52,12 +68,16 @@ void imgui_texture_view_panel(const char *title, ImTextureID textureId,
                               const ImVec2 &uv1) {
     ImGui::Begin(title);
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    ImGui::Image(textureId, avail, uv0, uv1);
+    const uint32_t w_px = content_avail_to_pixel_dim(avail.x);
+    const uint32_t h_px = content_avail_to_pixel_dim(avail.y);
+    ImGui::Image(textureId,
+                  ImVec2(static_cast<float>(w_px), static_cast<float>(h_px)),
+                  uv0, uv1);
     if (outWidth) {
-        *outWidth = std::max(1u, static_cast<uint32_t>(avail.x));
+        *outWidth = w_px;
     }
     if (outHeight) {
-        *outHeight = std::max(1u, static_cast<uint32_t>(avail.y));
+        *outHeight = h_px;
     }
     if (outRect) {
         const ImVec2 minP = ImGui::GetItemRectMin();

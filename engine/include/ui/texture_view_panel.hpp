@@ -63,8 +63,10 @@ void imgui_viewport_mouse_debug(const TextureViewRect &rect,
 /**
  * @brief 纹理预览面板
  *
- * 绘制一个 ImGui 窗口，以 GetContentRegionAvail() 为尺寸显示纹理。
+ * 绘制一个 ImGui 窗口，以 GetContentRegionAvail() 为基准显示纹理。
  * 若提供 outWidth/outHeight，则输出本帧显示尺寸，供下一帧调整离屏目标。
+ * 引擎内部会将非有限、非正或过大的可用区域规范为合法像素尺寸（至少为 1，
+ * 并设合理上界），调用方无需再钳位即可传给 OffscreenRenderTarget::resize。
  * 若提供 outRect，则输出 Image 的屏幕坐标矩形（左上 min、右下 max）。
  *
  * @param title 窗口标题（如 "Scene", "Wireframe", "Normal", "Depth"）
