@@ -298,11 +298,12 @@ static int run_sandbox() {
     }
 
     LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环 [WASD] 移动 [QE] 旋转");
+    lumen::core::anchor_steady_epoch();
+    lumen::core::FrameDeltaClock frame_dt;
     float lastLoggedTime = -10.0f; // 用于限速调试日志
     uint64_t frameCount = 0;       // 用于限速调试日志
     glm::vec2 rectPos { 0.0f, 0.0f };
     float rectRotation { 0.0f };
-    double lastTime = lumen::core::get_time_seconds();
     constexpr float kMoveSpeed = 1.5f;
     constexpr float kRotSpeed = 2.5f;
     constexpr uint64_t kLogInterval = 60; // 每 N 帧输出一次阶段日志
@@ -393,9 +394,7 @@ static int run_sandbox() {
             break;
 
         // 键盘控制：WASD 移动，QE 旋转
-        double now = lumen::core::get_time_seconds();
-        float dt = static_cast<float>(now - lastTime);
-        lastTime = now;
+        const float dt = static_cast<float>(frame_dt.tick_seconds());
         const auto &inp = pump.input();
         if (inp.is_key_down(lumen::platform::Key::W))
             rectPos.y -= kMoveSpeed * dt; // Vulkan NDC Y 向下，减为上

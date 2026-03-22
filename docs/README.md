@@ -36,7 +36,8 @@
 | [logging.md](reference/logging.md) | 日志实现与扩展路线 |
 | [glm-vulkan.md](reference/glm-vulkan.md) | GLM 与 Vulkan 适配 |
 | [cpp-style.md](reference/cpp-style.md) | C++ 编码风格参考 |
-| [sdl3-time.md](reference/sdl3-time.md) | SDL3 时间与引擎 `get_time_seconds()` |
+| [time.md](reference/time.md) | 单调时钟、`steady_seconds`、`FrameDeltaClock` |
+| [sdl3-time.md](reference/sdl3-time.md) | SDL3 计时与引擎对照 |
 
 ## design
 

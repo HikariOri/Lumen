@@ -207,7 +207,8 @@ static int run_shadertoy() {
     float mouseX { 0.0f }, mouseY { 0.0f };
     float mouseClickX { 0.0f }, mouseClickY { 0.0f };
     uint64_t frameCount { 0 };
-    double lastTime = lumen::core::get_time_seconds();
+    lumen::core::anchor_steady_epoch();
+    lumen::core::FrameDeltaClock frame_dt;
     int fbWidth { w }, fbHeight { h };
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
@@ -262,9 +263,7 @@ static int run_shadertoy() {
         if (!running)
             break;
 
-        double now = lumen::core::get_time_seconds();
-        float dt = static_cast<float>(now - lastTime);
-        lastTime = now;
+        const float dt = static_cast<float>(frame_dt.tick_seconds());
 
         uint32_t imageIndex = swapchain.acquire_next_image(
             frameSync.image_available(currentFrame), VK_NULL_HANDLE,
@@ -318,7 +317,7 @@ static int run_shadertoy() {
         ubo.iResolution.x = static_cast<float>(swapchain.extent().width);
         ubo.iResolution.y = static_cast<float>(swapchain.extent().height);
         ubo.iResolution.z = 1.0f;
-        ubo.iTime = static_cast<float>(lastTime);
+        ubo.iTime = static_cast<float>(frame_dt.last_steady_seconds());
         ubo.iTimeDelta = dt;
         ubo.iFrame = static_cast<float>(frameCount);
         ubo.iMouse = { mouseX, mouseY, mouseClickX, mouseClickY };

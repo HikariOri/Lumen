@@ -22,7 +22,7 @@
 | 操作 | 调用 |
 |------|------|
 | 路径 | `lumen::core::get_resource_path("shaders/xx.spv")` |
-| 时间 | `lumen::core::get_time_seconds()` |
+| 时间 | `lumen::core::steady_seconds()`、`FrameDeltaClock`（见 [time.md](../reference/time.md)） |
 | 日志 | `LUMEN_APP_LOG_*`（应用层）|
 | 设备等待 | `ctx.wait_idle()` |
 | Swapchain 重建 | `recreate_swapchain_resources(ctx, swapchain, framebuffers, frameSync, renderPass.handle(), w, h, framesInFlight, depthImageView)` |
@@ -37,4 +37,5 @@
 - [Git 提交规范](git-commit-convention.md) — Conventional Commits
 - [AI 协作开发](ai-assisted-workflow.md) — ChatGPT 规格 → Cursor 实现
 - [Cursor 全流程](cursor-end-to-end-workflow.md) — 设计 → 实现 → 验证（不依赖 GPT）
-- [SDL3 时间 API](../reference/sdl3-time.md) — 与 `get_time_seconds()` 对照
+- [时间与帧间隔](../reference/time.md) — 单调时钟、`FrameDeltaClock`
+- [SDL3 时间对照](../reference/sdl3-time.md) — 与引擎 API 的关系

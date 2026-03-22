@@ -10,10 +10,10 @@
 - **建议**：在 `Window::create()` 之后使用（Window 内部会调用 SDL_Init）
 - **失败时**：`get_base_path()` 返回空字符串；`get_resource_path()` 会退化为仅返回 `subpath`
 
-### 1.2 时间工具 `core::get_time_seconds()`
+### 1.2 时间工具（`core/time.hpp`）
 
-- **无依赖**：使用 `std::chrono::steady_clock`，不依赖 SDL
-- 可在程序任意位置调用
+- **实现**：`std::chrono::steady_clock`，不依赖 SDL；详见 [reference/time.md](../reference/time.md)。
+- **推荐**：进入主循环前调用 `anchor_steady_epoch()`，帧内用 `FrameDeltaClock::tick_seconds()` 取 dt；总时间用 `steady_seconds()`。
 
 ---
 

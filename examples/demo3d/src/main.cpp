@@ -323,7 +323,6 @@ static int run_demo3d() {
     bool needRecreateSwapchain { false };
     uint32_t currentFrame { 0 };
     bool running { true };
-    double lastTime = lumen::core::get_time_seconds();
     float dt { 0.016f };
     uint32_t nextSceneW { 0 };
     uint32_t nextSceneH { 0 };
@@ -664,6 +663,9 @@ static int run_demo3d() {
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
     constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
 
+    lumen::core::anchor_steady_epoch();
+    lumen::core::FrameDeltaClock frame_dt;
+
     while (running) {
         if (!pump.poll())
             break;
@@ -716,9 +718,7 @@ static int run_demo3d() {
         if (!running)
             break;
 
-        double now = lumen::core::get_time_seconds();
-        dt = static_cast<float>(now - lastTime);
-        lastTime = now;
+        dt = static_cast<float>(frame_dt.tick_seconds());
 
         lumen::ui::imgui_backend_new_frame();
 
