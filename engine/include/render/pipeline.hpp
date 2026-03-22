@@ -56,6 +56,8 @@ struct GraphicsPipelineConfig {
     bool depthTest { true };
     bool depthWrite { true };
     VkCompareOp depthCompareOp { VK_COMPARE_OP_LESS };
+    /// 预乘前开启典型 SrcAlpha / OneMinusSrcAlpha 颜色混合（图标、粒子等）
+    bool alphaBlend { false };
 };
 
 /**

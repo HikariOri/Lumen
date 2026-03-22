@@ -15,6 +15,18 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/cube.frag"
           -o "$<TARGET_FILE_DIR:demo3d>/shaders/cube.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_icon.vert"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/light_icon.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_icon.frag"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/light_icon.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_debug.vert"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/light_debug.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/light_debug.frag"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/light_debug.frag.spv"
   COMMENT "Compiling 3D cube GLSL shaders"
   VERBATIM
 )

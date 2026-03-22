@@ -28,6 +28,7 @@
 #include "scene/light.hpp"
 #include "scene/scene.hpp"
 #include "scene/scene_camera_controller.hpp"
+#include "scene/transform.hpp"
 #include "scene/scene_orbit_camera.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
@@ -45,6 +46,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -61,10 +63,14 @@ using Vertex = lumen::core::ObjVertex;
 
 /// UBO：model / mvp / normal / 相机 / 光源数组（与 `cube.vert`/`cube.frag`
 /// 一致，std140）
+///
+/// 注意：GLSL `mat3` 在 std140 中按 3×vec4 列存储（48 字节），与 `glm::mat3`
+///（36 字节）不一致，会导致后续 `cameraWorld`、`lights` 整体错位。此处用
+/// `mat4` 存法线矩阵（仅左上 3×3 有效），与着色器对齐。
 struct UBO {
     glm::mat4 model;
     glm::mat4 mvp;
-    glm::mat3 normalMatrix;
+    glm::mat4 normalMatrix;
     glm::vec4 cameraWorld;
     lumen::scene::GPULight lights[lumen::scene::kMaxLightsUbo];
     glm::vec4 sceneParams;
@@ -88,6 +94,8 @@ constexpr float kViewCubeSize { 96.0f };
 constexpr float kViewCubeMargin { 8.0f };
 /// 控件实际绘制会略超出传入矩形，右侧需额外内缩避免「出界」
 constexpr float kViewCubeRightBleed { 22.0f };
+/// 光源图标在世界空间中的半宽/半高（局部 xy ∈ [-1,1]）
+constexpr float kLightIconHalfExtent { 0.18f };
 
 /// 将 ViewManipulate 放在矩形右上角内侧（优先 Scene 视口屏幕矩形）
 void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
@@ -143,6 +151,223 @@ ImGuizmo::OPERATION scene_gizmo_to_operation(SceneGizmoTool t) {
     case SceneGizmoTool::Scale: return ImGuizmo::SCALE;
     case SceneGizmoTool::View:
     default: return ImGuizmo::TRANSLATE;
+    }
+}
+
+struct BillboardVertex {
+    glm::vec2 pos;
+    glm::vec2 uv;
+};
+
+/// 相机朝向 billboard，局部 xy ∈ [-1,1]，世界半宽/半高为 half_extent
+[[nodiscard]] glm::mat4 light_icon_mvp(const glm::mat4 &view,
+                                       const glm::mat4 &proj,
+                                       const glm::vec3 &world_pos,
+                                       float half_extent) {
+    const glm::mat4 inv_view = glm::inverse(view);
+    const glm::vec3 cam_pos = glm::vec3(inv_view[3]);
+    glm::vec3 n = cam_pos - world_pos;
+    if (glm::length(n) < 1e-5f) {
+        n = glm::vec3(0.0f, 0.0f, 1.0f);
+    } else {
+        n = glm::normalize(n);
+    }
+    const glm::vec3 up_ref = std::abs(n.y) < 0.99f ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                                   : glm::vec3(1.0f, 0.0f, 0.0f);
+    const glm::vec3 right = glm::normalize(glm::cross(up_ref, n));
+    const glm::vec3 up = glm::normalize(glm::cross(n, right));
+    glm::mat4 model(1.0f);
+    model[0] = glm::vec4(right * half_extent, 0.0f);
+    model[1] = glm::vec4(up * half_extent, 0.0f);
+    model[2] = glm::vec4(n, 0.0f);
+    model[3] = glm::vec4(world_pos, 1.0f);
+    return proj * view * model;
+}
+
+/// 光源范围/方向调试线（世界空间顶点，`vp = proj * view`）
+struct LightDebugLineVertex {
+    glm::vec3 pos;
+    glm::vec4 color;
+};
+
+constexpr std::size_t kLightDebugVbMaxBytes { 768U * 1024U };
+constexpr int kLightDebugCircleSegments { 28 };
+constexpr float kLightDebugDirBeamLength { 3.8f };
+/// 聚光半角可视化上限，避免 tan 爆炸（约 89°）
+constexpr float kLightDebugMaxHalfAngleRad { 1.553343f };
+
+inline glm::vec3 normalize_safe(glm::vec3 v, glm::vec3 fallback) {
+    const float len = glm::length(v);
+    return len > 1e-8f ? v / len : fallback;
+}
+
+inline glm::vec4 tint_axis_color(glm::vec4 base, glm::vec3 light_rgb) {
+    glm::vec4 c = base;
+    c.r = std::min(c.r * light_rgb.r, 1.0f);
+    c.g = std::min(c.g * light_rgb.g, 1.0f);
+    c.b = std::min(c.b * light_rgb.b, 1.0f);
+    return c;
+}
+
+void light_debug_append_line(std::vector<LightDebugLineVertex> &out,
+                             glm::vec3 a, glm::vec3 b, glm::vec4 color) {
+    out.push_back({ a, color });
+    out.push_back({ b, color });
+}
+
+void light_debug_circle_in_plane(std::vector<LightDebugLineVertex> &out,
+                                 glm::vec3 center, glm::vec3 plane_axis,
+                                 float radius, glm::vec4 color, int n) {
+    if (radius < 1e-4f || n < 3) {
+        return;
+    }
+    plane_axis = normalize_safe(plane_axis, glm::vec3(0.0f, 0.0f, 1.0f));
+    const glm::vec3 ref = std::abs(plane_axis.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                                        : glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 u =
+        normalize_safe(glm::cross(ref, plane_axis), glm::vec3(1.0f, 0.0f, 0.0f));
+    const glm::vec3 v = glm::cross(plane_axis, u);
+    constexpr float k_two_pi { 6.28318530718f };
+    for (int i = 0; i < n; ++i) {
+        const float a0 = k_two_pi * static_cast<float>(i) / static_cast<float>(n);
+        const float a1 =
+            k_two_pi * static_cast<float>(i + 1) / static_cast<float>(n);
+        const glm::vec3 p0 =
+            center + (u * std::cos(a0) + v * std::sin(a0)) * radius;
+        const glm::vec3 p1 =
+            center + (u * std::cos(a1) + v * std::sin(a1)) * radius;
+        light_debug_append_line(out, p0, p1, color);
+    }
+}
+
+void light_debug_wire_sphere(std::vector<LightDebugLineVertex> &out,
+                             glm::vec3 center, float radius, glm::vec4 color) {
+    if (radius < 1e-4f) {
+        return;
+    }
+    light_debug_circle_in_plane(out, center, glm::vec3(0.0f, 0.0f, 1.0f), radius,
+                                color, kLightDebugCircleSegments);
+    light_debug_circle_in_plane(out, center, glm::vec3(0.0f, 1.0f, 0.0f), radius,
+                                color, kLightDebugCircleSegments);
+    light_debug_circle_in_plane(out, center, glm::vec3(1.0f, 0.0f, 0.0f), radius,
+                                color, kLightDebugCircleSegments);
+}
+
+void light_debug_arrow(std::vector<LightDebugLineVertex> &out, glm::vec3 tail,
+                       glm::vec3 dir_unit, float length, glm::vec4 color) {
+    if (length < 1e-4f) {
+        return;
+    }
+    const glm::vec3 tip = tail + dir_unit * length;
+    light_debug_append_line(out, tail, tip, color);
+    const float head = std::min(length * 0.18f, 0.35f);
+    const glm::vec3 back = tip - dir_unit * head;
+    const glm::vec3 ref = std::abs(dir_unit.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                                      : glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 side0 =
+        normalize_safe(glm::cross(ref, dir_unit), glm::vec3(0.0f, 0.0f, 1.0f));
+    const glm::vec3 side1 = glm::cross(dir_unit, side0);
+    constexpr float k_two_pi { 6.28318530718f };
+    const float spread = head * 0.55f;
+    for (int k = 0; k < 3; ++k) {
+        const float ang = k_two_pi * static_cast<float>(k) / 3.0f;
+        const glm::vec3 wing =
+            back + (side0 * std::cos(ang) + side1 * std::sin(ang)) * spread;
+        light_debug_append_line(out, tip, wing, color);
+    }
+}
+
+void light_debug_spot_cone(std::vector<LightDebugLineVertex> &out,
+                           glm::vec3 apex, glm::vec3 emit_axis_unit, float range,
+                           float inner_half, float outer_half,
+                           glm::vec3 light_rgb) {
+    range = std::max(range, 1e-3f);
+    emit_axis_unit =
+        normalize_safe(emit_axis_unit, glm::vec3(0.0f, 0.0f, -1.0f));
+    float inner_a = std::min(inner_half, outer_half);
+    float outer_a = std::max(inner_half, outer_half);
+    outer_a = std::min(outer_a, kLightDebugMaxHalfAngleRad);
+    inner_a = std::min(inner_a, outer_a);
+    const glm::vec3 base_c = apex + emit_axis_unit * range;
+    const float r_out = range * std::tan(outer_a);
+    const float r_in = range * std::tan(inner_a);
+    const glm::vec4 col_out =
+        tint_axis_color({ 1.0f, 0.52f, 0.12f, 0.88f }, light_rgb);
+    const glm::vec4 col_in =
+        tint_axis_color({ 1.0f, 0.88f, 0.35f, 0.55f }, light_rgb);
+    const glm::vec3 ref = std::abs(emit_axis_unit.y) < 0.9f
+                              ? glm::vec3(0.0f, 1.0f, 0.0f)
+                              : glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 u = normalize_safe(glm::cross(ref, emit_axis_unit),
+                                 glm::vec3(1.0f, 0.0f, 0.0f));
+    const glm::vec3 v = glm::cross(emit_axis_unit, u);
+    constexpr float k_two_pi { 6.28318530718f };
+    const int n = kLightDebugCircleSegments;
+    for (int i = 0; i < n; ++i) {
+        const float a0 = k_two_pi * static_cast<float>(i) / static_cast<float>(n);
+        const float a1 =
+            k_two_pi * static_cast<float>(i + 1) / static_cast<float>(n);
+        for (int pass = 0; pass < 2; ++pass) {
+            const float rr = pass == 0 ? r_out : r_in;
+            const glm::vec4 cc = pass == 0 ? col_out : col_in;
+            if (rr < 1e-4f) {
+                continue;
+            }
+            const glm::vec3 p0 =
+                base_c + (u * std::cos(a0) + v * std::sin(a0)) * rr;
+            const glm::vec3 p1 =
+                base_c + (u * std::cos(a1) + v * std::sin(a1)) * rr;
+            light_debug_append_line(out, p0, p1, cc);
+        }
+    }
+    for (int k = 0; k < 4; ++k) {
+        const float ang = k_two_pi * static_cast<float>(k) / 4.0f;
+        const glm::vec3 p_base =
+            base_c + (u * std::cos(ang) + v * std::sin(ang)) * r_out;
+        light_debug_append_line(out, apex, p_base, col_out);
+    }
+}
+
+/// 仅为 @a selected 生成范围/方向线；非光源或未选中时清空 @a out
+void build_light_debug_vertices(const ::entt::registry &registry,
+                                ::entt::entity selected,
+                                std::vector<LightDebugLineVertex> &out) {
+    out.clear();
+    if (selected == ::entt::null || !registry.valid(selected) ||
+        !registry.all_of<lumen::scene::LightComponent>(selected)) {
+        return;
+    }
+    out.reserve(2048);
+    const auto &light = registry.get<lumen::scene::LightComponent>(selected);
+    const glm::mat4 world = lumen::scene::world_matrix(registry, selected);
+    const glm::vec3 wp = glm::vec3(world[3]);
+    const glm::mat3 lin = glm::mat3(world);
+    switch (light.type) {
+    case lumen::scene::LightType::Directional: {
+        const glm::vec3 surf_to_light = normalize_safe(
+            lin * light.local_direction, glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::vec3 emit_dir = -surf_to_light;
+        const glm::vec4 c =
+            tint_axis_color({ 1.0f, 0.92f, 0.28f, 0.92f }, light.color);
+        light_debug_arrow(out, wp, emit_dir, kLightDebugDirBeamLength, c);
+        break;
+    }
+    case lumen::scene::LightType::Point: {
+        const float R = std::max(light.range, 1e-2f);
+        const glm::vec4 c =
+            tint_axis_color({ 0.28f, 0.72f, 1.0f, 0.78f }, light.color);
+        light_debug_wire_sphere(out, wp, R, c);
+        break;
+    }
+    case lumen::scene::LightType::Spot: {
+        const glm::vec3 emit_axis =
+            normalize_safe(lin * light.local_direction,
+                           glm::vec3(0.0f, 0.0f, -1.0f));
+        const float range = std::max(light.range, 1e-2f);
+        light_debug_spot_cone(out, wp, emit_axis, range, light.inner_radians,
+                              light.outer_radians, light.color);
+        break;
+    }
     }
 }
 
@@ -403,6 +628,174 @@ static int run_demo3d() {
         return -1;
     }
 
+    // 光源图标：SkyLight / PointLight / SpotLight PNG，billboard + alpha 混合
+    std::string lightIconVertPath =
+        lumen::core::get_resource_path("shaders/light_icon.vert.spv");
+    std::string lightIconFragPath =
+        lumen::core::get_resource_path("shaders/light_icon.frag.spv");
+    lumen::render::ShaderModule lightIconVertShader;
+    lumen::render::ShaderModule lightIconFragShader;
+    const bool light_icon_shaders_ok =
+        lightIconVertShader.create_from_file(ctx.device(),
+                                             lightIconVertPath.c_str()) &&
+        lightIconFragShader.create_from_file(ctx.device(),
+                                             lightIconFragPath.c_str());
+
+    lumen::render::Texture tex_light_sky;
+    lumen::render::Texture tex_light_point;
+    lumen::render::Texture tex_light_spot;
+    const bool light_icon_textures_ok =
+        tex_light_sky.create_from_file(
+            ctx, lumen::core::get_resource_path("assets/icons/SkyLight.png")
+                     .c_str(),
+            ctx.graphics_queue(), cmdPool) &&
+        tex_light_point.create_from_file(
+            ctx, lumen::core::get_resource_path("assets/icons/PointLight.png")
+                     .c_str(),
+            ctx.graphics_queue(), cmdPool) &&
+        tex_light_spot.create_from_file(
+            ctx, lumen::core::get_resource_path("assets/icons/SpotLight.png")
+                     .c_str(),
+            ctx.graphics_queue(), cmdPool);
+
+    const BillboardVertex k_light_quad_verts[] = {
+        { { -1.0f, -1.0f }, { 0.0f, 1.0f } },
+        { { 1.0f, -1.0f }, { 1.0f, 1.0f } },
+        { { 1.0f, 1.0f }, { 1.0f, 0.0f } },
+        { { -1.0f, 1.0f }, { 0.0f, 0.0f } },
+    };
+    const uint32_t k_light_quad_indices[] = { 0u, 1u, 2u, 0u, 2u, 3u };
+    lumen::render::VertexBuffer light_icon_vertex_buffer;
+    lumen::render::IndexBuffer light_icon_index_buffer;
+    if (!light_icon_vertex_buffer.create(ctx, sizeof(k_light_quad_verts)) ||
+        !light_icon_index_buffer.create(ctx, sizeof(k_light_quad_indices))) {
+        return -1;
+    }
+    light_icon_vertex_buffer.upload(k_light_quad_verts, sizeof(k_light_quad_verts));
+    light_icon_index_buffer.set_index_type(
+        lumen::render::IndexBuffer::IndexType::Uint32);
+    light_icon_index_buffer.upload(k_light_quad_indices,
+                                   sizeof(k_light_quad_indices));
+
+    lumen::render::DescriptorSetLayout light_icon_desc_layout;
+    light_icon_desc_layout.create(
+        ctx, { { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                VK_SHADER_STAGE_FRAGMENT_BIT } });
+
+    lumen::render::PipelineLayout light_icon_pipeline_layout;
+    VkPushConstantRange light_icon_push {};
+    light_icon_push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    light_icon_push.offset = 0;
+    light_icon_push.size = sizeof(glm::mat4);
+    light_icon_pipeline_layout.create(ctx, { light_icon_desc_layout.handle() },
+                                      { light_icon_push });
+
+    lumen::render::DescriptorPool light_icon_desc_pool;
+    std::array<VkDescriptorSet, 3> light_icon_descriptor_sets {};
+    lumen::render::GraphicsPipeline light_icon_pipeline;
+    bool light_icons_ready = false;
+    if (light_icon_shaders_ok && light_icon_textures_ok) {
+        light_icon_desc_pool.create(
+            ctx, { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 } }, 3);
+        for (uint32_t i = 0; i < 3; ++i) {
+            light_icon_desc_pool.allocate(
+                ctx.device(), light_icon_desc_layout.handle(),
+                light_icon_descriptor_sets[i]);
+        }
+        lumen::render::write_descriptor_image(
+            ctx.device(), light_icon_descriptor_sets[0], 0, tex_light_sky.view(),
+            tex_light_sky.sampler());
+        lumen::render::write_descriptor_image(
+            ctx.device(), light_icon_descriptor_sets[1], 0,
+            tex_light_point.view(), tex_light_point.sampler());
+        lumen::render::write_descriptor_image(
+            ctx.device(), light_icon_descriptor_sets[2], 0, tex_light_spot.view(),
+            tex_light_spot.sampler());
+
+        lumen::render::GraphicsPipelineConfig light_icon_pipe {};
+        light_icon_pipe.stages.push_back(
+            { lightIconVertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+        light_icon_pipe.stages.push_back({ lightIconFragShader.handle(),
+                                           VK_SHADER_STAGE_FRAGMENT_BIT,
+                                           "main" });
+        light_icon_pipe.vertexBindings.push_back(
+            { 0, sizeof(BillboardVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        light_icon_pipe.vertexAttributes.push_back(
+            { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, pos) });
+        light_icon_pipe.vertexAttributes.push_back(
+            { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, uv) });
+        light_icon_pipe.depthTest = true;
+        light_icon_pipe.depthWrite = false;
+        light_icon_pipe.depthCompareOp = VK_COMPARE_OP_LESS;
+        light_icon_pipe.cullMode = VK_CULL_MODE_NONE;
+        light_icon_pipe.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        light_icon_pipe.alphaBlend = true;
+        light_icons_ready = light_icon_pipeline.create(
+            ctx, light_icon_pipeline_layout.handle(), sceneTarget.render_pass(), 0,
+            light_icon_pipe);
+    }
+    if (!light_icons_ready) {
+        LUMEN_APP_LOG_WARN(
+            "光源图标资源未就绪（着色器或 PNG），将跳过视口内光源可视化");
+    }
+
+    std::string light_dbg_vert_path =
+        lumen::core::get_resource_path("shaders/light_debug.vert.spv");
+    std::string light_dbg_frag_path =
+        lumen::core::get_resource_path("shaders/light_debug.frag.spv");
+    lumen::render::ShaderModule light_dbg_vert_shader;
+    lumen::render::ShaderModule light_dbg_frag_shader;
+    const bool light_debug_shaders_ok =
+        light_dbg_vert_shader.create_from_file(ctx.device(),
+                                               light_dbg_vert_path.c_str()) &&
+        light_dbg_frag_shader.create_from_file(ctx.device(),
+                                               light_dbg_frag_path.c_str());
+
+    lumen::render::PipelineLayout light_debug_pipeline_layout;
+    VkPushConstantRange light_dbg_push {};
+    light_dbg_push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    light_dbg_push.offset = 0;
+    light_dbg_push.size = sizeof(glm::mat4);
+    light_debug_pipeline_layout.create(ctx, {}, { light_dbg_push });
+
+    lumen::render::GraphicsPipelineConfig light_dbg_pipe {};
+    light_dbg_pipe.stages.push_back(
+        { light_dbg_vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    light_dbg_pipe.stages.push_back(
+        { light_dbg_frag_shader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    light_dbg_pipe.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    light_dbg_pipe.vertexBindings.push_back(
+        { 0, sizeof(LightDebugLineVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+    light_dbg_pipe.vertexAttributes.push_back(
+        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+          offsetof(LightDebugLineVertex, pos) });
+    light_dbg_pipe.vertexAttributes.push_back(
+        { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+          offsetof(LightDebugLineVertex, color) });
+    light_dbg_pipe.depthTest = true;
+    light_dbg_pipe.depthWrite = false;
+    light_dbg_pipe.depthCompareOp = VK_COMPARE_OP_LESS;
+    light_dbg_pipe.cullMode = VK_CULL_MODE_NONE;
+    light_dbg_pipe.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    light_dbg_pipe.alphaBlend = true;
+    lumen::render::GraphicsPipeline light_debug_pipeline;
+    const bool light_debug_ready =
+        light_debug_shaders_ok &&
+        light_debug_pipeline.create(ctx, light_debug_pipeline_layout.handle(),
+                                    sceneTarget.render_pass(), 0, light_dbg_pipe);
+    if (!light_debug_ready) {
+        LUMEN_APP_LOG_WARN(
+            "光源范围/方向调试线管线创建失败，将跳过范围与方向可视化");
+    }
+
+    std::array<lumen::render::VertexBuffer, kMaxFramesInFlight> light_debug_vbs;
+    for (uint32_t fi = 0; fi < kMaxFramesInFlight; ++fi) {
+        if (!light_debug_vbs[fi].create(ctx, kLightDebugVbMaxBytes)) {
+            LUMEN_APP_LOG_ERROR("光源调试顶点缓冲创建失败");
+            return -1;
+        }
+    }
+
     auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
     lumen::render::FrameSync frameSync;
     frameSync.create(ctx.device(), swapchain.image_count(), kMaxFramesInFlight);
@@ -433,6 +826,8 @@ static int run_demo3d() {
     glm::vec4 clearColor { 0.1f, 0.12f, 0.18f, 1.0f };
     glm::vec4 modelColor { 1.0f, 1.0f, 1.0f, 1.0f };
     bool show_viewport_debug { false };
+    bool show_light_debug_gizmo { true };
+    uint32_t light_debug_vertex_count { 0 };
 
     // ImGui 后端
     lumen::ui::ImGuiBackendInitInfo imguiInfo;
@@ -477,6 +872,18 @@ static int run_demo3d() {
             auto &tr = reg.get<lumen::scene::TransformComponent>(pe);
             tr.matrix =
                 glm::translate(glm::mat4(1.0f), glm::vec3(2.2f, 2.8f, 1.5f));
+        }
+        {
+            const ::entt::entity se = ecs_scene.create_entity("Spot Demo");
+            auto &L = reg.emplace<lumen::scene::LightComponent>(se);
+            L.type = lumen::scene::LightType::Spot;
+            L.color = glm::vec3(0.75f, 0.9f, 1.0f);
+            L.intensity = 3.0f;
+            L.range = 18.0f;
+            L.local_direction = glm::vec3(0.0f, -0.35f, -1.0f);
+            auto &tr = reg.get<lumen::scene::TransformComponent>(se);
+            tr.matrix =
+                glm::translate(glm::mat4(1.0f), glm::vec3(-2.5f, 3.2f, 2.0f));
         }
     }
     editor_selection.entity = ecs_model_entity;
@@ -583,6 +990,65 @@ static int run_demo3d() {
                 vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                                      indexBuffer.vk_index_type());
                 vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+
+                if (light_icons_ready) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      light_icon_pipeline.handle());
+                    VkBuffer lib_vb = light_icon_vertex_buffer.handle();
+                    VkDeviceSize lib_vb_off { 0 };
+                    vkCmdBindVertexBuffers(cmd, 0, 1, &lib_vb, &lib_vb_off);
+                    vkCmdBindIndexBuffer(cmd, light_icon_index_buffer.handle(), 0,
+                                         light_icon_index_buffer.vk_index_type());
+                    ::entt::registry &light_reg = ecs_scene.registry();
+                    for (const ::entt::entity le :
+                         light_reg.view<lumen::scene::LightComponent>()) {
+                        const auto &lc =
+                            light_reg.get<lumen::scene::LightComponent>(le);
+                        const glm::mat4 world =
+                            lumen::scene::world_matrix(light_reg, le);
+                        const glm::vec3 wp = glm::vec3(world[3]);
+                        const glm::mat4 mvp =
+                            light_icon_mvp(scene_view, scene_proj, wp,
+                                           kLightIconHalfExtent);
+                        std::uint32_t set_i = 0;
+                        switch (lc.type) {
+                        case lumen::scene::LightType::Directional:
+                            set_i = 0;
+                            break;
+                        case lumen::scene::LightType::Point:
+                            set_i = 1;
+                            break;
+                        case lumen::scene::LightType::Spot:
+                            set_i = 2;
+                            break;
+                        }
+                        VkDescriptorSet ds = light_icon_descriptor_sets[set_i];
+                        vkCmdBindDescriptorSets(
+                            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            light_icon_pipeline_layout.handle(), 0, 1, &ds, 0,
+                            nullptr);
+                        vkCmdPushConstants(cmd, light_icon_pipeline_layout.handle(),
+                                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                                           sizeof(glm::mat4),
+                                           glm::value_ptr(mvp));
+                        vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+                    }
+                }
+
+                if (light_debug_ready && show_light_debug_gizmo &&
+                    light_debug_vertex_count > 0) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      light_debug_pipeline.handle());
+                    const glm::mat4 vp = scene_proj * scene_view;
+                    vkCmdPushConstants(cmd, light_debug_pipeline_layout.handle(),
+                                       VK_SHADER_STAGE_VERTEX_BIT, 0,
+                                       sizeof(glm::mat4), glm::value_ptr(vp));
+                    VkBuffer ldb = light_debug_vbs[currentFrame].handle();
+                    VkDeviceSize ldb_off { 0 };
+                    vkCmdBindVertexBuffers(cmd, 0, 1, &ldb, &ldb_off);
+                    vkCmdDraw(cmd, light_debug_vertex_count, 1, 0, 0);
+                }
+
                 vkCmdEndRenderPass(cmd);
             },
     });
@@ -789,6 +1255,12 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
+                ImGui::Checkbox(
+                    "Light range / direction (selected light only)",
+                    &show_light_debug_gizmo);
+                ImGui::TextDisabled(
+                    "在 Hierarchy 选中带 Light 的实体后显示范围与方向线；"
+                    "其它光源仍显示图标。");
                 ImGui::Checkbox("Show viewport debug", &show_viewport_debug);
                 if (show_viewport_debug) {
                     const auto sceneMouseState =
@@ -883,6 +1355,9 @@ static int run_demo3d() {
 
     lumen::core::anchor_steady_epoch();
     lumen::core::FrameDeltaClock frame_dt;
+
+    std::vector<LightDebugLineVertex> light_debug_cpu;
+    light_debug_cpu.reserve(8192);
 
     while (running) {
         if (!pump.poll())
@@ -1115,8 +1590,9 @@ static int run_demo3d() {
         UBO ubo {};
         ubo.model = model_matrix;
         ubo.mvp = scene_proj * scene_view * model_matrix;
-        ubo.normalMatrix =
+        const glm::mat3 nm =
             glm::mat3(glm::transpose(glm::inverse(model_matrix)));
+        ubo.normalMatrix = glm::mat4(nm);
         ubo.cameraWorld = glm::vec4(cameraPos, 0.0f);
         std::uint32_t light_count = 0;
         lumen::scene::pack_lights_for_ubo(ecs_scene.registry(), ubo.lights,
@@ -1124,6 +1600,21 @@ static int run_demo3d() {
         ubo.sceneParams =
             glm::vec4(static_cast<float>(light_count), 0.0f, 0.0f, 0.0f);
         uniformBuffers[currentFrame].update(ubo);
+
+        light_debug_vertex_count = 0;
+        if (light_debug_ready && show_light_debug_gizmo) {
+            build_light_debug_vertices(ecs_scene.registry(),
+                                       editor_selection.entity, light_debug_cpu);
+            const size_t dbg_bytes =
+                light_debug_cpu.size() * sizeof(LightDebugLineVertex);
+            if (dbg_bytes > 0 &&
+                dbg_bytes <= light_debug_vbs[currentFrame].size()) {
+                light_debug_vbs[currentFrame].upload(light_debug_cpu.data(),
+                                                     dbg_bytes);
+                light_debug_vertex_count =
+                    static_cast<uint32_t>(light_debug_cpu.size());
+            }
+        }
 
         VkCommandBuffer cmd = cmdBuffers[currentFrame];
         vkResetCommandBuffer(cmd, 0);

@@ -21,7 +21,7 @@ struct GPULight {
 layout(set = 0, binding = 0) uniform UBO {
     mat4 model;
     mat4 mvp;
-    mat3 normalMatrix;
+    mat4 normalMatrix;
     vec4 cameraWorld;
     GPULight lights[8];
     vec4 sceneParams;

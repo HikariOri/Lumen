@@ -18,7 +18,7 @@ struct GPULight {
 layout(set = 0, binding = 0) uniform UBO {
     mat4 model;
     mat4 mvp;
-    mat3 normalMatrix;
+    mat4 normalMatrix;
     vec4 cameraWorld;
     GPULight lights[8];
     vec4 sceneParams;
@@ -29,5 +29,5 @@ void main() {
     fragWorldPos = world.xyz;
     gl_Position = ubo.mvp * vec4(inPosition, 1.0);
     fragUV = inUV;
-    fragNormal = ubo.normalMatrix * inNormal;
+    fragNormal = mat3(ubo.normalMatrix) * inNormal;
 }
