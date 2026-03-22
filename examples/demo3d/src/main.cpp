@@ -639,7 +639,9 @@ static int run_demo3d() {
     // 拖拽时启用相对鼠标模式（ImGui 未占用时）
     pump.on_mouse_button_down(
         [&](const lumen::platform::EventMouseButtonDown &e) {
-            if (lumen::ui::imgui_wants_mouse())
+            const auto sceneHover = lumen::ui::viewport_mouse_state(
+                sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
+            if (lumen::ui::imgui_wants_mouse() && !sceneHover.inViewport)
                 return;
             if (e.button == lumen::platform::MouseButton::Left ||
                 e.button == lumen::platform::MouseButton::Right) {
@@ -661,7 +663,9 @@ static int run_demo3d() {
         }
     });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
-        if (lumen::ui::imgui_wants_mouse())
+        const auto sceneHover = lumen::ui::viewport_mouse_state(
+            sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
+        if (lumen::ui::imgui_wants_mouse() && !sceneHover.inViewport)
             return;
         orbitRadius = glm::clamp(orbitRadius - e.deltaY * kZoomSpeed,
                                  kMinOrbitRadius, kMaxOrbitRadius);
@@ -806,8 +810,13 @@ static int run_demo3d() {
         }
 
         const auto &inp = pump.input();
-        const bool imguiWantsInput = lumen::ui::imgui_wants_any_input();
-        if (!imguiWantsInput) {
+        // 悬停在 Scene 的 Image 上时 ImGui 会 WantCaptureMouse，但仍应允许 3D 导航
+        const auto sceneNavMouse = lumen::ui::viewport_mouse_state(
+            sceneRect, inp.mouse_x(), inp.mouse_y());
+        const bool imguiBlocksKb = lumen::ui::imgui_wants_keyboard();
+        const bool imguiBlocksMouse =
+            lumen::ui::imgui_wants_mouse() && !sceneNavMouse.inViewport;
+        if (!imguiBlocksKb) {
             if (inp.is_key_down(lumen::platform::Key::A))
                 orbitYaw += kOrbitSpeed * dt;
             if (inp.is_key_down(lumen::platform::Key::D))
@@ -820,15 +829,15 @@ static int run_demo3d() {
                     glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
         }
 
-        // 左键拖拽旋转模型，右键拖拽旋转相机（ImGui 未占用时）
-        if (!imguiWantsInput &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
+        // 左键拖拽模型、右键拖拽相机（与启动日志一致；Scene Image 上仍允许导航）
+        if (!imguiBlocksMouse &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
             modelYaw -= inp.mouse_delta_x() * kMouseSensitivity;
             modelPitch += inp.mouse_delta_y() * kMouseSensitivity;
             modelPitch = glm::clamp(modelPitch, -1.5f, 1.5f);
         }
-        if (!imguiWantsInput &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+        if (!imguiBlocksMouse &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
             orbitYaw -= inp.mouse_delta_x() * kMouseSensitivity;
             orbitPitch =
                 glm::clamp(orbitPitch + inp.mouse_delta_y() * kMouseSensitivity,
