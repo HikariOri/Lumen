@@ -127,20 +127,22 @@ void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
     outY = mainVp.WorkPos.y + m;
 }
 
-/// 将 lookAt 视图矩阵还原为 Demo3D 轨道参数（目标为原点），供 ViewManipulate
-/// 之后同步
-void sync_orbit_from_scene_view(const glm::mat4 &view, float &orbitYaw,
+/// 将 lookAt 视图矩阵还原为轨道参数（枢轴为 orbit_target），供 ViewManipulate 之后同步
+void sync_orbit_from_scene_view(const glm::mat4 &view,
+                                const glm::vec3 &orbit_target, float &orbitYaw,
                                 float &orbitPitch, float &orbitRadius) {
     const glm::mat4 inv = glm::inverse(view);
     const glm::vec3 eye(inv[3]);
-    const float r = glm::length(eye);
+    const glm::vec3 v = eye - orbit_target;
+    const float r = glm::length(v);
     if (r < 1e-5f) {
         return;
     }
     orbitRadius = glm::clamp(r, kMinOrbitRadius, kMaxOrbitRadius);
-    orbitPitch = glm::asin(glm::clamp(eye.y / r, -1.0f, 1.0f));
+    const glm::vec3 d = v / orbitRadius;
+    orbitPitch = glm::asin(glm::clamp(d.y, -1.0f, 1.0f));
     orbitPitch = glm::clamp(orbitPitch, 0.1f, 1.4f);
-    orbitYaw = std::atan2(eye.x, eye.z);
+    orbitYaw = std::atan2(d.x, d.z);
 }
 
 /// 与 Unity Scene 视图一致：Q 视图、W 移动、E 旋转、R 缩放
@@ -414,6 +416,7 @@ static int run_demo3d() {
     float orbitYaw { 0.0f };
     float orbitPitch { 0.3f };
     float orbitRadius { 2.5f };
+    glm::vec3 orbit_target { 0.0f };
     glm::mat4 scene_view { 1.0f };
     glm::mat4 scene_proj { 1.0f };
     SceneGizmoTool scene_gizmo_tool { SceneGizmoTool::Rotate };
@@ -681,7 +684,7 @@ static int run_demo3d() {
                         ::entt::registry &reg = ecs_scene.registry();
                         const ::entt::entity ge = editor_selection.entity;
                         if (!reg.valid(ge) ||
-                            !reg.all_of<lumen::scene::Transform>(ge)) {
+                            !reg.all_of<lumen::scene::TransformComponent>(ge)) {
                             return;
                         }
                         glm::mat4 world = lumen::scene::world_matrix(reg, ge);
@@ -691,7 +694,7 @@ static int run_demo3d() {
                             gizmo_world_mode ? ImGuizmo::WORLD
                                              : ImGuizmo::LOCAL);
                         if (lumen::ui::imguizmo_is_using()) {
-                            auto &local = reg.get<lumen::scene::Transform>(ge);
+                            auto &local = reg.get<lumen::scene::TransformComponent>(ge);
                             if (const auto *p =
                                     reg.try_get<lumen::scene::ParentComponent>(
                                         ge);
@@ -735,6 +738,9 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
+                ImGui::TextDisabled(
+                    "Scene：Alt+左键 轨道 | Alt+中键 平移 | Alt+右键/滚轮 缩放 | "
+                    "右键+移动 环视，右键+WASD 平移、E/Q 升降");
                 ImGui::Text("Gizmo (Unity: Q/W/E/R)");
                 if (ImGui::RadioButton("View (Q)", scene_gizmo_tool ==
                                                        SceneGizmoTool::View)) {
@@ -789,8 +795,9 @@ static int run_demo3d() {
                             &scene_view, orbitRadius, cubeX, cubeY,
                             kViewCubeSize, kViewCubeSize,
                             IM_COL32(28, 28, 32, 200));
-                        sync_orbit_from_scene_view(scene_view, orbitYaw,
-                                                   orbitPitch, orbitRadius);
+                        sync_orbit_from_scene_view(scene_view, orbit_target,
+                                                   orbitYaw, orbitPitch,
+                                                   orbitRadius);
                     }
                 }
 
@@ -806,14 +813,22 @@ static int run_demo3d() {
         pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
     LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] 相机；模型：Hierarchy 选中 + "
-        "Inspector / Scene Gizmo（Q/W/E/R）"
-        " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+        "Demo3D 启动 Scene 相机（类 Unity）：Alt+左键轨道、Alt+中键平移、Alt+右键"
+        "或滚轮缩放；右键+移动环视，右键+WASD 平移枢轴、E/Q 升降。模型：Hierarchy + "
+        "Inspector / Gizmo（Q/W/E/R） [0]–[3] 渲染模式 [ESC] 退出");
 
-    constexpr float kMouseSensitivity { 0.007f };
+    constexpr float kAltOrbitSensitivity { 0.007f };
+    constexpr float kRmbLookSensitivity { 0.007f };
+    constexpr float kPanSensitivity { 0.004f };
+    constexpr float kAltRmbZoomSensitivity { 0.01f };
+    constexpr float kFlyMoveSpeed { 3.0f };
+    constexpr float kFlyMoveSpeedFast { 9.0f };
     constexpr float kZoomSpeed { 0.25f };
 
-    pump.on_quit([&] { running = false; });
+    pump.on_quit([&] {
+        running = false;
+        SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
+    });
     pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
         if (e.key == lumen::platform::Key::Escape) {
             running = false;
@@ -832,22 +847,6 @@ static int run_demo3d() {
         fbHeight = r.height;
         needRecreateSwapchain = true;
     });
-    // 仅右键拖拽相机时启用相对鼠标；左键留给 Scene 内 ImGui / Gizmo
-    pump.on_mouse_button_down(
-        [&](const lumen::platform::EventMouseButtonDown &e) {
-            const auto sceneHover = lumen::ui::viewport_mouse_state(
-                sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
-            if (lumen::ui::imgui_wants_mouse() && !sceneHover.inViewport)
-                return;
-            if (e.button == lumen::platform::MouseButton::Right) {
-                SDL_SetWindowRelativeMouseMode(window.sdl_window(), true);
-            }
-        });
-    pump.on_mouse_button_up([&](const lumen::platform::EventMouseButtonUp &e) {
-        if (e.button == lumen::platform::MouseButton::Right) {
-            SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
-        }
-    });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
         const auto sceneHover = lumen::ui::viewport_mouse_state(
             sceneRect, pump.input().mouse_x(), pump.input().mouse_y());
@@ -857,7 +856,6 @@ static int run_demo3d() {
                                  kMinOrbitRadius, kMaxOrbitRadius);
     });
 
-    constexpr float kOrbitSpeed = 1.2f;
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
     constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
 
@@ -921,12 +919,34 @@ static int run_demo3d() {
 
         lumen::ui::imgui_backend_new_frame();
 
-        // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询：poll() 里
-        // imgui_wants_keyboard() 在 Dock 焦点下几乎恒为 true，会挡掉
-        // on_key_down。
+        const auto &inp = pump.input();
+        const auto sceneNavMouse = lumen::ui::viewport_mouse_state(
+            sceneRect, inp.mouse_x(), inp.mouse_y());
+        if (scene_gizmo_tool == SceneGizmoTool::View) {
+            lumen::ui::imguizmo_reset_interaction_state();
+        }
+        const bool block_scene_nav_for_gizmo =
+            (scene_gizmo_tool != SceneGizmoTool::View) &&
+            (lumen::ui::imguizmo_is_using() ||
+             lumen::ui::imguizmo_is_over());
+        const bool cam_nav_ok =
+            sceneNavMouse.inViewport && !block_scene_nav_for_gizmo;
+        const bool scene_fly = cam_nav_ok &&
+                               inp.is_mouse_button_down(
+                                   lumen::platform::MouseButton::Right) &&
+                               !inp.has_alt();
+
+        static bool scene_relative_mouse { false };
+        if (scene_fly != scene_relative_mouse) {
+            SDL_SetWindowRelativeMouseMode(window.sdl_window(), scene_fly);
+            scene_relative_mouse = scene_fly;
+        }
+
+        // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询；右键飞行时 Q/E 用于升降，
+        // 与 Unity 一致不切换工具。
         {
             const ImGuiIO &io = ImGui::GetIO();
-            if (!io.WantTextInput) {
+            if (!io.WantTextInput && !scene_fly) {
                 if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
                     scene_gizmo_tool = SceneGizmoTool::View;
                 }
@@ -1017,38 +1037,87 @@ static int run_demo3d() {
             }
         }
 
-        const auto &inp = pump.input();
-        // 悬停在 Scene 的 Image 上时 ImGui 会 WantCaptureMouse，但仍应允许 3D
-        // 导航
-        const auto sceneNavMouse = lumen::ui::viewport_mouse_state(
-            sceneRect, inp.mouse_x(), inp.mouse_y());
-        const bool imguiBlocksKb = lumen::ui::imgui_wants_keyboard();
-        const bool imguiBlocksMouse =
+        const bool imgui_blocks_mouse =
             lumen::ui::imgui_wants_mouse() && !sceneNavMouse.inViewport;
-        if (scene_gizmo_tool == SceneGizmoTool::View) {
-            lumen::ui::imguizmo_reset_interaction_state();
-        }
-        if (!imguiBlocksKb) {
-            if (inp.is_key_down(lumen::platform::Key::A))
-                orbitYaw += kOrbitSpeed * dt;
-            if (inp.is_key_down(lumen::platform::Key::D))
-                orbitYaw -= kOrbitSpeed * dt;
-            // 俯仰用方向键，避免与 Unity 式 W（移动 Gizmo）冲突
-            if (inp.is_key_down(lumen::platform::Key::Up))
-                orbitPitch =
-                    glm::clamp(orbitPitch + kOrbitSpeed * dt, 0.1f, 1.4f);
-            if (inp.is_key_down(lumen::platform::Key::Down))
-                orbitPitch =
-                    glm::clamp(orbitPitch - kOrbitSpeed * dt, 0.1f, 1.4f);
+        const float mdx = inp.mouse_delta_x();
+        const float mdy = inp.mouse_delta_y();
+
+        if (cam_nav_ok && inp.has_alt() &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
+            orbitYaw -= mdx * kAltOrbitSensitivity;
+            orbitPitch =
+                glm::clamp(orbitPitch + mdy * kAltOrbitSensitivity, 0.1f,
+                           1.4f);
         }
 
-        // 模型变换仅由 Scene Gizmo 写入 model_matrix；鼠标仅右键拖拽轨道相机
-        if (!imguiBlocksMouse &&
+        if (cam_nav_ok && inp.has_alt() &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Middle)) {
+            const glm::vec3 orbit_off =
+                orbitRadius *
+                glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
+                          std::sin(orbitPitch),
+                          std::cos(orbitYaw) * std::cos(orbitPitch));
+            const glm::vec3 cam_pos = orbit_target + orbit_off;
+            glm::vec3 forward = glm::normalize(orbit_target - cam_pos);
+            const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
+            glm::vec3 right = glm::normalize(glm::cross(forward, world_up));
+            if (glm::length(right) < 1e-5f) {
+                right = glm::vec3(1.0f, 0.0f, 0.0f);
+            }
+            const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+            const float pan_scale = orbitRadius * kPanSensitivity;
+            orbit_target += (-mdx * pan_scale) * right + (mdy * pan_scale) * up;
+        }
+
+        if (cam_nav_ok && inp.has_alt() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
-            orbitYaw -= inp.mouse_delta_x() * kMouseSensitivity;
+            orbitRadius = glm::clamp(
+                orbitRadius * (1.0f + mdy * kAltRmbZoomSensitivity),
+                kMinOrbitRadius, kMaxOrbitRadius);
+        }
+
+        if (!imgui_blocks_mouse && scene_fly) {
+            orbitYaw -= mdx * kRmbLookSensitivity;
             orbitPitch =
-                glm::clamp(orbitPitch + inp.mouse_delta_y() * kMouseSensitivity,
-                           0.1f, 1.4f);
+                glm::clamp(orbitPitch + mdy * kRmbLookSensitivity, 0.1f,
+                           1.4f);
+
+            const glm::vec3 orbit_off =
+                orbitRadius *
+                glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
+                          std::sin(orbitPitch),
+                          std::cos(orbitYaw) * std::cos(orbitPitch));
+            const glm::vec3 cam_pos = orbit_target + orbit_off;
+            const glm::vec3 view_fwd =
+                glm::normalize(orbit_target - cam_pos);
+            glm::vec3 flat_fwd(view_fwd.x, 0.0f, view_fwd.z);
+            if (glm::length(flat_fwd) > 1e-5f) {
+                flat_fwd = glm::normalize(flat_fwd);
+            } else {
+                flat_fwd = glm::vec3(0.0f, 0.0f, -1.0f);
+            }
+            const glm::vec3 flat_right =
+                glm::normalize(glm::cross(flat_fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+            const float fly_step =
+                (inp.has_shift() ? kFlyMoveSpeedFast : kFlyMoveSpeed) * dt;
+            if (inp.is_key_down(lumen::platform::Key::W)) {
+                orbit_target += flat_fwd * fly_step;
+            }
+            if (inp.is_key_down(lumen::platform::Key::S)) {
+                orbit_target -= flat_fwd * fly_step;
+            }
+            if (inp.is_key_down(lumen::platform::Key::A)) {
+                orbit_target -= flat_right * fly_step;
+            }
+            if (inp.is_key_down(lumen::platform::Key::D)) {
+                orbit_target += flat_right * fly_step;
+            }
+            if (inp.is_key_down(lumen::platform::Key::E)) {
+                orbit_target += glm::vec3(0.0f, 1.0f, 0.0f) * fly_step;
+            }
+            if (inp.is_key_down(lumen::platform::Key::Q)) {
+                orbit_target -= glm::vec3(0.0f, 1.0f, 0.0f) * fly_step;
+            }
         }
 
         uint32_t imageIndex = swapchain.acquire_next_image(
@@ -1058,11 +1127,12 @@ static int run_demo3d() {
             continue;
 
         // MVP 矩阵（与 Scene 视口 Gizmo 共用 view / proj）
-        glm::vec3 cameraPos =
+        const glm::vec3 camera_offset =
             orbitRadius * glm::vec3(std::sin(orbitYaw) * std::cos(orbitPitch),
                                     std::sin(orbitPitch),
                                     std::cos(orbitYaw) * std::cos(orbitPitch));
-        scene_view = glm::lookAt(cameraPos, glm::vec3(0.0f),
+        const glm::vec3 cameraPos = orbit_target + camera_offset;
+        scene_view = glm::lookAt(cameraPos, orbit_target,
                                  glm::vec3(0.0f, 1.0f, 0.0f));
         const VkExtent2D sceneExtentForProj = sceneTarget.extent();
         scene_proj =

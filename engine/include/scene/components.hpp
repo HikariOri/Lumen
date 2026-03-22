@@ -39,7 +39,7 @@ struct NameComponent {
 };
 
 /// 相对父节点的变换矩阵（列主序，与 glm / Vulkan 一致）；无父时即为世界矩阵
-struct Transform {
+struct TransformComponent {
     glm::mat4 matrix { 1.0f };
 };
 

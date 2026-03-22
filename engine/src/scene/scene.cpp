@@ -58,7 +58,7 @@ std::uint32_t Scene::allocate_object_id_() {
     } else {
         reg_.emplace<ObjectId>(e);
     }
-    reg_.emplace<Transform>(e);
+    reg_.emplace<TransformComponent>(e);
     reg_.emplace<NameComponent>(e, std::string(name));
     return e;
 }

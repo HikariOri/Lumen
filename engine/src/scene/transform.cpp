@@ -17,7 +17,7 @@ glm::mat4 world_matrix(const ::entt::registry &registry, ::entt::entity entity,
     }
 
     glm::mat4 local { 1.0f };
-    if (const auto *tr = registry.try_get<Transform>(entity)) {
+    if (const auto *tr = registry.try_get<TransformComponent>(entity)) {
         local = tr->matrix;
     }
 

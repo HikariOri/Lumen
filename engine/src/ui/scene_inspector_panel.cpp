@@ -99,7 +99,7 @@ void SceneInspectorPanel::on_imgui_render() {
         }
     }
 
-    if (auto *tr = reg.try_get<lumen::scene::Transform>(e)) {
+    if (auto *tr = reg.try_get<lumen::scene::TransformComponent>(e)) {
         ImGui::Separator();
         ImGui::TextUnformatted("Transform (local)");
         float pos[3];

@@ -46,7 +46,8 @@ public:
     [[nodiscard]] ::entt::entity primary_drawable() const;
 
     /**
-     * @brief 读取 `ObjectId::id`，供渲染/Pick Pass 写入 GPU（无效实体或无组件返回 kInvalid）
+     * @brief 读取 `ObjectId::id`，供渲染/Pick Pass 写入
+     * GPU（无效实体或无组件返回 kInvalid）
      */
     [[nodiscard]] std::uint32_t object_id_for(::entt::entity entity) const;
 
