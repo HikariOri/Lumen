@@ -4,6 +4,8 @@
 
 本文约定：**在 ChatGPT（或其它对话式大模型）侧产出结构化需求/设计说明**，再在 **Cursor** 中按任务拆解实现与审查。适用于本仓库这类 **C++23 + Vulkan 1.4 + SDL3** 引擎与工具开发。
 
+若**不经过 GPT**、从需求到提交都在 Cursor 内完成，见 [Cursor 内从设计到交付：全流程指南](cursor-end-to-end-workflow.md)（规格落盘、拆单、构建与验收与本文可衔接）。
+
 ---
 
 ## 1. 为什么要分两段
@@ -220,6 +222,7 @@ flowchart LR
 | [快速参考](../guides/quick-reference.md) | 常用 API 与可执行目标 |
 | [项目注意事项](../guides/project-notes.md) | 工程注意事项 |
 | [Git 提交规范](../guides/git-commit-convention.md) | 提交格式 |
+| [Cursor 全流程](cursor-end-to-end-workflow.md) | 不经过 GPT 时，从设计到提交 |
 
 ---
 

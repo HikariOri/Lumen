@@ -36,4 +36,5 @@
 - [日志系统](../reference/logging.md) — spdlog 封装与宏
 - [Git 提交规范](git-commit-convention.md) — Conventional Commits
 - [AI 协作开发](ai-assisted-workflow.md) — ChatGPT 规格 → Cursor 实现
+- [Cursor 全流程](cursor-end-to-end-workflow.md) — 设计 → 实现 → 验证（不依赖 GPT）
 - [SDL3 时间 API](../reference/sdl3-time.md) — 与 `get_time_seconds()` 对照

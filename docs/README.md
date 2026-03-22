@@ -25,6 +25,7 @@
 | [project-notes.md](guides/project-notes.md) | 工程注意事项 |
 | [git-commit-convention.md](guides/git-commit-convention.md) | Conventional Commits |
 | [ai-assisted-workflow.md](guides/ai-assisted-workflow.md) | ChatGPT 出规格 → Cursor 落地 |
+| [cursor-end-to-end-workflow.md](guides/cursor-end-to-end-workflow.md) | 全程在 Cursor：设计 → 实现 → 验证 → 提交 |
 | [chinese-typography.md](guides/chinese-typography.md) | 中文文案排版指北 |
 
 ## reference

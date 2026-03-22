@@ -88,3 +88,4 @@ cmake --build build --config Release
 - [渲染引擎规划](docs/design/render-engine-roadmap.md)
 - [Git 提交规范](docs/guides/git-commit-convention.md)
 - [AI 协作开发（对话模型 → Cursor）](docs/guides/ai-assisted-workflow.md)
+- [Cursor 内全流程（设计 → 交付）](docs/guides/cursor-end-to-end-workflow.md)
