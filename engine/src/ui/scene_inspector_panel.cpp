@@ -81,21 +81,47 @@ void SceneInspectorPanel::on_imgui_render() {
         ImGui::TextUnformatted("Parent: (none)");
     }
 
-    if (auto *dir = reg.try_get<lumen::scene::DirectionalLightComponent>(e)) {
+    if (auto *light = reg.try_get<lumen::scene::LightComponent>(e)) {
         ImGui::Separator();
-        ImGui::TextUnformatted("Directional light");
-        ImGui::DragFloat3("To-light (local)", glm::value_ptr(dir->direction),
-                          0.01f, 0.0f, 0.0f, "%.3f");
-        ImGui::DragFloat("Intensity", &dir->intensity, 0.02f, 0.0f, 32.0f,
+        ImGui::TextUnformatted("Light");
+        int type_i = static_cast<int>(light->type);
+        if (ImGui::Combo("Type", &type_i,
+                          "Directional\0Point\0Spot\0\0")) {
+            light->type = static_cast<lumen::scene::LightType>(type_i);
+        }
+        ImGui::ColorEdit3("Color", glm::value_ptr(light->color));
+        ImGui::DragFloat("Intensity", &light->intensity, 0.02f, 0.0f, 64.0f,
                          "%.2f");
-        ImGui::TextDisabled(
-            "Direction is in local space; world uses entity Transform.");
-        if (ImGui::Button("Remove directional light")) {
-            reg.remove<lumen::scene::DirectionalLightComponent>(e);
+        if (light->type == lumen::scene::LightType::Directional ||
+            light->type == lumen::scene::LightType::Spot) {
+            ImGui::DragFloat3("Local direction", glm::value_ptr(light->local_direction),
+                              0.01f, 0.0f, 0.0f, "%.3f");
+            ImGui::TextDisabled(
+                "Directional: surface → light. Spot: cone axis (local).");
+        }
+        if (light->type == lumen::scene::LightType::Point ||
+            light->type == lumen::scene::LightType::Spot) {
+            ImGui::DragFloat("Range", &light->range, 0.05f, 0.01f, 256.0f,
+                             "%.2f");
+        }
+        if (light->type == lumen::scene::LightType::Spot) {
+            float inner_deg = light->inner_radians * 57.2957795f;
+            float outer_deg = light->outer_radians * 57.2957795f;
+            if (ImGui::DragFloat("Inner cone (deg)", &inner_deg, 0.25f, 0.1f,
+                                 89.0f, "%.1f")) {
+                light->inner_radians = inner_deg * 0.0174532925f;
+            }
+            if (ImGui::DragFloat("Outer cone (deg)", &outer_deg, 0.25f, 0.2f,
+                                 90.0f, "%.1f")) {
+                light->outer_radians = outer_deg * 0.0174532925f;
+            }
+        }
+        if (ImGui::Button("Remove light")) {
+            reg.remove<lumen::scene::LightComponent>(e);
         }
     } else {
-        if (ImGui::Button("Add directional light")) {
-            reg.emplace<lumen::scene::DirectionalLightComponent>(e);
+        if (ImGui::Button("Add light")) {
+            reg.emplace<lumen::scene::LightComponent>(e);
         }
     }
 

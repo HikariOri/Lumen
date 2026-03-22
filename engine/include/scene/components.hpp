@@ -52,15 +52,34 @@ struct ParentComponent {
 struct DrawableTag {};
 
 /**
- * @brief 定向光（与 demo3d `cube.frag` 中 `vec4 lightN` 约定一致）
- *
- * - `direction`：**局部空间**下从表面指向光源的向量（与原先手写 UBO 的 xyz 语义相同）；
- *   提交 GPU 时用实体 **世界矩阵的线性部分** 变换到世界空间（见 `pack_directional_lights_for_ubo`）。
- * - `intensity`：对应 shader 中 `lightN.w`，与 `dot(n, normalize(xyz))` 相乘。
+ * @brief 光源类型（与 GPU `GPULight.position.w` 编码一致：0/1/2）
  */
-struct DirectionalLightComponent {
-    glm::vec3 direction { 0.0f, 0.5f, -1.0f };
+enum class LightType : std::uint8_t {
+    Directional = 0,
+    Point = 1,
+    Spot = 2,
+};
+
+/**
+ * @brief 统一光源组件（对应设计文档中的 `LightComponent` + 各子类型字段）
+ *
+ * 按 `type` 解释字段：
+ * - **方向光**：`local_direction`（局部空间，**表面 → 光源**）、`color`、`intensity`；`Transform` 仅旋转影响方向。
+ * - **点光**：`Transform` 平移为世界位置，`range` 为影响距离；`color`、`intensity`。
+ * - **聚光**：`Transform` 为世界位置，`local_direction` 为锥轴（光发射方向，局部空间），`range`、`inner_radians` /
+ *   `outer_radians`（相对锥轴的半角，弧度，内 ≤ 外）；`color`、`intensity`。
+ *
+ * 点光衰减系数暂由 shader 固定；若需 per-light 衰减，可后续扩展本结构。
+ */
+struct LightComponent {
+    LightType type { LightType::Directional };
+    std::uint8_t _pad[3] {};
+    glm::vec3 color { 1.0f, 1.0f, 1.0f };
     float intensity { 1.0f };
+    glm::vec3 local_direction { 0.0f, 0.5f, -1.0f };
+    float range { 10.0f };
+    float inner_radians { 0.35f };
+    float outer_radians { 0.61f };
 };
 
 } // namespace scene

@@ -25,7 +25,7 @@
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
 #include "scene/components.hpp"
-#include "scene/directional_light.hpp"
+#include "scene/light.hpp"
 #include "scene/scene.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
@@ -57,14 +57,14 @@
 
 using Vertex = lumen::core::ObjVertex;
 
-/// UBO：mat4 mvp + mat3 normalMatrix + 4 光源 (std140 对齐)
+/// UBO：model / mvp / normal / 相机 / 光源数组（与 `cube.vert`/`cube.frag` 一致，std140）
 struct UBO {
+    glm::mat4 model;
     glm::mat4 mvp;
     glm::mat3 normalMatrix;
-    glm::vec4 light0; // xyz=方向 w=强度
-    glm::vec4 light1;
-    glm::vec4 light2;
-    glm::vec4 light3;
+    glm::vec4 cameraWorld;
+    lumen::scene::GPULight lights[lumen::scene::kMaxLightsUbo];
+    glm::vec4 sceneParams;
 };
 
 /// Push Constants：mode + modelColor
@@ -127,7 +127,8 @@ void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
     outY = mainVp.WorkPos.y + m;
 }
 
-/// 将 lookAt 视图矩阵还原为轨道参数（枢轴为 orbit_target），供 ViewManipulate 之后同步
+/// 将 lookAt 视图矩阵还原为轨道参数（枢轴为 orbit_target），供 ViewManipulate
+/// 之后同步
 void sync_orbit_from_scene_view(const glm::mat4 &view,
                                 const glm::vec3 &orbit_target, float &orbitYaw,
                                 float &orbitPitch, float &orbitRadius) {
@@ -463,14 +464,26 @@ static int run_demo3d() {
         auto &reg = ecs_scene.registry();
         auto add_dir = [&](const char *name, glm::vec3 dir, float intensity) {
             const ::entt::entity le = ecs_scene.create_entity(name);
-            auto &L = reg.emplace<lumen::scene::DirectionalLightComponent>(le);
-            L.direction = dir;
+            auto &L = reg.emplace<lumen::scene::LightComponent>(le);
+            L.type = lumen::scene::LightType::Directional;
+            L.local_direction = dir;
             L.intensity = intensity;
+            L.color = glm::vec3(1.0f);
         };
         add_dir("Dir Key", { 0.0f, 0.5f, -1.0f }, 1.2f);
         add_dir("Dir Fill", { -0.6f, 0.5f, -0.6f }, 0.7f);
         add_dir("Dir Rim", { 0.5f, 0.3f, -0.8f }, 0.6f);
         add_dir("Dir Bounce", { 0.0f, -0.5f, -0.9f }, 0.5f);
+        {
+            const ::entt::entity pe = ecs_scene.create_entity("Point Warm");
+            auto &L = reg.emplace<lumen::scene::LightComponent>(pe);
+            L.type = lumen::scene::LightType::Point;
+            L.color = glm::vec3(1.0f, 0.92f, 0.82f);
+            L.intensity = 2.2f;
+            L.range = 14.0f;
+            auto &tr = reg.get<lumen::scene::TransformComponent>(pe);
+            tr.matrix = glm::translate(glm::mat4(1.0f), glm::vec3(2.2f, 2.8f, 1.5f));
+        }
     }
     editor_selection.entity = ecs_model_entity;
 
@@ -694,7 +707,8 @@ static int run_demo3d() {
                             gizmo_world_mode ? ImGuizmo::WORLD
                                              : ImGuizmo::LOCAL);
                         if (lumen::ui::imguizmo_is_using()) {
-                            auto &local = reg.get<lumen::scene::TransformComponent>(ge);
+                            auto &local =
+                                reg.get<lumen::scene::TransformComponent>(ge);
                             if (const auto *p =
                                     reg.try_get<lumen::scene::ParentComponent>(
                                         ge);
@@ -738,9 +752,9 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
-                ImGui::TextDisabled(
-                    "Scene：Alt+左键 轨道 | Alt+中键 平移 | Alt+右键/滚轮 缩放 | "
-                    "右键+移动 环视，右键+WASD 平移、E/Q 升降");
+                ImGui::TextDisabled("Scene：Alt+左键 轨道 | Alt+中键 平移 | "
+                                    "Alt+右键/滚轮 缩放 | "
+                                    "右键+移动 环视，右键+WASD 平移、E/Q 升降");
                 ImGui::Text("Gizmo (Unity: Q/W/E/R)");
                 if (ImGui::RadioButton("View (Q)", scene_gizmo_tool ==
                                                        SceneGizmoTool::View)) {
@@ -813,8 +827,10 @@ static int run_demo3d() {
         pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
     LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 Scene 相机（类 Unity）：Alt+左键轨道、Alt+中键平移、Alt+右键"
-        "或滚轮缩放；右键+移动环视，右键+WASD 平移枢轴、E/Q 升降。模型：Hierarchy + "
+        "Demo3D 启动 Scene 相机（类 "
+        "Unity）：Alt+左键轨道、Alt+中键平移、Alt+右键"
+        "或滚轮缩放；右键+移动环视，右键+WASD 平移枢轴、E/Q "
+        "升降。模型：Hierarchy + "
         "Inspector / Gizmo（Q/W/E/R） [0]–[3] 渲染模式 [ESC] 退出");
 
     constexpr float kAltOrbitSensitivity { 0.007f };
@@ -927,14 +943,13 @@ static int run_demo3d() {
         }
         const bool block_scene_nav_for_gizmo =
             (scene_gizmo_tool != SceneGizmoTool::View) &&
-            (lumen::ui::imguizmo_is_using() ||
-             lumen::ui::imguizmo_is_over());
+            (lumen::ui::imguizmo_is_using() || lumen::ui::imguizmo_is_over());
         const bool cam_nav_ok =
             sceneNavMouse.inViewport && !block_scene_nav_for_gizmo;
-        const bool scene_fly = cam_nav_ok &&
-                               inp.is_mouse_button_down(
-                                   lumen::platform::MouseButton::Right) &&
-                               !inp.has_alt();
+        const bool scene_fly =
+            cam_nav_ok &&
+            inp.is_mouse_button_down(lumen::platform::MouseButton::Right) &&
+            !inp.has_alt();
 
         static bool scene_relative_mouse { false };
         if (scene_fly != scene_relative_mouse) {
@@ -942,8 +957,8 @@ static int run_demo3d() {
             scene_relative_mouse = scene_fly;
         }
 
-        // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询；右键飞行时 Q/E 用于升降，
-        // 与 Unity 一致不切换工具。
+        // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询；右键飞行时 Q/E
+        // 用于升降， 与 Unity 一致不切换工具。
         {
             const ImGuiIO &io = ImGui::GetIO();
             if (!io.WantTextInput && !scene_fly) {
@@ -1046,8 +1061,7 @@ static int run_demo3d() {
             inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
             orbitYaw -= mdx * kAltOrbitSensitivity;
             orbitPitch =
-                glm::clamp(orbitPitch + mdy * kAltOrbitSensitivity, 0.1f,
-                           1.4f);
+                glm::clamp(orbitPitch + mdy * kAltOrbitSensitivity, 0.1f, 1.4f);
         }
 
         if (cam_nav_ok && inp.has_alt() &&
@@ -1071,16 +1085,15 @@ static int run_demo3d() {
 
         if (cam_nav_ok && inp.has_alt() &&
             inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
-            orbitRadius = glm::clamp(
-                orbitRadius * (1.0f + mdy * kAltRmbZoomSensitivity),
-                kMinOrbitRadius, kMaxOrbitRadius);
+            orbitRadius =
+                glm::clamp(orbitRadius * (1.0f + mdy * kAltRmbZoomSensitivity),
+                           kMinOrbitRadius, kMaxOrbitRadius);
         }
 
         if (!imgui_blocks_mouse && scene_fly) {
             orbitYaw -= mdx * kRmbLookSensitivity;
             orbitPitch =
-                glm::clamp(orbitPitch + mdy * kRmbLookSensitivity, 0.1f,
-                           1.4f);
+                glm::clamp(orbitPitch + mdy * kRmbLookSensitivity, 0.1f, 1.4f);
 
             const glm::vec3 orbit_off =
                 orbitRadius *
@@ -1088,16 +1101,15 @@ static int run_demo3d() {
                           std::sin(orbitPitch),
                           std::cos(orbitYaw) * std::cos(orbitPitch));
             const glm::vec3 cam_pos = orbit_target + orbit_off;
-            const glm::vec3 view_fwd =
-                glm::normalize(orbit_target - cam_pos);
+            const glm::vec3 view_fwd = glm::normalize(orbit_target - cam_pos);
             glm::vec3 flat_fwd(view_fwd.x, 0.0f, view_fwd.z);
             if (glm::length(flat_fwd) > 1e-5f) {
                 flat_fwd = glm::normalize(flat_fwd);
             } else {
                 flat_fwd = glm::vec3(0.0f, 0.0f, -1.0f);
             }
-            const glm::vec3 flat_right =
-                glm::normalize(glm::cross(flat_fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+            const glm::vec3 flat_right = glm::normalize(
+                glm::cross(flat_fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
             const float fly_step =
                 (inp.has_shift() ? kFlyMoveSpeedFast : kFlyMoveSpeed) * dt;
             if (inp.is_key_down(lumen::platform::Key::W)) {
@@ -1132,8 +1144,8 @@ static int run_demo3d() {
                                     std::sin(orbitPitch),
                                     std::cos(orbitYaw) * std::cos(orbitPitch));
         const glm::vec3 cameraPos = orbit_target + camera_offset;
-        scene_view = glm::lookAt(cameraPos, orbit_target,
-                                 glm::vec3(0.0f, 1.0f, 0.0f));
+        scene_view =
+            glm::lookAt(cameraPos, orbit_target, glm::vec3(0.0f, 1.0f, 0.0f));
         const VkExtent2D sceneExtentForProj = sceneTarget.extent();
         scene_proj =
             glm::perspective(glm::radians(42.0f),
@@ -1149,16 +1161,16 @@ static int run_demo3d() {
                 lumen::scene::world_matrix(ecs_scene.registry(), drawable);
         }
         UBO ubo {};
+        ubo.model = model_matrix;
         ubo.mvp = scene_proj * scene_view * model_matrix;
         ubo.normalMatrix =
             glm::mat3(glm::transpose(glm::inverse(model_matrix)));
-        glm::vec4 packed_lights[4];
-        lumen::scene::pack_directional_lights_for_ubo(ecs_scene.registry(),
-                                                      packed_lights);
-        ubo.light0 = packed_lights[0];
-        ubo.light1 = packed_lights[1];
-        ubo.light2 = packed_lights[2];
-        ubo.light3 = packed_lights[3];
+        ubo.cameraWorld = glm::vec4(cameraPos, 0.0f);
+        std::uint32_t light_count = 0;
+        lumen::scene::pack_lights_for_ubo(ecs_scene.registry(), ubo.lights,
+                                          light_count);
+        ubo.sceneParams =
+            glm::vec4(static_cast<float>(light_count), 0.0f, 0.0f, 0.0f);
         uniformBuffers[currentFrame].update(ubo);
 
         VkCommandBuffer cmd = cmdBuffers[currentFrame];
