@@ -27,8 +27,8 @@
 #include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
-#include "ui/log_panel.hpp"
 #include "ui/input_bridge.hpp"
+#include "ui/log_panel.hpp"
 #include "ui/texture_view_panel.hpp"
 
 #include <algorithm>
@@ -40,11 +40,11 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
-#include <imgui.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <imgui.h>
 
 using Vertex = lumen::core::ObjVertex;
 
@@ -67,8 +67,10 @@ struct PushConstants {
 
 namespace {
 
+
+
 constexpr uint32_t kMaxFramesInFlight { 2 };
-constexpr const char *kObjPath { "assets/meshes/monkey/monkey.obj" };
+constexpr const char *kObjPath { "assets/model/Mythra (Pyra Costume)_1.00/Mythra (Pyra Costume)_1.00.obj" };
 constexpr float kMinOrbitRadius { 0.8f };
 constexpr float kMaxOrbitRadius { 20.0f };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
@@ -116,7 +118,8 @@ void place_view_cube_top_right(const lumen::ui::TextureViewRect &sceneRect,
     outY = mainVp.WorkPos.y + m;
 }
 
-/// 将 lookAt 视图矩阵还原为 Demo3D 轨道参数（目标为原点），供 ViewManipulate 之后同步
+/// 将 lookAt 视图矩阵还原为 Demo3D 轨道参数（目标为原点），供 ViewManipulate
+/// 之后同步
 void sync_orbit_from_scene_view(const glm::mat4 &view, float &orbitYaw,
                                 float &orbitPitch, float &orbitRadius) {
     const glm::mat4 inv = glm::inverse(view);
@@ -141,15 +144,11 @@ enum class SceneGizmoTool : std::uint8_t {
 
 ImGuizmo::OPERATION scene_gizmo_to_operation(SceneGizmoTool t) {
     switch (t) {
-    case SceneGizmoTool::Move:
-        return ImGuizmo::TRANSLATE;
-    case SceneGizmoTool::Rotate:
-        return ImGuizmo::ROTATE;
-    case SceneGizmoTool::Scale:
-        return ImGuizmo::SCALE;
+    case SceneGizmoTool::Move: return ImGuizmo::TRANSLATE;
+    case SceneGizmoTool::Rotate: return ImGuizmo::ROTATE;
+    case SceneGizmoTool::Scale: return ImGuizmo::SCALE;
     case SceneGizmoTool::View:
-    default:
-        return ImGuizmo::TRANSLATE;
+    default: return ImGuizmo::TRANSLATE;
     }
 }
 
@@ -228,8 +227,7 @@ static int run_demo3d() {
     auxConfig.height = kAuxViewportH;
     auxConfig.format = swapchain.image_format();
     auxConfig.useDepth = true;
-    auxConfig.colorFinalLayout =
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    auxConfig.colorFinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     lumen::render::OffscreenRenderTarget wireframeTarget;
     lumen::render::OffscreenRenderTarget normalTarget;
     lumen::render::OffscreenRenderTarget depthTarget;
@@ -419,7 +417,8 @@ static int run_demo3d() {
     float dt { 0.016f };
     uint32_t nextSceneW { 0 };
     uint32_t nextSceneH { 0 };
-    lumen::ui::TextureViewRect sceneRect {}; // Scene Image 屏幕坐标，供射线拾取等使用
+    lumen::ui::TextureViewRect
+        sceneRect {}; // Scene Image 屏幕坐标，供射线拾取等使用
     uint32_t nextWireframeW { 0 };
     uint32_t nextWireframeH { 0 };
     uint32_t nextNormalW { 0 };
@@ -436,10 +435,10 @@ static int run_demo3d() {
     imguiInfo.swapchain = &swapchain;
     imguiInfo.renderPass = renderPass.handle();
     imguiInfo.window = window.sdl_window();
-// #ifdef _WIN32
+    // #ifdef _WIN32
     // 默认内置字体无 CJK；微软雅黑覆盖常用简体 UI 文案
     // imguiInfo.cjk_font_ttf_path = "C:/Windows/Fonts/msyh.ttc";
-// #endif
+    // #endif
     if (!lumen::ui::imgui_backend_init(imguiInfo)) {
         LUMEN_APP_LOG_ERROR("ImGui 初始化失败");
         return -1;
@@ -472,23 +471,19 @@ static int run_demo3d() {
     lumen::render::RGImage rgDepth =
         lumen::render::RGImage::from_texture(sceneTarget.depth_image(), true);
     lumen::render::RGImage rgWireframeColor =
-        lumen::render::RGImage::from_texture(
-            wireframeTarget.color_image(), false);
+        lumen::render::RGImage::from_texture(wireframeTarget.color_image(),
+                                             false);
     lumen::render::RGImage rgWireframeDepth =
-        lumen::render::RGImage::from_texture(
-            wireframeTarget.depth_image(), true);
+        lumen::render::RGImage::from_texture(wireframeTarget.depth_image(),
+                                             true);
     lumen::render::RGImage rgNormalColor =
-        lumen::render::RGImage::from_texture(
-            normalTarget.color_image(), false);
+        lumen::render::RGImage::from_texture(normalTarget.color_image(), false);
     lumen::render::RGImage rgNormalDepth =
-        lumen::render::RGImage::from_texture(
-            normalTarget.depth_image(), true);
+        lumen::render::RGImage::from_texture(normalTarget.depth_image(), true);
     lumen::render::RGImage rgDepthColor =
-        lumen::render::RGImage::from_texture(
-            depthTarget.color_image(), false);
+        lumen::render::RGImage::from_texture(depthTarget.color_image(), false);
     lumen::render::RGImage rgDepthDepth =
-        lumen::render::RGImage::from_texture(
-            depthTarget.depth_image(), true);
+        lumen::render::RGImage::from_texture(depthTarget.depth_image(), true);
     lumen::render::RGImage rgSwapchain =
         lumen::render::RGImage::from_swapchain(swapchain);
 
@@ -548,17 +543,17 @@ static int run_demo3d() {
             },
     });
 
-    auto addAuxPass = [&](const char* name, lumen::render::RGImage* outColor,
-                         lumen::render::RGImage* outDepth,
-                         lumen::render::OffscreenRenderTarget& target,
-                         VkPipeline pipelineHandle, uint32_t mode) {
+    auto addAuxPass = [&](const char *name, lumen::render::RGImage *outColor,
+                          lumen::render::RGImage *outDepth,
+                          lumen::render::OffscreenRenderTarget &target,
+                          VkPipeline pipelineHandle, uint32_t mode) {
         renderGraph.add_pass(lumen::render::RGPass {
             .name = name,
             .reads = {},
             .writes = { outColor, outDepth },
             .execute =
-                [&, pipelineHandle, mode](
-                    VkCommandBuffer cmd, uint32_t /*swapchainImageIndex*/) {
+                [&, pipelineHandle, mode](VkCommandBuffer cmd,
+                                          uint32_t /*swapchainImageIndex*/) {
                     const VkExtent2D ext = target.extent();
                     if (ext.width == 0 || ext.height == 0)
                         return;
@@ -592,9 +587,9 @@ static int run_demo3d() {
                                        VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                        sizeof(PushConstants), &pc);
                     VkDescriptorSet ds = descriptorSets[currentFrame];
-                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                            pipelineLayout.handle(), 0, 1, &ds,
-                                            0, nullptr);
+                    vkCmdBindDescriptorSets(
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout.handle(), 0, 1, &ds, 0, nullptr);
                     VkBuffer vb = vertexBuffer.handle();
                     VkDeviceSize vbOff { 0 };
                     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOff);
@@ -646,8 +641,8 @@ static int run_demo3d() {
                 ui_panels.set_default_dock_id(dockspaceId);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
-                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH, &sceneRect,
-                    ImVec2(0, 0), ImVec2(1, 1),
+                    "Scene", sceneTextureId, &nextSceneW, &nextSceneH,
+                    &sceneRect, ImVec2(0, 0), ImVec2(1, 1),
                     [&](const lumen::ui::TextureViewRect &r) {
                         if (scene_gizmo_tool != SceneGizmoTool::View) {
                             lumen::ui::imguizmo_manipulate(
@@ -662,11 +657,11 @@ static int run_demo3d() {
                     "Wireframe", wireframeTextureId, &nextWireframeW,
                     &nextWireframeH);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                lumen::ui::imgui_texture_view_panel(
-                    "Normal", normalTextureId, &nextNormalW, &nextNormalH);
+                lumen::ui::imgui_texture_view_panel("Normal", normalTextureId,
+                                                    &nextNormalW, &nextNormalH);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
-                lumen::ui::imgui_texture_view_panel(
-                    "Depth", depthTextureId, &nextDepthW, &nextDepthH);
+                lumen::ui::imgui_texture_view_panel("Depth", depthTextureId,
+                                                    &nextDepthW, &nextDepthH);
 
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
@@ -688,23 +683,25 @@ static int run_demo3d() {
                 ImGui::SliderFloat("Camera Distance", &orbitRadius,
                                    kMinOrbitRadius, kMaxOrbitRadius, "%.1f");
                 ImGui::Text("Gizmo (Unity: Q/W/E/R)");
-                if (ImGui::RadioButton("View (Q)",
-                                      scene_gizmo_tool == SceneGizmoTool::View)) {
+                if (ImGui::RadioButton("View (Q)", scene_gizmo_tool ==
+                                                       SceneGizmoTool::View)) {
                     scene_gizmo_tool = SceneGizmoTool::View;
                 }
                 ImGui::SameLine();
-                if (ImGui::RadioButton("Move (W)",
-                                      scene_gizmo_tool == SceneGizmoTool::Move)) {
+                if (ImGui::RadioButton("Move (W)", scene_gizmo_tool ==
+                                                       SceneGizmoTool::Move)) {
                     scene_gizmo_tool = SceneGizmoTool::Move;
                 }
                 ImGui::SameLine();
                 if (ImGui::RadioButton("Rotate (E)",
-                                      scene_gizmo_tool == SceneGizmoTool::Rotate)) {
+                                       scene_gizmo_tool ==
+                                           SceneGizmoTool::Rotate)) {
                     scene_gizmo_tool = SceneGizmoTool::Rotate;
                 }
                 ImGui::SameLine();
                 if (ImGui::RadioButton("Scale (R)",
-                                      scene_gizmo_tool == SceneGizmoTool::Scale)) {
+                                       scene_gizmo_tool ==
+                                           SceneGizmoTool::Scale)) {
                     scene_gizmo_tool = SceneGizmoTool::Scale;
                 }
                 ImGui::Checkbox("World mode", &gizmo_world_mode);
@@ -719,8 +716,8 @@ static int run_demo3d() {
                     bool trsEdited = false;
                     trsEdited |= ImGui::DragFloat3("Position", tr, 0.01f, 0.0f,
                                                    0.0f, "%.3f");
-                    trsEdited |= ImGui::DragFloat3("Rotation (deg)", rotDeg, 0.5f,
-                                                   0.0f, 0.0f, "%.2f");
+                    trsEdited |= ImGui::DragFloat3("Rotation (deg)", rotDeg,
+                                                   0.5f, 0.0f, 0.0f, "%.2f");
                     trsEdited |= ImGui::DragFloat3("Scale", sc, 0.01f, 1e-2f,
                                                    1e3f, "%.3f");
                     if (trsEdited) {
@@ -728,15 +725,13 @@ static int run_demo3d() {
                             tr, rotDeg, sc, glm::value_ptr(model_matrix));
                     }
                     ImGui::Spacing();
-                    ImGui::TextDisabled(
-                        "Same TRS as ImGuizmo (Euler degrees). "
-                        "Edits write back to model_matrix.");
+                    ImGui::TextDisabled("Same TRS as ImGuizmo (Euler degrees). "
+                                        "Edits write back to model_matrix.");
                     if (ImGui::TreeNode("mat4 (column-major)")) {
                         for (int r = 0; r < 4; ++r) {
-                            ImGui::Text(
-                                "%7.4f  %7.4f  %7.4f  %7.4f",
-                                model_matrix[0][r], model_matrix[1][r],
-                                model_matrix[2][r], model_matrix[3][r]);
+                            ImGui::Text("%7.4f  %7.4f  %7.4f  %7.4f",
+                                        model_matrix[0][r], model_matrix[1][r],
+                                        model_matrix[2][r], model_matrix[3][r]);
                         }
                         ImGui::TreePop();
                     }
@@ -747,9 +742,9 @@ static int run_demo3d() {
                 ImGui::Checkbox("Show viewport debug", &show_viewport_debug);
                 if (show_viewport_debug) {
                     const auto sceneMouseState =
-                        lumen::ui::viewport_mouse_state(
-                            sceneRect, pump.input().mouse_x(),
-                            pump.input().mouse_y());
+                        lumen::ui::viewport_mouse_state(sceneRect,
+                                                        pump.input().mouse_x(),
+                                                        pump.input().mouse_y());
                     lumen::ui::imgui_viewport_mouse_debug(
                         sceneRect, sceneMouseState, "Scene");
                 }
@@ -782,11 +777,12 @@ static int run_demo3d() {
     });
 
     lumen::ui::imgui_setup_event_pump(pump);
-    lumen::platform::add_input_debug_handler(pump); // 调试：输出鼠标键盘事件到 logs/engine.log
+    lumen::platform::add_input_debug_handler(
+        pump); // 调试：输出鼠标键盘事件到 logs/engine.log
 
-    LUMEN_APP_LOG_INFO(
-        "Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] 仅控制相机；模型仅能通过 Scene Gizmo（Q/W/E/R）"
-        " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
+    LUMEN_APP_LOG_INFO("Demo3D 启动 [A/D/↑/↓] [右键拖拽] [滚轮] "
+                       "仅控制相机；模型仅能通过 Scene Gizmo（Q/W/E/R）"
+                       " [0] 光照 [1] 线框 [2] 法线 [3] 深度 [ESC] 退出");
 
     constexpr float kMouseSensitivity { 0.007f };
     constexpr float kZoomSpeed { 0.25f };
@@ -853,8 +849,9 @@ static int run_demo3d() {
                 newDepth.create_depth_attachment(
                     ctx, static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight));
-                // 必须先 destroy framebuffers 再替换 depthImage，否则旧 depth view
-                // 仍被 framebuffer 引用时被销毁会触发 VUID-vkDestroyImageView-01026
+                // 必须先 destroy framebuffers 再替换 depthImage，否则旧 depth
+                // view 仍被 framebuffer 引用时被销毁会触发
+                // VUID-vkDestroyImageView-01026
                 lumen::render::recreate_swapchain_resources(
                     ctx, swapchain, framebuffers, frameSync,
                     renderPass.handle(), static_cast<uint32_t>(fbWidth),
@@ -899,7 +896,8 @@ static int run_demo3d() {
         lumen::ui::imgui_backend_new_frame();
 
         // Q/W/E/R 须在 NewFrame 之后用 ImGui 按键查询：poll() 里
-        // imgui_wants_keyboard() 在 Dock 焦点下几乎恒为 true，会挡掉 on_key_down。
+        // imgui_wants_keyboard() 在 Dock 焦点下几乎恒为 true，会挡掉
+        // on_key_down。
         {
             const ImGuiIO &io = ImGui::GetIO();
             if (!io.WantTextInput) {
@@ -994,7 +992,8 @@ static int run_demo3d() {
         }
 
         const auto &inp = pump.input();
-        // 悬停在 Scene 的 Image 上时 ImGui 会 WantCaptureMouse，但仍应允许 3D 导航
+        // 悬停在 Scene 的 Image 上时 ImGui 会 WantCaptureMouse，但仍应允许 3D
+        // 导航
         const auto sceneNavMouse = lumen::ui::viewport_mouse_state(
             sceneRect, inp.mouse_x(), inp.mouse_y());
         const bool imguiBlocksKb = lumen::ui::imgui_wants_keyboard();
@@ -1045,7 +1044,8 @@ static int run_demo3d() {
                              static_cast<float>(sceneExtentForProj.width) /
                                  static_cast<float>(sceneExtentForProj.height),
                              0.1f, 100.0f);
-        scene_proj[1][1] *= -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
+        scene_proj[1][1] *=
+            -1.0f; // Vulkan NDC Y 向下；frontFace 与模型绕序匹配
         UBO ubo {};
         ubo.mvp = scene_proj * scene_view * model_matrix;
         ubo.normalMatrix =
