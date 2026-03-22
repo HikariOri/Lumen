@@ -428,6 +428,7 @@ static int run_demo3d() {
     uint32_t nextDepthH { 0 };
     glm::vec4 clearColor { 0.1f, 0.12f, 0.18f, 1.0f };
     glm::vec4 modelColor { 1.0f, 1.0f, 1.0f, 1.0f };
+    bool show_viewport_debug { false };
 
     // ImGui 后端
     lumen::ui::ImGuiBackendInitInfo imguiInfo;
@@ -743,12 +744,15 @@ static int run_demo3d() {
                 ImGui::Separator();
                 ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "FPS: %.1f",
                                    1.0f / (dt > 0.0f ? dt : 0.016f));
-                const auto sceneMouseState =
-                    lumen::ui::viewport_mouse_state(
-                        sceneRect, pump.input().mouse_x(),
-                        pump.input().mouse_y());
-                lumen::ui::imgui_viewport_mouse_debug(sceneRect, sceneMouseState,
-                                                     "Scene");
+                ImGui::Checkbox("Show viewport debug", &show_viewport_debug);
+                if (show_viewport_debug) {
+                    const auto sceneMouseState =
+                        lumen::ui::viewport_mouse_state(
+                            sceneRect, pump.input().mouse_x(),
+                            pump.input().mouse_y());
+                    lumen::ui::imgui_viewport_mouse_debug(
+                        sceneRect, sceneMouseState, "Scene");
+                }
                 ImGui::TextDisabled(
                     "Scene top-right: orientation cube (ViewManipulate), "
                     "inset to stay inside the viewport.");

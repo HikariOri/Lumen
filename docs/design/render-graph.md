@@ -136,8 +136,9 @@ struct RGPass {
 ```cpp
 class RenderGraph {
 public:
-    void addPass(const RGPass& pass);
-    void execute(VkCommandBuffer cmd);  // 拓扑排序 + 自动 barrier + 执行
+    void add_pass(const RGPass& pass);
+    bool compile();   // DAG 拓扑排序；有环则失败
+    void execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex);
 };
 ```
 
@@ -217,23 +218,23 @@ uiPass.writes = { &swapchainImage };
 
 ### 7.2 代码映射
 
-```text
-Pass 1 (Scene)：
-  - writes: sceneTarget.color_view(), sceneTarget.depth
-  - framebuffer: sceneTarget.framebuffer()
-  - renderPass: sceneTarget.render_pass()
+引擎侧实现见 `engine/include/render/pass/render_graph.hpp`、`render_graph.cpp`。demo3d 中用 `RGImage::from_texture` / `from_swapchain` 绑定资源，再用 `RenderGraph::add_pass` 声明依赖。
 
-Pass 2 (UI)：
-  - reads:  sceneTarget.color_view() → ImGui::Image 采样
-  - writes: swapchain 当前帧 framebuffer
-  - renderPass: 主屏 RenderPass（Clear + ImGui）
+```text
+Pass Scene（示例）：
+  - writes: rgColor / rgDepth（来自 OffscreenRenderTarget 的 Image）
+  - framebuffer / renderPass：仍由 Pass 的 execute 回调内部绑定（与 RG 声明一致即可）
+
+Pass UI（示例）：
+  - reads:  rgColor → ImGui 视口采样
+  - writes: rgSwapchain → 主屏 framebuffer
 ```
 
-### 7.3 当前实现的 Layout 处理
+### 7.3 Layout 与同步（当前实现）
 
-- **RenderPass 内**：Vulkan 通过 attachment 的 `initialLayout` / `finalLayout` 自动处理
-- **跨 Pass**：Scene 的 `colorFinalLayout = SHADER_READ_ONLY_OPTIMAL`，供 ImGui 采样
-- **显式 RenderGraph**：当前未实现，仍为手写顺序 + RenderPass 声明式 layout
+- **三阶段**：`add_pass`（Setup）→ `compile()`（拓扑排序，有环则失败、不执行）→ `execute()`（按编译顺序插入 `vkCmdPipelineBarrier` 与 layout 跟踪，再调用各 Pass 的 `execute`）。`execute` 在编译过期时会自动调用 `compile()`。
+- **RenderPass 内**：各 `OffscreenRenderTarget` / 主屏 RenderPass 仍通过附件的 `initialLayout` / `finalLayout` 处理子通道内转换；离屏颜色默认 `colorFinalLayout = SHADER_READ_ONLY_OPTIMAL`，与 RenderGraph 在 Pass 结束后对颜色纹理跟踪的 layout 一致。
+- **跨 Pass**：由 RenderGraph 在 Pass 前将 `reads` 迁到 `SHADER_READ_ONLY_OPTIMAL`，将 `writes` 迁到 color / depth attachment layout；Swapchain 从 `PRESENT_SRC_KHR` 再次写入时会插入合法 barrier。未实现：Resource Aliasing、异步计算、多线程编译与提交。
 
 ---
 
@@ -254,10 +255,11 @@ RenderGraph：UIPass 依赖 OffscreenImage，OffscreenImage 依赖 ScenePass
 
 | 方向 | 说明 |
 |------|------|
-| 拓扑排序 | 多 Pass 时自动推导 DAG 顺序 |
-| 资源复用 | 多 Image 共用显存，减少峰值 |
-| Compute Pass | 支持 Graphics + Compute 混合 |
-| 多帧并发 | frame-in-flight 下的资源生命周期 |
+| Builder / Context API | 文档「阶段二」：编译期与执行期分离，避免执行阶段改依赖 |
+| 资源时间线 / Pass Culling | 显式 `first_use` / `last_use`，未使用 Pass 剔除 |
+| 资源复用 | 多 Image 共用显存（Aliasing） |
+| Compute Pass | Graphics + Compute 混合与队列同步 |
+| 多帧并发 | frame-in-flight 下的资源生命周期与调度 |
 
 ---
 
@@ -266,17 +268,17 @@ RenderGraph：UIPass 依赖 OffscreenImage，OffscreenImage 依赖 ScenePass
 ### 10.1 当前阶段推荐
 
 ```text
-- 明确 read/write 的 Pass 划分
+- 明确 read/write 的 Pass 划分，与 execute 内实际 framebuffer 附件一致
 - 离屏与 Swapchain 的职责分离（OffscreenRenderTarget / SwapchainRenderTarget）
-- RenderPass 内用 attachment layout 声明式管理
+- RenderPass 内继续用 attachment 的 initial/finalLayout；跨 Pass 交给 RenderGraph
 ```
 
-### 10.2 暂不实现
+### 10.2 暂不实现（相对当前代码）
 
 ```text
-- 完整 DAG 自动排序
-- 自动 Barrier 生成
-- 内存复用 / Aliasing
+- Builder 式声明 API、资源时间线与 Pass Culling
+- 内存复用 / Resource Aliasing
+- 异步计算与多线程 RenderGraph 编译
 ```
 
 ---
@@ -294,6 +296,7 @@ RenderGraph：UIPass 依赖 OffscreenImage，OffscreenImage 依赖 ScenePass
 
 ## 参考
 
+- `engine/include/render/pass/render_graph.hpp`：RenderGraph / RGPass / RGImage
 - `engine/include/render/pass/render_target.hpp`：OffscreenRenderTarget / SwapchainRenderTarget
 - `examples/demo3d/src/main.cpp`：Scene → Offscreen → ImGui → Swapchain 实际流程
 - [render-engine-roadmap.md](render-engine-roadmap.md)：完整管线设计

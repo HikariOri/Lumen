@@ -1,6 +1,6 @@
 /**
  * @file render_graph.cpp
- * @brief RenderGraph 实现：拓扑排序、自动 Layout 转换、PipelineBarrier
+ * @brief RenderGraph：拓扑排序、Compile/Execute、Layout 与 PipelineBarrier
  */
 
 #include "render/pass/render_graph.hpp"
@@ -11,6 +11,24 @@
 #include "render/swapchain.hpp"
 
 namespace lumen::render {
+
+namespace {
+
+[[nodiscard]] VkImageAspectFlags aspect_mask_for_rg_image(const RGImage &img) {
+    if (!img.isDepth) {
+        return VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+    switch (img.format) {
+    case VK_FORMAT_D16_UNORM_S8_UINT:
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    default:
+        return VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+}
+
+} // namespace
 
 // --- RGImage ---
 
@@ -78,9 +96,18 @@ uint32_t RGImage::image_count() const {
 
 RenderGraph::RenderGraph(const Context *ctx) : ctx_(ctx) {}
 
-void RenderGraph::add_pass(const RGPass &pass) { passes_.push_back(pass); }
+void RenderGraph::add_pass(const RGPass &pass) {
+    passes_.push_back(pass);
+    compile_stale_ = true;
+    compile_ok_ = false;
+}
 
-void RenderGraph::clear() { passes_.clear(); }
+void RenderGraph::clear() {
+    passes_.clear();
+    execution_order_.clear();
+    compile_stale_ = true;
+    compile_ok_ = false;
+}
 
 void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
                                     VkImageLayout oldLayout,
@@ -96,8 +123,7 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = img->image_at(index);
-    barrier.subresourceRange.aspectMask =
-        img->isDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask = aspect_mask_for_rg_image(*img);
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -120,6 +146,9 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
     } else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
         barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
         srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+        barrier.srcAccessMask = 0;
+        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
     if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
@@ -154,7 +183,6 @@ void RenderGraph::transition_image_(VkCommandBuffer cmd, RGImage *img,
 }
 
 std::vector<size_t> RenderGraph::topo_sort_() const {
-    // 构建依赖图：pass i 依赖 pass j 当且仅当 i 读 j 写的资源
     const size_t n = passes_.size();
     std::vector<std::vector<size_t>> adj(n);
     std::vector<int> inDeg(n, 0);
@@ -174,14 +202,13 @@ std::vector<size_t> RenderGraph::topo_sort_() const {
                     }
                 }
                 if (readsWrite) {
-                    adj[i].push_back(j); // i -> j 表示 i 必须先于 j
+                    adj[i].push_back(j);
                     inDeg[j]++;
                 }
             }
         }
     }
 
-    // Kahn 拓扑排序
     std::vector<size_t> order;
     order.reserve(n);
     std::vector<size_t> queue;
@@ -200,25 +227,45 @@ std::vector<size_t> RenderGraph::topo_sort_() const {
         }
     }
 
-    if (order.size() != n) {
-        LUMEN_LOG_ERROR("RenderGraph: 检测到循环依赖，无法拓扑排序");
-        order.clear();
-        for (size_t i = 0; i < n; ++i)
-            order.push_back(i);
-    }
     return order;
+}
+
+bool RenderGraph::compile() {
+    if (passes_.empty()) {
+        execution_order_.clear();
+        compile_ok_ = true;
+        compile_stale_ = false;
+        return true;
+    }
+
+    std::vector<size_t> order = topo_sort_();
+    if (order.size() != passes_.size()) {
+        LUMEN_LOG_ERROR(
+            "RenderGraph::compile: 循环依赖，无法拓扑排序（请检查 reads/writes）");
+        execution_order_.clear();
+        compile_ok_ = false;
+        compile_stale_ = false;
+        return false;
+    }
+
+    execution_order_ = std::move(order);
+    compile_ok_ = true;
+    compile_stale_ = false;
+    return true;
 }
 
 void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
     if (!ctx_ || passes_.empty())
         return;
 
-    std::vector<size_t> order = topo_sort_();
+    if (compile_stale_ || !compile_ok_) {
+        if (!compile())
+            return;
+    }
 
-    for (size_t idx : order) {
+    for (size_t idx : execution_order_) {
         const RGPass &pass = passes_[idx];
 
-        // 将 reads 转到 SHADER_READ_ONLY
         for (RGImage *img : pass.reads) {
             if (img)
                 transition_image_(
@@ -226,7 +273,6 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
                     img->is_swapchain() ? swapchainImageIndex : 0);
         }
 
-        // 将 writes 转到 ATTACHMENT
         for (RGImage *img : pass.writes) {
             if (!img)
                 continue;
@@ -237,13 +283,9 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
             transition_image_(cmd, img, targetLayout, subIndex);
         }
 
-        // 执行 Pass
         if (pass.execute)
             pass.execute(cmd, swapchainImageIndex);
 
-        // 更新 layout 跟踪：RenderPass 会设置 finalLayout
-        // 离屏 color 通常 finalLayout=SHADER_READ_ONLY，swapchain 为
-        // PRESENT_SRC
         for (RGImage *img : pass.writes) {
             if (!img)
                 continue;

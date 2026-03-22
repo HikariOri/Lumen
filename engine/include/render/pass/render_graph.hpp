@@ -2,8 +2,12 @@
  * @file render_graph.hpp
  * @brief RenderGraph：用资源读写依赖描述渲染流程，自动推导执行顺序与同步
  *
- * 核心：声明 reads/writes，系统自动完成拓扑排序、PipelineBarrier、Layout 转换。
- * 参考 docs/design/render-graph.md
+ * 三阶段模型（与 docs/design/render-graph.md 一致）：
+ * - **Setup**：`add_pass` 声明 reads/writes
+ * - **Compile**：`compile()` 拓扑排序，产出执行顺序；存在环则失败，不执行
+ * - **Execute**：`execute()` 按编译结果插入 barrier / layout 转换并调用各 Pass
+ *
+ * 未包含：多线程调度、异步计算、Resource Aliasing。
  */
 
 #pragma once
@@ -108,7 +112,7 @@ struct RGPass {
 
 /**
  * @class RenderGraph
- * @brief 渲染图：addPass 声明依赖，execute 自动排序 + barrier + 执行
+ * @brief 渲染图：Setup 阶段 `add_pass`，Compile 阶段 `compile`，Execute 阶段 `execute`
  */
 class RenderGraph {
 public:
@@ -118,19 +122,32 @@ public:
     void set_context(const Context *ctx) { ctx_ = ctx; }
 
     /**
-     * @brief 添加 Pass
+     * @brief Setup：添加 Pass（会使编译结果失效，下次 execute 前需重新 compile）
      */
     void add_pass(const RGPass &pass);
 
     /**
-     * @brief 执行渲染图
+     * @brief Compile：按「写 → 被读」建边并拓扑排序
+     * @return 成功返回 true；若存在循环依赖返回 false（不打回退顺序）
+     */
+    [[nodiscard]] bool compile();
+
+    /**
+     * @brief 最近一次 compile 是否成功且与当前 passes 一致
+     */
+    [[nodiscard]] bool is_compiled() const {
+        return compile_ok_ && !compile_stale_;
+    }
+
+    /**
+     * @brief Execute：若编译过期则先 `compile()`；compile 失败则不录制任何 Pass
      * @param cmd 命令缓冲
      * @param swapchainImageIndex 当前 Swapchain 图像索引（用于 write 到
      * swapchain 的 Pass）
      */
     void execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex = 0);
 
-    /// 清空所有 Pass
+    /// 清空所有 Pass 并使编译失效
     void clear();
 
     [[nodiscard]] bool is_valid() const { return ctx_ != nullptr; }
@@ -141,10 +158,15 @@ private:
     void pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
                            VkImageLayout oldLayout, VkImageLayout newLayout,
                            uint32_t index);
-    std::vector<size_t> topo_sort_() const;
+    /// 成功时 size()==passes_.size()；存在环时 size()<passes_.size()
+    [[nodiscard]] std::vector<size_t> topo_sort_() const;
 
     const Context *ctx_ { nullptr };
     std::vector<RGPass> passes_;
+    std::vector<size_t> execution_order_;
+    /// `add_pass` / `clear` 之后为 true，成功 compile 后为 false
+    bool compile_stale_ { true };
+    bool compile_ok_ { false };
 };
 
 } // namespace render
