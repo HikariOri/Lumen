@@ -25,6 +25,12 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/skybox.frag"
           -o "$<TARGET_FILE_DIR:demo3d>/shaders/skybox.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/grid.vert"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/grid.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_CURRENT_LIST_DIR}/shaders/grid.frag"
+          -o "$<TARGET_FILE_DIR:demo3d>/shaders/grid.frag.spv"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "$<TARGET_FILE_DIR:engine>/shaders/light_icon.vert.spv"
           "$<TARGET_FILE_DIR:demo3d>/shaders/light_icon.vert.spv"

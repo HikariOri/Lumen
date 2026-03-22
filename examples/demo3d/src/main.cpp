@@ -170,6 +170,40 @@ ImGuizmo::OPERATION scene_gizmo_to_operation(SceneGizmoTool t) {
 
 } // namespace
 
+/// XZ 地面网格：`kind` 0 细线、1 粗线（每 10 格）、2 世界 +X 轴、3 世界 +Z 轴
+struct GroundGridVertex {
+    glm::vec3 position {};
+    float kind { 0.0f };
+};
+
+static void fill_ground_grid_vertices(int half_cells, float step, float plane_y,
+                                      std::vector<GroundGridVertex> &out) {
+    out.clear();
+    const float L = static_cast<float>(half_cells) * step;
+    for (int iz = -half_cells; iz <= half_cells; ++iz) {
+        const float z = static_cast<float>(iz) * step;
+        float kind = 0.0f;
+        if (iz == 0) {
+            kind = 2.0f;
+        } else if (iz % 10 == 0) {
+            kind = 1.0f;
+        }
+        out.push_back({ { -L, plane_y, z }, kind });
+        out.push_back({ { L, plane_y, z }, kind });
+    }
+    for (int ix = -half_cells; ix <= half_cells; ++ix) {
+        const float x = static_cast<float>(ix) * step;
+        float kind = 0.0f;
+        if (ix == 0) {
+            kind = 3.0f;
+        } else if (ix % 10 == 0) {
+            kind = 1.0f;
+        }
+        out.push_back({ { x, plane_y, -L }, kind });
+        out.push_back({ { x, plane_y, L }, kind });
+    }
+}
+
 static int run_demo3d() {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
@@ -300,6 +334,18 @@ static int run_demo3d() {
         return -1;
     }
 
+    std::string grid_vert_path =
+        lumen::core::get_resource_path("shaders/grid.vert.spv");
+    std::string grid_frag_path =
+        lumen::core::get_resource_path("shaders/grid.frag.spv");
+    lumen::render::ShaderModule grid_vert_shader;
+    lumen::render::ShaderModule grid_frag_shader;
+    if (!grid_vert_shader.create_from_file(ctx.device(), grid_vert_path.c_str()) ||
+        !grid_frag_shader.create_from_file(ctx.device(), grid_frag_path.c_str())) {
+        LUMEN_APP_LOG_ERROR("地面网格着色器加载失败");
+        return -1;
+    }
+
     // OBJ 模型加载
     lumen::core::ObjMesh mesh;
     std::string objPath = lumen::core::get_resource_path(kObjPath);
@@ -410,6 +456,23 @@ static int run_demo3d() {
         lumen::render::IndexBuffer::IndexType::Uint32);
     sky_index_buffer.upload(kSkyIndices, sizeof(kSkyIndices));
 
+    std::vector<GroundGridVertex> ground_grid_vertices;
+    constexpr int kGridHalfCells { 50 };
+    constexpr float kGridStep { 1.0f };
+    constexpr float kGridPlaneY { 0.0005f };
+    fill_ground_grid_vertices(kGridHalfCells, kGridStep, kGridPlaneY,
+                                ground_grid_vertices);
+    const uint32_t grid_vertex_count =
+        static_cast<uint32_t>(ground_grid_vertices.size());
+    lumen::render::VertexBuffer grid_vertex_buffer;
+    if (!grid_vertex_buffer.create(
+            ctx, ground_grid_vertices.size() * sizeof(GroundGridVertex))) {
+        return -1;
+    }
+    grid_vertex_buffer.upload(ground_grid_vertices.data(),
+                              ground_grid_vertices.size() *
+                                  sizeof(GroundGridVertex));
+
     // Descriptor
     lumen::render::DescriptorSetLayout descLayout;
     descLayout.create(
@@ -500,6 +563,39 @@ static int run_demo3d() {
     if (!sky_pipeline.create(ctx, pipelineLayout.handle(),
                              sceneTarget.render_pass(), 0, sky_pipe_config)) {
         LUMEN_APP_LOG_ERROR("天空盒管线创建失败");
+        return -1;
+    }
+
+    lumen::render::PipelineLayout grid_pipeline_layout;
+    VkPushConstantRange grid_push {};
+    grid_push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    grid_push.offset = 0;
+    grid_push.size = sizeof(glm::mat4);
+    grid_pipeline_layout.create(ctx, {}, { grid_push });
+
+    lumen::render::GraphicsPipelineConfig grid_pipe_config {};
+    grid_pipe_config.stages.push_back(
+        { grid_vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    grid_pipe_config.stages.push_back(
+        { grid_frag_shader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    grid_pipe_config.vertexBindings.push_back(
+        { 0, sizeof(GroundGridVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+    grid_pipe_config.vertexAttributes.push_back(
+        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+          offsetof(GroundGridVertex, position) });
+    grid_pipe_config.vertexAttributes.push_back(
+        { 1, 0, VK_FORMAT_R32_SFLOAT, offsetof(GroundGridVertex, kind) });
+    grid_pipe_config.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    grid_pipe_config.depthTest = true;
+    grid_pipe_config.depthWrite = true;
+    grid_pipe_config.depthCompareOp = VK_COMPARE_OP_LESS;
+    grid_pipe_config.cullMode = VK_CULL_MODE_NONE;
+    grid_pipe_config.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    lumen::render::GraphicsPipeline grid_pipeline;
+    if (!grid_pipeline.create(ctx, grid_pipeline_layout.handle(),
+                              sceneTarget.render_pass(), 0, grid_pipe_config)) {
+        LUMEN_APP_LOG_ERROR("地面网格管线创建失败");
         return -1;
     }
 
@@ -757,9 +853,26 @@ static int run_demo3d() {
                     vkCmdBindIndexBuffer(cmd, sky_index_buffer.handle(), 0,
                                          sky_index_buffer.vk_index_type());
                     vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
-                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                      activePipeline);
                 }
+                {
+                    const glm::mat4 grid_vp = scene_proj * scene_view;
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      grid_pipeline.handle());
+                    vkCmdPushConstants(cmd, grid_pipeline_layout.handle(),
+                                       VK_SHADER_STAGE_VERTEX_BIT, 0,
+                                       sizeof(glm::mat4), &grid_vp);
+                    VkBuffer grid_vb = grid_vertex_buffer.handle();
+                    VkDeviceSize grid_off { 0 };
+                    vkCmdBindVertexBuffers(cmd, 0, 1, &grid_vb, &grid_off);
+                    vkCmdDraw(cmd, grid_vertex_count, 1, 0, 0);
+                }
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  activePipeline);
+                // 网格 push 在 offset 0 写入了 viewProj，会覆盖主材质
+                // PushConstants（mode / modelColor），必须在画模型前重新推送
+                vkCmdPushConstants(cmd, pipelineLayout.handle(),
+                                   VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(PushConstants), &pushData);
                 VkBuffer vb = vertexBuffer.handle();
                 VkDeviceSize vbOffset { 0 };
                 vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
