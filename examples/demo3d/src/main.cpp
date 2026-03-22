@@ -59,7 +59,8 @@
 
 using Vertex = lumen::core::ObjVertex;
 
-/// UBO：model / mvp / normal / 相机 / 光源数组（与 `cube.vert`/`cube.frag` 一致，std140）
+/// UBO：model / mvp / normal / 相机 / 光源数组（与 `cube.vert`/`cube.frag`
+/// 一致，std140）
 struct UBO {
     glm::mat4 model;
     glm::mat4 mvp;
@@ -474,13 +475,14 @@ static int run_demo3d() {
             L.intensity = 2.2f;
             L.range = 14.0f;
             auto &tr = reg.get<lumen::scene::TransformComponent>(pe);
-            tr.matrix = glm::translate(glm::mat4(1.0f), glm::vec3(2.2f, 2.8f, 1.5f));
+            tr.matrix =
+                glm::translate(glm::mat4(1.0f), glm::vec3(2.2f, 2.8f, 1.5f));
         }
     }
     editor_selection.entity = ecs_model_entity;
-    lumen::scene::frame_orbit_on_drawable(
-        scene_cam, ecs_scene.registry(), ecs_model_entity, mesh_center_local,
-        mesh_half_extents_local);
+    lumen::scene::frame_orbit_on_drawable(scene_cam, ecs_scene.registry(),
+                                          ecs_model_entity, mesh_center_local,
+                                          mesh_half_extents_local);
 
     lumen::ui::PanelManager ui_panels;
     ui_panels.add(std::make_unique<lumen::ui::LogPanel>());
@@ -748,8 +750,9 @@ static int run_demo3d() {
                 {
                     float r = scene_cam.radius();
                     const auto lim = scene_cam.limits();
-                    if (ImGui::SliderFloat("Camera Distance", &r, lim.min_radius,
-                                           lim.max_radius, "%.1f")) {
+                    if (ImGui::SliderFloat("Camera Distance", &r,
+                                           lim.min_radius, lim.max_radius,
+                                           "%.1f")) {
                         scene_cam.set_radius(r);
                     }
                 }
@@ -1078,8 +1081,7 @@ static int run_demo3d() {
         if (!imgui_blocks_mouse && scene_fly) {
             scene_cam_ctrl.apply_rmb_look(scene_cam, mdx, mdy);
             lumen::scene::SceneCameraFlyInput fly {};
-            fly.move_forward =
-                inp.is_key_down(lumen::platform::Key::W);
+            fly.move_forward = inp.is_key_down(lumen::platform::Key::W);
             fly.move_back = inp.is_key_down(lumen::platform::Key::S);
             fly.move_left = inp.is_key_down(lumen::platform::Key::A);
             fly.move_right = inp.is_key_down(lumen::platform::Key::D);

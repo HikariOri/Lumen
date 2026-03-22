@@ -91,35 +91,41 @@ void SceneHierarchyPanel::on_imgui_render() {
     ImGui::Begin("Hierarchy");
     ::entt::registry &reg = scene_->registry();
 
-    if (ImGui::Button("Create empty")) {
-        ::entt::entity parent { ::entt::null };
-        if (reg.valid(selection_->entity)) {
-            parent = selection_->entity;
+    if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const float btn_w =
+            (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) *
+            0.5f;
+        if (ImGui::Button("Create empty", ImVec2(btn_w, 0))) {
+            ::entt::entity parent { ::entt::null };
+            if (reg.valid(selection_->entity)) {
+                parent = selection_->entity;
+            }
+            const ::entt::entity n = scene_->create_entity("GameObject");
+            if (parent != ::entt::null && reg.valid(parent)) {
+                scene_->set_parent(n, parent);
+            }
+            selection_->entity = n;
         }
-        const ::entt::entity n = scene_->create_entity("GameObject");
-        if (parent != ::entt::null && reg.valid(parent)) {
-            scene_->set_parent(n, parent);
-        }
-        selection_->entity = n;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Create root")) {
-        selection_->entity = scene_->create_entity("GameObject");
-    }
-
-    ImGui::Separator();
-    ImGui::TextUnformatted("Entities");
-    ImGui::BeginChild("hierarchy_tree", ImVec2(0, 0), false,
-                      ImGuiWindowFlags_HorizontalScrollbar);
-
-    pending_destroy_.clear();
-    for (const ::entt::entity e : reg.view<lumen::scene::NameComponent>()) {
-        if (is_root(reg, e)) {
-            draw_entity_node(scene_, selection_, &pending_destroy_, e);
+        ImGui::SameLine();
+        if (ImGui::Button("Create root", ImVec2(btn_w, 0))) {
+            selection_->entity = scene_->create_entity("GameObject");
         }
     }
 
-    ImGui::EndChild();
+    if (ImGui::CollapsingHeader("Entities", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::BeginChild("hierarchy_tree", ImVec2(0, 0), true,
+                          ImGuiWindowFlags_HorizontalScrollbar);
+
+        pending_destroy_.clear();
+        for (const ::entt::entity ent :
+             reg.view<lumen::scene::NameComponent>()) {
+            if (is_root(reg, ent)) {
+                draw_entity_node(scene_, selection_, &pending_destroy_, ent);
+            }
+        }
+
+        ImGui::EndChild();
+    }
 
     for (const ::entt::entity d : pending_destroy_) {
         scene_->destroy_entity(d);

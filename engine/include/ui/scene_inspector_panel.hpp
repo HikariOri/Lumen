@@ -1,6 +1,6 @@
 /**
  * @file scene_inspector_panel.hpp
- * @brief 检视选中实体的 ObjectId、名称与 Transform（TRS）
+ * @brief 检视选中实体：可折叠组件块、轴向着色 Transform、Add Component
  */
 
 #pragma once
