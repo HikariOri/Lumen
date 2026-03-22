@@ -344,6 +344,10 @@ static int run_demo3d() {
     imguiInfo.swapchain = &swapchain;
     imguiInfo.renderPass = renderPass.handle();
     imguiInfo.window = window.sdl_window();
+// #ifdef _WIN32
+    // 默认内置字体无 CJK；微软雅黑覆盖常用简体 UI 文案
+    // imguiInfo.cjk_font_ttf_path = "C:/Windows/Fonts/msyh.ttc";
+// #endif
     if (!lumen::ui::imgui_backend_init(imguiInfo)) {
         LUMEN_APP_LOG_ERROR("ImGui 初始化失败");
         return -1;

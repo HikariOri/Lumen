@@ -26,6 +26,13 @@ struct ImGuiBackendInitInfo {
     const render::Swapchain *swapchain { nullptr };
     VkRenderPass renderPass { VK_NULL_HANDLE };
     SDL_Window *window { nullptr };
+
+    /// 含中文等 CJK 的字体文件路径（.ttf / .otf / .ttc），UTF-8 编码。
+    /// 非空则作为默认字体加载，并包含常用简体字形（见 ImGui
+    /// GetGlyphRangesChineseSimplifiedCommon）。Windows 示例：`C:/Windows/Fonts/msyh.ttc`
+    const char *cjk_font_ttf_path { nullptr };
+    /// 与 cjk_font_ttf_path 配套的字号（像素）；<=0 时用 18
+    float cjk_font_size_pixels { 18.0f };
 };
 
 /**

@@ -25,6 +25,28 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+    {
+        ImFontConfig font_cfg {};
+        const float size =
+            info.cjk_font_size_pixels > 0.0f ? info.cjk_font_size_pixels
+                                             : 18.0f;
+        if (info.cjk_font_ttf_path != nullptr &&
+            info.cjk_font_ttf_path[0] != '\0') {
+            ImFont *loaded = io.Fonts->AddFontFromFileTTF(
+                info.cjk_font_ttf_path, size, &font_cfg,
+                io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
+            if (!loaded) {
+                LUMEN_LOG_WARN(
+                    "ImGui: failed to load CJK font ({}); Chinese UI will be "
+                    "missing glyphs",
+                    info.cjk_font_ttf_path);
+                io.Fonts->AddFontDefault();
+            }
+        } else {
+            io.Fonts->AddFontDefault();
+        }
+    }
+
     if (!ImGui_ImplSDL3_InitForVulkan(info.window)) {
         LUMEN_LOG_ERROR("ImGui SDL3 后端初始化失败");
         ImGui::DestroyContext();

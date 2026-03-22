@@ -59,6 +59,17 @@ ctx.wait_idle();
 lumen::ui::imgui_backend_shutdown();
 ```
 
+### 2.1 界面中文（CJK）显示
+
+ImGui 自带默认字体**不含**中文，直接 `Text(u8"日志")` 会出现缺字、方框或乱码。做法：
+
+1. **初始化时指定含 CJK 的字体文件**（在 `imgui_backend_init` 之前写入 `ImGuiBackendInitInfo`）：
+   - `cjk_font_ttf_path`：`.ttf` / `.otf` / `.ttc` 路径，字符串为 **UTF-8**（Windows 下可用正斜杠，如 `C:/Windows/Fonts/msyh.ttc` 微软雅黑）。
+   - `cjk_font_size_pixels`：字号，默认 18；仅在与 `cjk_font_ttf_path` 同时使用时生效。
+2. 引擎会使用 `GetGlyphRangesChineseSimplifiedCommon()` 预烘焙常用简体字形，图集比全量汉字小，一般足够做调试 UI。
+3. **源码字符串**：请保存为 **UTF-8**（建议带 BOM 以便 MSVC 正确识别）；或使用 `u8"..."` 字面量并确保编译单元为 UTF-8。
+4. 未设置 `cjk_font_ttf_path` 时仍使用 ImGui 内置字体，中文无法显示属预期行为。
+
 ## 3. 重要注意事项
 
 ### 3.1 SetMinImageCount 与 Swapchain 重建
