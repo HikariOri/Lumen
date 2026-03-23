@@ -92,15 +92,15 @@
 
 ### 7a. 材质系统
 
-- [x] **材质资产**：PBR 参数（BaseColor、Metallic、Roughness、AO、Emissive）+ 贴图槽，标量/贴图二选一与默认值（`MaterialComponent` + `MaterialAssetLibrary` JSON）
-- [x] **贴图槽**：BaseColor、MR/Roughness、Normal、AO、Emissive；无贴图时使用标量（`material_texture_mask.hpp`）
-- [x] **Alpha 模式**：Opaque / Mask（alpha cutoff）/ Blend，驱动深度与混合（管线变体 + UBO）
-- [x] **渲染状态**：背面剔除/双面、深度写、混合模式（Blend 时）（`pipeline` / `pipeline_blend` / `pipeline_nocull`）
-- [x] **材质实例**：`MaterialInstance`（`source_asset_id` + `resolved`），Inspector 与主材质同步至 dominant 槽
-- [x] **SubMesh 绑定**：`MeshComponent` + `MeshMaterialSlotsComponent`，每段 `SubMeshSlice::material_slot`
-- [x] **GPU 绑定**：`PbrMaterialUbo` + 材质 DescriptorSet；按 Alpha/双面选管线变体
-- [x] **材质序列化与加载**：`assets/materials/library.json` + `MaterialAssetLibrary::load_from_json_file`
-- [x] **同材质合批**：`build_submesh_batch_order`（按管线键排序子网格索引，减少状态切换）
+- [ ] **材质资产**：PBR 参数（BaseColor、Metallic、Roughness、AO、Emissive）+ 贴图槽，标量/贴图二选一与默认值
+- [ ] **贴图槽**：BaseColor、MR/Roughness、Normal、AO、Emissive；无贴图时使用标量
+- [ ] **Alpha 模式**：Opaque / Mask（alpha cutoff）/ Blend，驱动深度与混合
+- [ ] **渲染状态**：背面剔除/双面、深度写、混合模式（Blend 时）
+- [ ] **材质实例**：由资产派生，可覆盖部分参数（如颜色、粗糙度）
+- [ ] **SubMesh 绑定**：每子网格指定一个材质实例
+- [ ] **GPU 绑定**：材质 UBO 或 Push Constant；DescriptorSet 贴图+Sampler；按 Alpha/双面等选择管线变体
+- [ ] **材质序列化与加载**：JSON/二进制，加载与缓存
+- [ ] **同材质合批**：减少 Draw Call 与状态切换
 - [ ] 可选：Clearcoat/Sheen/Transmission、材质热重载
 
 ### 8. 阴影

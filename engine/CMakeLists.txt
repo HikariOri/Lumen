@@ -18,6 +18,8 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC $<IF:$<TARGET_EXISTS:flecs::flecs>
 target_link_libraries(${ENGINE_TARGET} PUBLIC spdlog::spdlog)
 target_link_libraries(${ENGINE_TARGET} PUBLIC slang::slang)
 target_link_libraries(${ENGINE_TARGET} PUBLIC glslang::glslang glslang::glslang-default-resource-limits glslang::SPIRV glslang::SPVRemapper)
+target_include_directories(${ENGINE_TARGET} PUBLIC ${TINYGLTF_INCLUDE_DIRS})
+target_link_libraries(${ENGINE_TARGET} PUBLIC tinyobjloader::tinyobjloader_double)
 target_include_directories(${ENGINE_TARGET} PUBLIC ${Stb_INCLUDE_DIR})
 target_include_directories(${ENGINE_TARGET} PUBLIC imgui::imgui)
 target_link_libraries(${ENGINE_TARGET} PUBLIC imgui::imgui)
@@ -29,8 +31,6 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC ghcFilesystem::ghc_filesystem)
 target_link_libraries(${ENGINE_TARGET} PUBLIC EnTT::EnTT)
 target_link_libraries(${ENGINE_TARGET} PUBLIC Tracy::TracyClient)
 target_link_libraries(${ENGINE_TARGET} PUBLIC ktx)
-target_link_libraries(${ENGINE_TARGET} PUBLIC assimp::assimp)
-target_link_libraries(${ENGINE_TARGET} PUBLIC nlohmann_json::nlohmann_json)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 

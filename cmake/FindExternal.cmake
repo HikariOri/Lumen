@@ -18,6 +18,9 @@ find_package(slang CONFIG REQUIRED)
 # ============================================================================
 # 3D模型加载
 # ============================================================================
+find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
+find_package(tinyobjloader CONFIG REQUIRED)
+find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
 find_package(fastgltf CONFIG REQUIRED)
 
 # ============================================================================
@@ -82,4 +85,3 @@ find_package(libuv CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 
 find_package(Tracy CONFIG REQUIRED)
-find_package(assimp CONFIG REQUIRED)
