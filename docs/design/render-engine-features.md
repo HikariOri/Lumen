@@ -189,6 +189,19 @@
 - [ ] 视频录制：连续帧读回并编码为 MP4/WebM（FFmpeg 或 OpenCV）
 - [ ] 导出 FPS、分辨率可配置；可选异步编码与 UI 状态/报错反馈
 
+### 附：Demo3D 与 §7 / §7a 落地对照
+
+**说明**：下文描述的是 **`examples/demo3d` 示例** 的当前能力，用于与 §7、§7a **逐项对照**；**不**代表将上文全局勾选框整体标为已完成（全引擎默认渲染器、资产管线等仍按清单推进）。
+
+| 对照 | Demo3D 状态 |
+|------|-------------|
+| §7 金属 / 粗糙度、BaseColor / MR / Normal / AO / Emissive、多光源、IBL、材质与 UBO / Descriptor 对接 | 已实现：双 Set（场景 + 材质）、`PbrMaterialUbo`、掩码控制标量或贴图、`cube.frag` 与 `main.cpp` 一致 |
+| §7a 贴图槽与标量二选一、Alpha（Opaque / Mask / Blend）、双面与混合相关渲染状态、GPU 绑定与管线变体 | 已实现：见 [demo3d-pbr-material-system.md](demo3d-pbr-material-system.md) |
+| §7a 材质资产 / 材质实例（独立于组件的正式分层）、SubMesh 绑定、序列化与加载、同材质合批 | **未**在 Demo3D 实现 |
+| §6 噪声 / 程序化噪声 | **未**实现 |
+
+专文：[demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)（架构、Binding、UBO 字段、ECS、限制与后续工作）。
+
 ---
 
 ## 二、按阶段的实现顺序（建议）

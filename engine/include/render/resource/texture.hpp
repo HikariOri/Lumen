@@ -56,6 +56,14 @@ public:
                           const SamplerConfig &samplerConfig = {});
 
     /**
+     * @brief 从 KTX / KTX2 文件创建纹理（libktx 解码为 RGBA8 后上传）
+     */
+    bool create_from_ktx_file(const Context &ctx, const char *filePath,
+                              VkQueue transferQueue, CommandPool &cmdPool,
+                              VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+                              const SamplerConfig &samplerConfig = {});
+
+    /**
      * @brief 从 6 面 RGBA8 像素创建立方体贴图（顺序 +X,-X,+Y,-Y,+Z,-Z），含
      * Mipmap
      *

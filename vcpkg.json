@@ -229,6 +229,17 @@
     {
       "name": "libuv",
       "version>=": "1.51.0"
+    },
+    {
+      "name": "tracy",
+      "version>=": "0.13.1",
+      "features": [
+        "cli-tools",
+        "crash-handler",
+        "fibers",
+        "on-demand",
+        "verbose"
+      ]
     }
   ]
 }

@@ -83,3 +83,5 @@ find_package(eventpp CONFIG REQUIRED)
 find_package(uvw CONFIG REQUIRED)
 find_package(libuv CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
+
+find_package(Tracy CONFIG REQUIRED)

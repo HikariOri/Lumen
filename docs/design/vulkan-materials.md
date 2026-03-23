@@ -188,7 +188,8 @@ private:
 
 ## 10. 参考
 
-- 本仓库 **Demo3D 落地顺序与 IBL/PBR 面板**： [material-system-ibl-pbr.md](material-system-ibl-pbr.md)
+- 本仓库 **Demo3D 当前材质与双 Set 实现**：[demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)
+- **Demo3D 分阶段规划与面板演进**：[material-system-ibl-pbr.md](material-system-ibl-pbr.md)
 - [Vulkan Guide：Material / GPU-driven](https://vkguide.dev/docs/gpudriven/material_system/)
 - [Vulkan Guide：Descriptors](https://vkguide.dev/docs/chapter-4/descriptors/)
 - [Khronos：Vulkan Specification — Descriptors](https://docs.vulkan.org/spec/latest/chapters/descriptorsets.html)

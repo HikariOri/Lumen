@@ -54,3 +54,15 @@ add_custom_command(
           "$<TARGET_FILE_DIR:demo3d>/assets"
   VERBATIM
 )
+
+if(WIN32 AND TARGET ktx)
+  add_custom_command(
+    TARGET demo3d
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:ktx>
+            $<TARGET_FILE_DIR:demo3d>
+    COMMENT "Copy libktx DLL next to demo3d (Windows shared build)"
+    VERBATIM
+  )
+endif()

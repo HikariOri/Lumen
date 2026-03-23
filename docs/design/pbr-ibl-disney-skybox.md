@@ -2,7 +2,7 @@
 
 本文说明 **Lumen** 中在 `examples/demo3d` 落地的 **金属–粗糙度 PBR**、**基于图像的光照（IBL）**、**天空盒**，以及着色器里采用的 **迪士尼原则性 BRDF 中的漫反射项 + 工业界常用的 GGX 镜面项** 的组合。正文排版遵循 [guides/chinese-typography.md](../guides/chinese-typography.md)。
 
-**扩展规划**（每物体材质、环境贴图文件加载、Descriptor 拆分、Inspector 材质块等）见 [material-system-ibl-pbr.md](material-system-ibl-pbr.md)。
+**材质与 Descriptor 的当前落地**（双 Set、`MaterialComponent`、`PbrMaterialUbo`、贴图槽掩码、Alpha / 双面管线等）见 [demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)。演进规划见 [material-system-ibl-pbr.md](material-system-ibl-pbr.md)。
 
 ---
 
@@ -38,14 +38,15 @@ Scene RenderPass（颜色 + 深度）
 
 | 组件 | 路径或类型 |
 |------|------------|
-| 环境立方体贴图 | `lumen::render::Texture::create_cubemap_from_rgba8_faces`（引擎） |
+| 环境立方体贴图 | `lumen::render::Texture::create_cubemap_from_rgba8_faces` 或 `load_cubemap_from_face_files` / HDR 等（引擎 + `main.cpp` 环境面板） |
 | 程序化天空像素 | `examples/demo3d/src/pbr_resources.cpp` → `fill_procedural_sky_faces` |
 | BRDF LUT | `generate_brdf_lut_rgba8` → `Texture::create_from_memory`（256² RGBA8，无 Mipmap） |
 | 天空几何 | `main.cpp` 中单位立方体 8 顶点 + 36 索引，独立 `VertexBuffer` / `IndexBuffer` |
-| 统一 UBO | `struct UBO`：`model`、`mvp`、`normalMatrix`、`cameraWorld`、`lights[]`、`sceneParams`、`skyMvp`、`skyOrientInv`、`pbrParams`、`envParams` |
-| 描述符集（set = 0） | binding 0 UBO；1 `sampler2D` 反照率；2 `samplerCube` 环境；3 `sampler2D` BRDF LUT |
+| 场景 UBO | `SceneUbo`：`model`、`mvp`、`normalMatrix`、`cameraWorld`、`lights[]`、`sceneParams`、`skyMvp`、`skyOrientInv`、`envParams`（曝光、Mip、IBL 强度等） |
+| **Set 0** | binding 0 场景 UBO；1 `samplerCube` `envMap`；2 `sampler2D` `brdfLUT` |
+| **Set 1**（主模型 Lit） | binding 0 `PbrMaterialUbo`；1–5 为反照率 / 法线 / MR / AO / 自发光 combined sampler（缺槽用占位纹理）；详见 [demo3d-pbr-material-system.md](demo3d-pbr-material-system.md) |
 
-天空与主材质 **共用同一 `PipelineLayout` 与 DescriptorSet**，以便绑定一致；天空片元仅使用 binding 0 与 2。
+**天空盒**与主模型 **共用同一 `VkPipelineLayout`（双 Set 布局）**；绘制天空时仅绑定 **Set 0**（片元使用 UBO + `envMap`）。主模型绘制时绑定 **Set 0 + Set 1**。
 
 ### 2.3 引擎侧立方体贴图
 
@@ -110,9 +111,8 @@ LUT 在 `pbr_resources.cpp` 中用 **重要性采样的 GGX** 与 **1024 样本*
 
 构建目标 `demo3d`，在 **Demo3D** 窗口中：
 
-- **Metallic / Roughness / AO**：`pbrParams`；
-- **IBL Strength**：漫反射 + 镜面 IBL 总增益；
-- **Env Exposure**：环境贴图与天空盒亮度（`envParams.x`）。
+- **PBR 标量 / 贴图路径、Alpha、双面**：选中带 `Material` 的实体，在 **Inspector → Material** 编辑；GPU 数据见 `PbrMaterialUbo` 与 [demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)。
+- **IBL Strength / Env Exposure**：**Environment** 面板与 `SceneUbo.envParams`（与历史文档中全局 `pbrParams.w` 分离后的写法一致）。
 
 **Lit / Wireframe** 下会先画天空盒再画模型；**Normal / Depth** 下主场景不画天空盒，仅清屏色。
 
@@ -138,7 +138,8 @@ LUT 在 `pbr_resources.cpp` 中用 **重要性采样的 GGX** 与 **1024 样本*
 | `examples/demo3d/src/pbr_resources.hpp/.cpp` | 程序化天空、BRDF LUT |
 | `examples/demo3d/shaders/cube.frag` | PBR + IBL 主片元 |
 | `examples/demo3d/shaders/skybox.vert/.frag` | 天空盒 |
-| `examples/demo3d/src/main.cpp` | UBO、描述符、管线、绘制顺序、ImGui |
+| `examples/demo3d/src/main.cpp` | 双 Set 描述符、场景 / 材质 UBO、管线变体、绘制顺序、ImGui |
+| [demo3d-pbr-material-system.md](demo3d-pbr-material-system.md) | 材质系统实现说明（与 BRDF / IBL 本文互补） |
 | `examples/demo3d/CMakeLists.txt` | 编译 `pbr_resources.cpp` 与 `skybox` 着色器 |
 
 ---

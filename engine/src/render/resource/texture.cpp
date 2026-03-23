@@ -4,6 +4,7 @@
  */
 
 #include "render/resource/texture.hpp"
+#include "core/ktx_texture_rgba8.hpp"
 #include "core/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
@@ -226,6 +227,31 @@ bool Texture::create_from_file(const Context &ctx, const char *filePath,
         return false;
     }
     LUMEN_LOG_DEBUG("纹理加载成功: {} {}x{}", filePath, texWidth, texHeight);
+    return create_sampler_(ctx, samplerConfig);
+}
+
+bool Texture::create_from_ktx_file(const Context &ctx, const char *filePath,
+                                   VkQueue transferQueue, CommandPool &cmdPool,
+                                   VkFormat format,
+                                   const SamplerConfig &samplerConfig) {
+    std::vector<std::uint8_t> rgba;
+    std::uint32_t texWidth = 0;
+    std::uint32_t texHeight = 0;
+    std::string kerr;
+    if (!lumen::core::decode_ktx_file_to_rgba8(filePath, rgba, texWidth,
+                                               texHeight, &kerr)) {
+        LUMEN_LOG_ERROR("KTX 解码失败 {}: {}", filePath != nullptr ? filePath : "",
+                        kerr);
+        return false;
+    }
+    const size_t imageSize =
+        static_cast<size_t>(texWidth) * static_cast<size_t>(texHeight) * 4u;
+    if (!create_from_pixels_(ctx, rgba.data(), imageSize, texWidth, texHeight,
+                             format, transferQueue, cmdPool, true)) {
+        LUMEN_LOG_ERROR("KTX 纹理上传失败: {}x{}", texWidth, texHeight);
+        return false;
+    }
+    LUMEN_LOG_DEBUG("KTX 纹理加载成功: {} {}x{}", filePath, texWidth, texHeight);
     return create_sampler_(ctx, samplerConfig);
 }
 

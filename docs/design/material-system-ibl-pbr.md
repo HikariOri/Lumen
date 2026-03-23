@@ -2,7 +2,7 @@
 
 本文规划 **Lumen** 在 **金属–粗糙度 PBR**、**IBL（基于图像的光照）** 与 **ImGui 材质/环境编辑面板** 上的数据模型、GPU 布局、着色器扩展与分阶段落地顺序，作为实现前的单一事实来源。正文排版遵循 [guides/chinese-typography.md](../guides/chinese-typography.md)。
 
-**相关文档**：[pbr-ibl-disney-skybox.md](pbr-ibl-disney-skybox.md)（当前 Demo3D 着色模型与 IBL 近似）、[vulkan-materials.md](vulkan-materials.md)（Effect / Material / Descriptor 分层）、[ui-panels.md](ui-panels.md)（面板架构）、[render-engine-roadmap.md](render-engine-roadmap.md)。
+**相关文档**：[demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)（Demo3D 已实现的双 Set、UBO、掩码与管线变体）、[pbr-ibl-disney-skybox.md](pbr-ibl-disney-skybox.md)（BRDF / IBL / 天空盒原理）、[vulkan-materials.md](vulkan-materials.md)（Effect / Material / Descriptor 分层）、[ui-panels.md](ui-panels.md)（面板架构）、[render-engine-roadmap.md](render-engine-roadmap.md)。
 
 ---
 
@@ -28,14 +28,14 @@
 
 ## 2. 现状摘要（Demo3D）
 
-以下描述实现本文档时的起点，便于 diff 心智模型。
+**以仓库当前代码为准**；下列为已实现部分，详细 Binding、UBO 字段与未实现项见 **[demo3d-pbr-material-system.md](demo3d-pbr-material-system.md)**。
 
-- **着色器**（`examples/demo3d/shaders/cube.frag`）：单张 **反照率** `sampler2D`；`pbrParams`（metallic, roughness, ao, iblStrength）与 **全局** `envParams`（exposure, maxMip, diffMip）在 **UBO**；IBL 为 **split-sum** + `samplerCube` + `brdfLUT`。
-- **CPU**：`main.cpp` 中全局 `pbr_metallic` 等与 ImGui 调试滑条绑定；**无** `MaterialComponent`；**无** 每物体描述符。
-- **环境贴图**：`pbr_resources.cpp` 程序化 RGBA8 立方体 + `Texture::create_cubemap_from_rgba8_faces`；BRDF LUT CPU 预积分。
-- **Inspector**：`SceneInspectorPanel` 含 Transform / Light / Drawable 等，**无** 材质块。
+- **着色器**（`cube.frag` / `cube.vert`）：**Set 0** 场景 UBO + `envMap` + `brdfLUT`；**Set 1** `PbrMaterialUbo` + 五槽 PBR 贴图；反照率贴图 **sRGB → 线性**；**掩码**控制各槽「仅标量」或「贴图 × 因子」；**Alpha** Opaque / Mask / Blend。
+- **CPU / ECS**：`MaterialComponent`（路径 + 因子 + `MaterialAlphaMode` + `double_sided`）；`main.cpp` 中按路径加载 `Texture`、`reload` 写 Descriptor；每帧写 `SceneUbo` 与 `PbrMaterialUbo`；**IBL 强度**在 `envParams.w`。
+- **环境**：程序化立方体与 / 或 **六面目录 / 单张 HDR** 等（`cubemap_file_loader` + Environment 面板）。
+- **Inspector**：材质块（路径、标量、Apply、Alpha、双面）+ Environment 面板。
 
-**差距**：材质与 IBL 均为「全局一份」，无法按物体换贴图/参数，也无法从资产路径加载环境图。
+**仍属规划范围（未在 Demo3D 落地）**：正式 **Material 资产 / 实例** 分层、**Descriptor 去重缓存**、**序列化**、**SubMesh 每段材质**、**同材质合批**、运行时 HDR 立方体镜面卷积等（见 §1.2、§9）。
 
 ---
 

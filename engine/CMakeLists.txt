@@ -29,6 +29,8 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC Vulkan::Headers)
 target_link_libraries(${ENGINE_TARGET} PUBLIC GPUOpen::VulkanMemoryAllocator)
 target_link_libraries(${ENGINE_TARGET} PUBLIC ghcFilesystem::ghc_filesystem)
 target_link_libraries(${ENGINE_TARGET} PUBLIC EnTT::EnTT)
+target_link_libraries(${ENGINE_TARGET} PUBLIC Tracy::TracyClient)
+target_link_libraries(${ENGINE_TARGET} PUBLIC ktx)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 

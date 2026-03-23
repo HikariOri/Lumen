@@ -37,6 +37,7 @@ layout(set = 1, binding = 0) uniform MaterialUBO {
     vec4 baseColorFactor;
     vec4 mrAoFactors;
     vec4 emissiveFactor;
+    vec4 shaderParams;
 } matUbo;
 
 layout(set = 1, binding = 1) uniform sampler2D albedoMap;
@@ -110,6 +111,17 @@ vec3 perturb_normal(vec3 N, vec3 worldPos, vec3 V, vec2 uv, vec3 map) {
     return normalize(TBN * map);
 }
 
+vec3 srgb_to_linear_rgb(vec3 c) {
+    bvec3 lo = lessThanEqual(c, vec3(0.04045));
+    vec3 a = c / 12.92;
+    vec3 b = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(b, a, vec3(lo));
+}
+
+uint material_tex_mask() {
+    return floatBitsToUint(matUbo.shaderParams.z);
+}
+
 void accum_light_pbr(GPULight L, vec3 N, vec3 V, vec3 albedo, float metallic,
                      float roughness, out vec3 Lo) {
     float kind = L.position.w;
@@ -179,22 +191,57 @@ void main() {
 
     vec3 V = normalize(scene.cameraWorld.xyz - fragWorldPos);
     vec3 N0 = normalize(fragNormal);
-    vec3 tn = texture(normalMap, fragUV).rgb;
-    vec3 N = perturb_normal(N0, fragWorldPos, V, fragUV, tn);
+    uint tmask = material_tex_mask();
+
+    vec3 albedo_linear;
+    float albedo_a = 1.0;
+    if ((tmask & 1u) != 0u) {
+        vec4 tc = texture(albedoMap, fragUV);
+        albedo_linear = srgb_to_linear_rgb(tc.rgb) * matUbo.baseColorFactor.rgb;
+        albedo_a = tc.a;
+    } else {
+        albedo_linear = matUbo.baseColorFactor.rgb;
+        albedo_a = matUbo.baseColorFactor.a;
+    }
+    vec3 albedo = albedo_linear * pc.modelColor.rgb;
+
+    vec3 N;
+    if ((tmask & 2u) != 0u) {
+        vec3 tn = texture(normalMap, fragUV).rgb;
+        N = perturb_normal(N0, fragWorldPos, V, fragUV, tn);
+    } else {
+        N = N0;
+    }
+
+    float metallic;
+    float roughness;
+    if ((tmask & 4u) != 0u) {
+        vec4 mrSample = texture(metallicRoughnessMap, fragUV);
+        // kMatTexBitMrIsSpecularGlossinessMap = 32：KHR spec/gloss 贴图绑在 MR 槽
+        if ((tmask & 32u) != 0u) {
+            metallic = clamp(matUbo.mrAoFactors.x, 0.0, 1.0);
+            float gloss = clamp(mrSample.a * matUbo.mrAoFactors.y, 0.0, 1.0);
+            roughness = clamp(1.0 - gloss, 0.04, 1.0);
+        } else {
+            metallic = clamp(mrSample.b * matUbo.mrAoFactors.x, 0.0, 1.0);
+            roughness = clamp(mrSample.g * matUbo.mrAoFactors.y, 0.04, 1.0);
+        }
+    } else {
+        metallic = clamp(matUbo.mrAoFactors.x, 0.0, 1.0);
+        roughness = clamp(matUbo.mrAoFactors.y, 0.04, 1.0);
+    }
+
+    float ao;
+    if ((tmask & 8u) != 0u) {
+        ao = clamp(texture(aoMap, fragUV).r * matUbo.mrAoFactors.z, 0.0, 1.0);
+    } else {
+        ao = clamp(matUbo.mrAoFactors.z, 0.0, 1.0);
+    }
 
     float exposure = max(scene.envParams.x, 0.0);
     float maxMip = max(scene.envParams.y, 0.0);
     float diffMip = max(scene.envParams.z, 0.0);
     float iblStrength = max(scene.envParams.w, 0.0);
-
-    vec4 texColor = texture(albedoMap, fragUV);
-    vec3 albedo = texColor.rgb * matUbo.baseColorFactor.rgb * pc.modelColor.rgb;
-
-    vec4 mrSample = texture(metallicRoughnessMap, fragUV);
-    float metallic = clamp(mrSample.b * matUbo.mrAoFactors.x, 0.0, 1.0);
-    float roughness =
-        clamp(mrSample.g * matUbo.mrAoFactors.y, 0.04, 1.0);
-    float ao = clamp(texture(aoMap, fragUV).r * matUbo.mrAoFactors.z, 0.0, 1.0);
 
     int nLights = int(scene.sceneParams.x + 0.5);
     nLights = min(nLights, kMaxLights);
@@ -220,8 +267,26 @@ void main() {
     vec3 spec_ibl = prefiltered * (F0 * brdf.x + brdf.y) * ao;
 
     vec3 ambient = (diffuse_ibl + spec_ibl) * iblStrength;
-    vec3 emissive =
-        texture(emissiveMap, fragUV).rgb * matUbo.emissiveFactor.rgb;
+
+    vec3 emissive;
+    if ((tmask & 16u) != 0u) {
+        emissive = texture(emissiveMap, fragUV).rgb * matUbo.emissiveFactor.rgb;
+    } else {
+        emissive = matUbo.emissiveFactor.rgb;
+    }
+
     vec3 color = ambient + Lo + emissive;
-    outColor = vec4(color, texColor.a * pc.modelColor.a * matUbo.baseColorFactor.a);
+
+    float alpha = albedo_a * pc.modelColor.a * matUbo.baseColorFactor.a;
+    float amode = matUbo.shaderParams.x;
+    if (amode > 0.5 && amode < 1.5) {
+        if (alpha < matUbo.shaderParams.y)
+            discard;
+    }
+
+    float out_alpha = 1.0;
+    if (amode > 1.5) {
+        out_alpha = alpha;
+    }
+    outColor = vec4(color, out_alpha);
 }

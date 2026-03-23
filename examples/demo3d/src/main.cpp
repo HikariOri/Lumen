@@ -5,6 +5,7 @@
 
 #include "engine.hpp"
 
+#include "core/gltf_loader.hpp"
 #include "core/logger.hpp"
 #include "core/obj_loader.hpp"
 #include "core/path.hpp"
@@ -17,6 +18,7 @@
 #include "render/pass/render_graph.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
+#include "render/material_texture_mask.hpp"
 #include "render/pbr_material_ubo.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/cubemap_file_loader.hpp"
@@ -59,6 +61,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <SDL3/SDL.h>
@@ -115,6 +118,22 @@ std::string resolve_asset_path(const std::string &p) {
     return p;
 }
 
+bool path_ends_with_ci(std::string_view s, std::string_view ext) {
+    if (s.size() < ext.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < ext.size(); ++i) {
+        const char a = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(s[s.size() - ext.size() + i])));
+        const char b = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(ext[i])));
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void write_material_descriptor_images(
     VkDevice dev, VkDescriptorSet set,
     const lumen::render::PbrPlaceholderTextures &ph,
@@ -138,6 +157,7 @@ void write_material_descriptor_images(
 }
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
+constexpr const char *kGltfPath { "assets/model/adamHead/adamHead.gltf" };
 constexpr const char *kObjPath { "assets/model/Mythra_1.04/Mythra_1.04.obj" };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
 constexpr float kViewCubeSize { 96.0f };
@@ -394,11 +414,21 @@ static int run_demo3d() {
         return -1;
     }
 
-    // OBJ 模型加载
+    // glTF 优先，失败则回退 OBJ
     lumen::core::ObjMesh mesh;
-    std::string objPath = lumen::core::get_resource_path(kObjPath);
-    if (!lumen::core::load_obj(objPath, mesh)) {
-        LUMEN_APP_LOG_ERROR("OBJ 加载失败: {}", objPath);
+    lumen::scene::MaterialComponent gltf_material {};
+    std::vector<lumen::core::GltfSubmeshRange> gltf_submeshes;
+    std::vector<lumen::scene::MaterialComponent> gltf_materials;
+    std::unordered_map<std::string, lumen::render::Texture> gltf_tex_cache;
+    bool loaded_from_gltf = false;
+    const std::string gltfPath = lumen::core::get_resource_path(kGltfPath);
+    const std::string objPath = lumen::core::get_resource_path(kObjPath);
+    if (lumen::core::load_gltf(gltfPath, mesh, gltf_material, &gltf_submeshes,
+                                &gltf_materials)) {
+        loaded_from_gltf = true;
+    } else if (!lumen::core::load_obj(objPath, mesh)) {
+        LUMEN_APP_LOG_ERROR("模型加载失败（glTF 与 OBJ 均失败） glTF: {} OBJ: {}",
+                            gltfPath, objPath);
         return -1;
     }
     if (mesh.vertices.empty() || mesh.indices.empty()) {
@@ -433,6 +463,16 @@ static int run_demo3d() {
     indexBuffer.upload(mesh.indices.data(), indexBytes);
 
     const uint32_t indexCount = static_cast<uint32_t>(mesh.indices.size());
+    const bool use_gltf_multimat =
+        loaded_from_gltf && !gltf_submeshes.empty() && !gltf_materials.empty();
+    static const lumen::scene::MaterialComponent kGltfMissingMaterial = [] {
+        lumen::scene::MaterialComponent m {};
+        m.base_color_factor = glm::vec4(1.0f);
+        m.metallic_factor = 0.0f;
+        m.roughness_factor = 0.5f;
+        m.ao_factor = 1.0f;
+        return m;
+    }();
 
     lumen::render::CommandPool cmdPool;
     if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
@@ -715,6 +755,26 @@ static int run_demo3d() {
         return -1;
     }
 
+    lumen::render::GraphicsPipelineConfig pipe_config_nocull = pipeConfig;
+    pipe_config_nocull.cullMode = VK_CULL_MODE_NONE;
+    lumen::render::GraphicsPipeline pipeline_nocull;
+    if (!pipeline_nocull.create(ctx, pipelineLayout.handle(),
+                                sceneTarget.render_pass(), 0,
+                                pipe_config_nocull)) {
+        return -1;
+    }
+
+    lumen::render::GraphicsPipelineConfig pipe_config_blend = pipeConfig;
+    pipe_config_blend.cullMode = VK_CULL_MODE_NONE;
+    pipe_config_blend.alphaBlend = true;
+    pipe_config_blend.depthWrite = false;
+    lumen::render::GraphicsPipeline pipeline_blend;
+    if (!pipeline_blend.create(ctx, pipelineLayout.handle(),
+                               sceneTarget.render_pass(), 0,
+                               pipe_config_blend)) {
+        return -1;
+    }
+
     lumen::render::GraphicsPipelineConfig sky_pipe_config {};
     sky_pipe_config.stages.push_back(
         { sky_vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
@@ -878,10 +938,14 @@ static int run_demo3d() {
         auto &matc =
             ecs_scene.registry().emplace<lumen::scene::MaterialComponent>(
                 ecs_model_entity);
-        matc.albedo_path = "assets/textures/ikun2026_happy_new_year.jpg";
-        matc.metallic_factor = 0.0f;
-        matc.roughness_factor = 0.42f;
-        matc.ao_factor = 1.0f;
+        if (loaded_from_gltf) {
+            matc = gltf_material;
+        } else {
+            matc.albedo_path = "assets/textures/ikun2026_happy_new_year.jpg";
+            matc.metallic_factor = 0.0f;
+            matc.roughness_factor = 0.42f;
+            matc.ao_factor = 1.0f;
+        }
     }
     {
         auto &reg = ecs_scene.registry();
@@ -930,6 +994,7 @@ static int run_demo3d() {
         mat_tex_mr = lumen::render::Texture {};
         mat_tex_ao = lumen::render::Texture {};
         mat_tex_emissive = lumen::render::Texture {};
+        gltf_tex_cache.clear();
         auto &reg = ecs_scene.registry();
         const ::entt::entity draw = ecs_scene.primary_drawable();
         if (draw == ::entt::null || !reg.valid(draw) ||
@@ -951,25 +1016,66 @@ static int run_demo3d() {
                     return false;
                 }
                 const std::string rp = resolve_asset_path(p);
+                if (path_ends_with_ci(rp, ".ktx") ||
+                    path_ends_with_ci(rp, ".ktx2")) {
+                    return t.create_from_ktx_file(ctx, rp.c_str(),
+                                                  ctx.graphics_queue(), cmdPool);
+                }
                 return t.create_from_file(ctx, rp.c_str(), ctx.graphics_queue(),
                                           cmdPool);
             };
-            const std::string alb = mc.albedo_path.empty()
-                                        ? kDefaultAlbedoPath
-                                        : resolve_asset_path(mc.albedo_path);
-            if (!mat_tex_albedo.create_from_file(
-                    ctx, alb.c_str(), ctx.graphics_queue(), cmdPool)) {
-                LUMEN_APP_LOG_WARN("反照率加载失败: {}", alb);
-                mat_tex_albedo = lumen::render::Texture {};
+            if (!gltf_materials.empty()) {
+                auto ensure_cached = [&](const std::string &rel) {
+                    if (rel.empty()) {
+                        return;
+                    }
+                    if (gltf_tex_cache.find(rel) != gltf_tex_cache.end()) {
+                        return;
+                    }
+                    const std::string rp = resolve_asset_path(rel);
+                    lumen::render::Texture tex;
+                    bool ok = false;
+                    if (path_ends_with_ci(rp, ".ktx") ||
+                        path_ends_with_ci(rp, ".ktx2")) {
+                        ok = tex.create_from_ktx_file(ctx, rp.c_str(),
+                                                      ctx.graphics_queue(),
+                                                      cmdPool);
+                    } else {
+                        ok = tex.create_from_file(ctx, rp.c_str(),
+                                                  ctx.graphics_queue(), cmdPool);
+                    }
+                    if (ok) {
+                        gltf_tex_cache.emplace(rel, std::move(tex));
+                    }
+                };
+                for (const auto &m : gltf_materials) {
+                    ensure_cached(m.albedo_path);
+                    ensure_cached(m.normal_path);
+                    ensure_cached(m.metallic_roughness_path);
+                    ensure_cached(m.ao_path);
+                    ensure_cached(m.emissive_path);
+                }
+            }
+            if (!mc.albedo_path.empty()) {
+                const std::string alb = resolve_asset_path(mc.albedo_path);
+                bool albedo_ok = false;
+                if (path_ends_with_ci(alb, ".ktx") ||
+                    path_ends_with_ci(alb, ".ktx2")) {
+                    albedo_ok = mat_tex_albedo.create_from_ktx_file(
+                        ctx, alb.c_str(), ctx.graphics_queue(), cmdPool);
+                } else {
+                    albedo_ok = mat_tex_albedo.create_from_file(
+                        ctx, alb.c_str(), ctx.graphics_queue(), cmdPool);
+                }
+                if (!albedo_ok) {
+                    LUMEN_APP_LOG_WARN("反照率加载失败: {}", alb);
+                    mat_tex_albedo = lumen::render::Texture {};
+                }
             }
             (void)try_tex(mat_tex_normal, mc.normal_path);
             (void)try_tex(mat_tex_mr, mc.metallic_roughness_path);
             (void)try_tex(mat_tex_ao, mc.ao_path);
             (void)try_tex(mat_tex_emissive, mc.emissive_path);
-            if (!mat_tex_albedo.is_valid()) {
-                mat_tex_albedo.create_from_file(ctx, kDefaultAlbedoPath.c_str(),
-                                                ctx.graphics_queue(), cmdPool);
-            }
         }
         for (uint32_t j = 0; j < kMaxFramesInFlight; ++j) {
             write_material_descriptor_images(
@@ -1068,9 +1174,25 @@ static int run_demo3d() {
                 VkRect2D sceneScissor { { 0, 0 }, sceneExtent };
                 vkCmdSetScissor(cmd, 0, 1, &sceneScissor);
 
-                VkPipeline activePipeline = (renderMode == 1u)
-                                                ? wireframePipeline.handle()
-                                                : pipeline.handle();
+                VkPipeline mesh_fill_pipeline = pipeline.handle();
+                {
+                    const ::entt::registry &reg = ecs_scene.registry();
+                    const ::entt::entity dr = ecs_scene.primary_drawable();
+                    if (dr != ::entt::null && reg.valid(dr) &&
+                        reg.all_of<lumen::scene::MaterialComponent>(dr)) {
+                        const auto &mc =
+                            reg.get<lumen::scene::MaterialComponent>(dr);
+                        if (mc.alpha_mode ==
+                            lumen::scene::MaterialAlphaMode::Blend) {
+                            mesh_fill_pipeline = pipeline_blend.handle();
+                        } else if (mc.double_sided) {
+                            mesh_fill_pipeline = pipeline_nocull.handle();
+                        }
+                    }
+                }
+                VkPipeline activePipeline =
+                    (renderMode == 1u) ? wireframePipeline.handle()
+                                       : mesh_fill_pipeline;
                 PushConstants pushData {};
                 pushData.mode = renderMode;
                 pushData.modelColor = modelColor;
@@ -1100,24 +1222,104 @@ static int run_demo3d() {
                     vkCmdBindVertexBuffers(cmd, 0, 1, &grid_vb, &grid_off);
                     vkCmdDraw(cmd, grid_vertex_count, 1, 0, 0);
                 }
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  activePipeline);
                 vkCmdPushConstants(cmd, pipelineLayout.handle(),
                                    VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(PushConstants), &pushData);
-                VkDescriptorSet mesh_sets[2] = {
-                    descriptorSetsScene[currentFrame],
-                    descriptorSetsMaterial[currentFrame]
-                };
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                        pipelineLayout.handle(), 0, 2,
-                                        mesh_sets, 0, nullptr);
                 VkBuffer vb = vertexBuffer.handle();
                 VkDeviceSize vbOffset { 0 };
                 vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOffset);
                 vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                                      indexBuffer.vk_index_type());
-                vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+
+                auto tex_from_cache =
+                    [&](const std::string &rel)
+                    -> const lumen::render::Texture * {
+                        if (rel.empty()) {
+                            return nullptr;
+                        }
+                        auto it = gltf_tex_cache.find(rel);
+                        if (it == gltf_tex_cache.end() ||
+                            !it->second.is_valid()) {
+                            return nullptr;
+                        }
+                        return &it->second;
+                    };
+
+                if (use_gltf_multimat) {
+                    for (const auto &sm : gltf_submeshes) {
+                        const lumen::scene::MaterialComponent &sm_mc =
+                            (sm.material_index >= 0 &&
+                             sm.material_index <
+                                 static_cast<int>(gltf_materials.size()))
+                                ? gltf_materials[static_cast<size_t>(
+                                      sm.material_index)]
+                                : kGltfMissingMaterial;
+
+                        VkPipeline sub_pipe = activePipeline;
+                        if (renderMode != 1u) {
+                            sub_pipe = pipeline.handle();
+                            if (sm_mc.alpha_mode ==
+                                lumen::scene::MaterialAlphaMode::Blend) {
+                                sub_pipe = pipeline_blend.handle();
+                            } else if (sm_mc.double_sided) {
+                                sub_pipe = pipeline_nocull.handle();
+                            }
+                        }
+                        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                          sub_pipe);
+
+                        lumen::render::PbrMaterialUbo sub_mat_ubo {};
+                        sub_mat_ubo.base_color_factor = sm_mc.base_color_factor;
+                        sub_mat_ubo.mr_ao_factors = glm::vec4(
+                            sm_mc.metallic_factor, sm_mc.roughness_factor,
+                            sm_mc.ao_factor, 0.0f);
+                        sub_mat_ubo.emissive_factor =
+                            glm::vec4(sm_mc.emissive_factor.x,
+                                      sm_mc.emissive_factor.y,
+                                      sm_mc.emissive_factor.z, 0.0f);
+                        const std::uint32_t sub_tex_mask =
+                            lumen::render::material_texture_mask_from_component(
+                                sm_mc);
+                        sub_mat_ubo.shader_params = glm::vec4(
+                            static_cast<float>(
+                                static_cast<unsigned>(sm_mc.alpha_mode)),
+                            sm_mc.alpha_cutoff,
+                            lumen::render::uint_bits_to_float(sub_tex_mask),
+                            0.0f);
+                        materialUniformBuffers[currentFrame].update(sub_mat_ubo);
+
+                        write_material_descriptor_images(
+                            ctx.device(),
+                            descriptorSetsMaterial[currentFrame],
+                            placeholder_textures,
+                            tex_from_cache(sm_mc.albedo_path),
+                            tex_from_cache(sm_mc.normal_path),
+                            tex_from_cache(sm_mc.metallic_roughness_path),
+                            tex_from_cache(sm_mc.ao_path),
+                            tex_from_cache(sm_mc.emissive_path));
+
+                        VkDescriptorSet mesh_sets_multi[2] = {
+                            descriptorSetsScene[currentFrame],
+                            descriptorSetsMaterial[currentFrame]};
+                        vkCmdBindDescriptorSets(
+                            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout.handle(), 0, 2, mesh_sets_multi,
+                            0, nullptr);
+
+                        vkCmdDrawIndexed(cmd, sm.index_count, 1,
+                                         sm.first_index, 0, 0);
+                    }
+                } else {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      activePipeline);
+                    VkDescriptorSet mesh_sets[2] = {
+                        descriptorSetsScene[currentFrame],
+                        descriptorSetsMaterial[currentFrame]};
+                    vkCmdBindDescriptorSets(
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout.handle(),
+                        0, 2, mesh_sets, 0, nullptr);
+                    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+                }
 
                 if (scene_light_gizmos.icons_ready() ||
                     scene_light_gizmos.debug_ready()) {
@@ -1172,19 +1374,90 @@ static int run_demo3d() {
                     vkCmdPushConstants(cmd, pipelineLayout.handle(),
                                        VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                        sizeof(PushConstants), &pc);
-                    VkDescriptorSet aux_sets[2] = {
-                        descriptorSetsScene[currentFrame],
-                        descriptorSetsMaterial[currentFrame]
-                    };
-                    vkCmdBindDescriptorSets(
-                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        pipelineLayout.handle(), 0, 2, aux_sets, 0, nullptr);
                     VkBuffer vb = vertexBuffer.handle();
                     VkDeviceSize vbOff { 0 };
                     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &vbOff);
                     vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                                          indexBuffer.vk_index_type());
-                    vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+
+                    auto tex_from_cache_aux =
+                        [&](const std::string &rel)
+                        -> const lumen::render::Texture * {
+                            if (rel.empty()) {
+                                return nullptr;
+                            }
+                            auto it = gltf_tex_cache.find(rel);
+                            if (it == gltf_tex_cache.end() ||
+                                !it->second.is_valid()) {
+                                return nullptr;
+                            }
+                            return &it->second;
+                        };
+
+                    if (use_gltf_multimat) {
+                        for (const auto &sm : gltf_submeshes) {
+                            const lumen::scene::MaterialComponent &sm_mc =
+                                (sm.material_index >= 0 &&
+                                 sm.material_index <
+                                     static_cast<int>(gltf_materials.size()))
+                                    ? gltf_materials[static_cast<size_t>(
+                                          sm.material_index)]
+                                    : kGltfMissingMaterial;
+
+                            lumen::render::PbrMaterialUbo sub_mat_ubo {};
+                            sub_mat_ubo.base_color_factor =
+                                sm_mc.base_color_factor;
+                            sub_mat_ubo.mr_ao_factors = glm::vec4(
+                                sm_mc.metallic_factor, sm_mc.roughness_factor,
+                                sm_mc.ao_factor, 0.0f);
+                            sub_mat_ubo.emissive_factor = glm::vec4(
+                                sm_mc.emissive_factor.x,
+                                sm_mc.emissive_factor.y,
+                                sm_mc.emissive_factor.z, 0.0f);
+                            const std::uint32_t sub_tex_mask =
+                                lumen::render::material_texture_mask_from_component(
+                                    sm_mc);
+                            sub_mat_ubo.shader_params = glm::vec4(
+                                static_cast<float>(static_cast<unsigned>(
+                                    sm_mc.alpha_mode)),
+                                sm_mc.alpha_cutoff,
+                                lumen::render::uint_bits_to_float(sub_tex_mask),
+                                0.0f);
+                            materialUniformBuffers[currentFrame].update(
+                                sub_mat_ubo);
+
+                            write_material_descriptor_images(
+                                ctx.device(),
+                                descriptorSetsMaterial[currentFrame],
+                                placeholder_textures,
+                                tex_from_cache_aux(sm_mc.albedo_path),
+                                tex_from_cache_aux(sm_mc.normal_path),
+                                tex_from_cache_aux(
+                                    sm_mc.metallic_roughness_path),
+                                tex_from_cache_aux(sm_mc.ao_path),
+                                tex_from_cache_aux(sm_mc.emissive_path));
+
+                            VkDescriptorSet aux_sets_loop[2] = {
+                                descriptorSetsScene[currentFrame],
+                                descriptorSetsMaterial[currentFrame]};
+                            vkCmdBindDescriptorSets(
+                                cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipelineLayout.handle(), 0, 2,
+                                aux_sets_loop, 0, nullptr);
+
+                            vkCmdDrawIndexed(cmd, sm.index_count, 1,
+                                             sm.first_index, 0, 0);
+                        }
+                    } else {
+                        VkDescriptorSet aux_sets[2] = {
+                            descriptorSetsScene[currentFrame],
+                            descriptorSetsMaterial[currentFrame]};
+                        vkCmdBindDescriptorSets(
+                            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout.handle(), 0, 2, aux_sets, 0,
+                            nullptr);
+                        vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
+                    }
                     vkCmdEndRenderPass(cmd);
                 },
         });
@@ -1692,24 +1965,41 @@ static int run_demo3d() {
                                   scene_env.ibl_strength);
         uniformBuffers[currentFrame].update(ubo);
 
-        lumen::render::PbrMaterialUbo matUbo {};
-        if (drawable != ::entt::null &&
-            ecs_scene.registry().all_of<lumen::scene::MaterialComponent>(
-                drawable)) {
-            const auto &mc =
-                ecs_scene.registry().get<lumen::scene::MaterialComponent>(
-                    drawable);
-            matUbo.base_color_factor = mc.base_color_factor;
-            matUbo.mr_ao_factors = glm::vec4(
-                mc.metallic_factor, mc.roughness_factor, mc.ao_factor, 0.0f);
-            matUbo.emissive_factor =
-                glm::vec4(mc.emissive_factor.x, mc.emissive_factor.y,
-                          mc.emissive_factor.z, 0.0f);
-        } else {
-            matUbo.base_color_factor = glm::vec4(1.0f);
-            matUbo.mr_ao_factors = glm::vec4(0.0f, 0.42f, 1.0f, 0.0f);
+        if (!use_gltf_multimat) {
+            lumen::render::PbrMaterialUbo matUbo {};
+            if (drawable != ::entt::null &&
+                ecs_scene.registry().all_of<lumen::scene::MaterialComponent>(
+                    drawable)) {
+                const auto &mc =
+                    ecs_scene.registry().get<lumen::scene::MaterialComponent>(
+                        drawable);
+                matUbo.base_color_factor = mc.base_color_factor;
+                matUbo.mr_ao_factors = glm::vec4(
+                    mc.metallic_factor, mc.roughness_factor, mc.ao_factor,
+                    0.0f);
+                matUbo.emissive_factor =
+                    glm::vec4(mc.emissive_factor.x, mc.emissive_factor.y,
+                              mc.emissive_factor.z, 0.0f);
+                const std::uint32_t tex_mask =
+                    lumen::render::material_texture_mask_from_component(mc);
+                matUbo.shader_params =
+                    glm::vec4(static_cast<float>(static_cast<unsigned>(
+                                  mc.alpha_mode)),
+                              mc.alpha_cutoff,
+                              lumen::render::uint_bits_to_float(tex_mask),
+                              0.0f);
+            } else {
+                matUbo.base_color_factor = glm::vec4(1.0f);
+                matUbo.mr_ao_factors = glm::vec4(0.0f, 0.42f, 1.0f, 0.0f);
+                matUbo.emissive_factor = glm::vec4(0.0f);
+                matUbo.shader_params =
+                    glm::vec4(0.0f, 0.5f,
+                              lumen::render::uint_bits_to_float(
+                                  lumen::render::kMatTexBitAlbedo),
+                              0.0f);
+            }
+            materialUniformBuffers[currentFrame].update(matUbo);
         }
-        materialUniformBuffers[currentFrame].update(matUbo);
 
         if (scene_light_gizmos.icons_ready() ||
             scene_light_gizmos.debug_ready()) {

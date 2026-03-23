@@ -53,9 +53,19 @@ struct ParentComponent {
 struct DrawableTag {};
 
 /**
+ * @brief 与 `render-engine-features.md` 7a 节 Alpha 模式一致
+ */
+enum class MaterialAlphaMode : std::uint8_t {
+    Opaque = 0,
+    Mask = 1,
+    Blend = 2,
+};
+
+/**
  * @brief PBR 材质参数与贴图路径（金属–粗糙度工作流）
  *
- * 路径为空时使用引擎占位纹理；运行时应在 GPU 侧解析为 Texture 并写 Descriptor。
+ * 路径为空表示该槽位仅用标量因子（见 `material_texture_mask.hpp`）；非空则 GPU
+ * 绑定真实贴图。Alpha 模式与双面由管线变体配合（非序列化演示数据）。
  */
 struct MaterialComponent {
     glm::vec4 base_color_factor { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -65,6 +75,15 @@ struct MaterialComponent {
     float _pad0 {};
     glm::vec3 emissive_factor { 0.0f, 0.0f, 0.0f };
     float _pad1 {};
+
+    MaterialAlphaMode alpha_mode { MaterialAlphaMode::Opaque };
+    float alpha_cutoff { 0.5f };
+    bool double_sided { false };
+    /// KHR_materials_pbrSpecularGlossiness：`metallic_roughness_path` 实际为
+    /// specularGlossiness 贴图时置 true；着色器用 **A 通道 × roughness_factor**
+    /// 作 glossiness，再得粗糙度（MR 工作流贴图布局不同）。
+    bool spec_gloss_texture_in_mr_slot { false };
+    std::uint8_t _pad2[1] {};
 
     std::string albedo_path;
     std::string normal_path;

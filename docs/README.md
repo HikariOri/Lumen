@@ -45,6 +45,7 @@
 |------|------|
 | [render-engine-roadmap.md](design/render-engine-roadmap.md) | 渲染引擎总体规划 |
 | [pbr-ibl-disney-skybox.md](design/pbr-ibl-disney-skybox.md) | Demo3D：PBR、IBL、天空盒与迪士尼风格 BRDF |
+| [demo3d-pbr-material-system.md](design/demo3d-pbr-material-system.md) | Demo3D：双 Set 材质、贴图槽 / 标量、Alpha、管线变体（与功能清单 §7 / §7a 对照） |
 | [render-engine-features.md](design/render-engine-features.md) | 功能清单与阶段勾选 |
 | [render-graph.md](design/render-graph.md) | RenderGraph 概念、与引擎对照、系统设计 |
 | [scene-ecs.md](design/scene-ecs.md) | Scene 与 ECS |

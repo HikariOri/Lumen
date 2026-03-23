@@ -175,7 +175,21 @@ void SceneInspectorPanel::on_imgui_render() {
                               "%s", mat.emissive_path.c_str());
             }
             ImGui::TextDisabled(
-                "标量与贴图二选一：路径非空则仅用贴图；空则仅用标量。");
+                "标量与贴图二选一：路径非空则绑定贴图并与因子相乘；空则仅用标量因子。");
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Alpha & faces");
+            {
+                int am = static_cast<int>(mat.alpha_mode);
+                if (ImGui::Combo("Alpha mode", &am,
+                                 "Opaque\0Alpha mask\0Alpha blend\0\0")) {
+                    mat.alpha_mode =
+                        static_cast<lumen::scene::MaterialAlphaMode>(am);
+                }
+                ImGui::DragFloat("Alpha cutoff (mask)", &mat.alpha_cutoff,
+                                 0.01f, 0.0f, 1.0f, "%.2f");
+                ImGui::Checkbox("Double sided", &mat.double_sided);
+            }
 
             ImGui::Separator();
             ImGui::TextUnformatted("Base color");
