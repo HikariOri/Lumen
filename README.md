@@ -9,11 +9,10 @@
 ## 获取源码
 
 ```bash
-git clone <你的仓库 URL> Lumen
-cd Lumen
+git clone --recurse-submodules git@github.com:HikariOri/Lumen.git
+git clone --recurse-submodules https://github.com/HikariOri/Lumen.git
 ```
-
-若需要生成带 Doxygen 主题的文档（可选），初始化子模块：
+如何已经 clone 但未初始化子模块，使用下面的命令初始化子模块：
 
 ```bash
 git submodule update --init --recursive
