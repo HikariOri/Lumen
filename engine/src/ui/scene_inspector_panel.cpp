@@ -5,6 +5,7 @@
 #include "ui/scene_inspector_panel.hpp"
 
 #include "scene/components.hpp"
+#include "scene/mesh_render.hpp"
 #include "scene/scene.hpp"
 #include "ui/editor_selection.hpp"
 #include "ui/imgui_hazel_helpers.hpp"
@@ -155,6 +156,16 @@ void SceneInspectorPanel::on_imgui_render() {
                 reg.emplace<lumen::scene::DrawableTag>(e);
             }
         }
+        if (const auto *msh = reg.try_get<lumen::scene::MeshComponent>(e)) {
+            ImGui::Separator();
+            ImGui::Text("Mesh: %zu submesh(es), dominant slot %u",
+                        msh->submeshes.size(), msh->dominant_material_slot);
+            if (const auto *slots =
+                    reg.try_get<lumen::scene::MeshMaterialSlotsComponent>(e)) {
+                ImGui::TextDisabled("材质槽数: %zu（与多段绘制一致）",
+                                    slots->slots.size());
+            }
+        }
         ImGui::TreePop();
     }
 
@@ -252,6 +263,13 @@ void SceneInspectorPanel::on_imgui_render() {
                 mat.metallic_roughness_path = g_mat_mr_path;
                 mat.ao_path = g_mat_ao_path;
                 mat.emissive_path = g_mat_emissive_path;
+                if (auto *msh = reg.try_get<lumen::scene::MeshComponent>(e);
+                    msh != nullptr) {
+                    auto *slots =
+                        reg.try_get<lumen::scene::MeshMaterialSlotsComponent>(e);
+                    lumen::scene::sync_material_component_to_dominant_slot(
+                        mat, *msh, slots);
+                }
                 if (selection_) {
                     selection_->material_texture_reload_requested = true;
                 }

@@ -30,6 +30,8 @@
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
 #include "scene/components.hpp"
+#include "scene/material_library.hpp"
+#include "scene/mesh_render.hpp"
 #include "scene/light.hpp"
 #include "scene/scene.hpp"
 #include "scene/scene_camera_controller.hpp"
@@ -157,7 +159,7 @@ void write_material_descriptor_images(
 }
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
-constexpr const char *kGltfPath { "assets/model/adamHead/adamHead.gltf" };
+constexpr const char *kGltfPath { "assets/model/CarbonFibre/glTF/CarbonFibre.gltf" };
 constexpr const char *kObjPath { "assets/model/Mythra_1.04/Mythra_1.04.obj" };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
 constexpr float kViewCubeSize { 96.0f };
@@ -463,8 +465,6 @@ static int run_demo3d() {
     indexBuffer.upload(mesh.indices.data(), indexBytes);
 
     const uint32_t indexCount = static_cast<uint32_t>(mesh.indices.size());
-    const bool use_gltf_multimat =
-        loaded_from_gltf && !gltf_submeshes.empty() && !gltf_materials.empty();
     static const lumen::scene::MaterialComponent kGltfMissingMaterial = [] {
         lumen::scene::MaterialComponent m {};
         m.base_color_factor = glm::vec4(1.0f);
@@ -947,6 +947,26 @@ static int run_demo3d() {
             matc.ao_factor = 1.0f;
         }
     }
+    lumen::scene::MaterialAssetLibrary material_asset_library {};
+    if (material_asset_library.load_from_json_file(
+            lumen::core::get_resource_path("assets/materials/library.json")) &&
+        material_asset_library.size() > 0) {
+        LUMEN_APP_LOG_DEBUG("材质资产库: {} 项", material_asset_library.size());
+    }
+    if (loaded_from_gltf && !gltf_submeshes.empty() &&
+        !gltf_materials.empty()) {
+        lumen::scene::MeshComponent mesh_comp {};
+        lumen::scene::MeshMaterialSlotsComponent slot_comp {};
+        lumen::scene::populate_mesh_from_gltf_data(mesh_comp, slot_comp,
+                                                   gltf_submeshes,
+                                                   gltf_materials);
+        ecs_scene.registry().emplace<lumen::scene::MeshComponent>(
+            ecs_model_entity, std::move(mesh_comp));
+        ecs_scene.registry().emplace<lumen::scene::MeshMaterialSlotsComponent>(
+            ecs_model_entity, std::move(slot_comp));
+    }
+    gltf_submeshes.clear();
+    gltf_materials.clear();
     {
         auto &reg = ecs_scene.registry();
         auto add_dir = [&](const char *name, glm::vec3 dir, float intensity) {
@@ -1024,31 +1044,34 @@ static int run_demo3d() {
                 return t.create_from_file(ctx, rp.c_str(), ctx.graphics_queue(),
                                           cmdPool);
             };
-            if (!gltf_materials.empty()) {
-                auto ensure_cached = [&](const std::string &rel) {
-                    if (rel.empty()) {
-                        return;
-                    }
-                    if (gltf_tex_cache.find(rel) != gltf_tex_cache.end()) {
-                        return;
-                    }
-                    const std::string rp = resolve_asset_path(rel);
-                    lumen::render::Texture tex;
-                    bool ok = false;
-                    if (path_ends_with_ci(rp, ".ktx") ||
-                        path_ends_with_ci(rp, ".ktx2")) {
-                        ok = tex.create_from_ktx_file(ctx, rp.c_str(),
-                                                      ctx.graphics_queue(),
-                                                      cmdPool);
-                    } else {
-                        ok = tex.create_from_file(ctx, rp.c_str(),
+            auto ensure_cached = [&](const std::string &rel) {
+                if (rel.empty()) {
+                    return;
+                }
+                if (gltf_tex_cache.find(rel) != gltf_tex_cache.end()) {
+                    return;
+                }
+                const std::string rp = resolve_asset_path(rel);
+                lumen::render::Texture tex;
+                bool ok = false;
+                if (path_ends_with_ci(rp, ".ktx") ||
+                    path_ends_with_ci(rp, ".ktx2")) {
+                    ok = tex.create_from_ktx_file(ctx, rp.c_str(),
                                                   ctx.graphics_queue(), cmdPool);
-                    }
-                    if (ok) {
-                        gltf_tex_cache.emplace(rel, std::move(tex));
-                    }
-                };
-                for (const auto &m : gltf_materials) {
+                } else {
+                    ok = tex.create_from_file(ctx, rp.c_str(),
+                                              ctx.graphics_queue(), cmdPool);
+                }
+                if (ok) {
+                    gltf_tex_cache.emplace(rel, std::move(tex));
+                }
+            };
+            if (const auto *slots_comp =
+                    reg.try_get<lumen::scene::MeshMaterialSlotsComponent>(
+                        draw);
+                slots_comp != nullptr && !slots_comp->slots.empty()) {
+                for (const auto &inst : slots_comp->slots) {
+                    const auto &m = inst.resolved;
                     ensure_cached(m.albedo_path);
                     ensure_cached(m.normal_path);
                     ensure_cached(m.metallic_roughness_path);
@@ -1245,14 +1268,27 @@ static int run_demo3d() {
                         return &it->second;
                     };
 
-                if (use_gltf_multimat) {
-                    for (const auto &sm : gltf_submeshes) {
+                const ::entt::registry &mesh_reg = ecs_scene.registry();
+                const ::entt::entity dr_mesh = ecs_scene.primary_drawable();
+                const auto *mesh_ptr =
+                    mesh_reg.try_get<lumen::scene::MeshComponent>(dr_mesh);
+                const auto *slots_ptr = mesh_reg.try_get<
+                    lumen::scene::MeshMaterialSlotsComponent>(dr_mesh);
+                const bool use_submesh_draws =
+                    lumen::scene::mesh_uses_submesh_materials(mesh_ptr,
+                                                              slots_ptr);
+                std::vector<std::uint32_t> submesh_batch_order;
+                if (use_submesh_draws) {
+                    lumen::scene::build_submesh_batch_order(
+                        *mesh_ptr, *slots_ptr, submesh_batch_order);
+                }
+
+                if (use_submesh_draws) {
+                    for (const std::uint32_t bi : submesh_batch_order) {
+                        const auto &sm = mesh_ptr->submeshes[bi];
                         const lumen::scene::MaterialComponent &sm_mc =
-                            (sm.material_index >= 0 &&
-                             sm.material_index <
-                                 static_cast<int>(gltf_materials.size()))
-                                ? gltf_materials[static_cast<size_t>(
-                                      sm.material_index)]
+                            (sm.material_slot < slots_ptr->slots.size())
+                                ? slots_ptr->slots[sm.material_slot].resolved
                                 : kGltfMissingMaterial;
 
                         VkPipeline sub_pipe = activePipeline;
@@ -1394,14 +1430,27 @@ static int run_demo3d() {
                             return &it->second;
                         };
 
-                    if (use_gltf_multimat) {
-                        for (const auto &sm : gltf_submeshes) {
+                    const ::entt::registry &aux_reg = ecs_scene.registry();
+                    const ::entt::entity dr_aux = ecs_scene.primary_drawable();
+                    const auto *aux_mesh =
+                        aux_reg.try_get<lumen::scene::MeshComponent>(dr_aux);
+                    const auto *aux_slots = aux_reg.try_get<
+                        lumen::scene::MeshMaterialSlotsComponent>(dr_aux);
+                    const bool aux_submesh = lumen::scene::mesh_uses_submesh_materials(
+                        aux_mesh, aux_slots);
+                    std::vector<std::uint32_t> aux_batch_order;
+                    if (aux_submesh) {
+                        lumen::scene::build_submesh_batch_order(
+                            *aux_mesh, *aux_slots, aux_batch_order);
+                    }
+
+                    if (aux_submesh) {
+                        for (const std::uint32_t bi : aux_batch_order) {
+                            const auto &sm = aux_mesh->submeshes[bi];
                             const lumen::scene::MaterialComponent &sm_mc =
-                                (sm.material_index >= 0 &&
-                                 sm.material_index <
-                                     static_cast<int>(gltf_materials.size()))
-                                    ? gltf_materials[static_cast<size_t>(
-                                          sm.material_index)]
+                                (sm.material_slot < aux_slots->slots.size())
+                                    ? aux_slots->slots[sm.material_slot]
+                                          .resolved
                                     : kGltfMissingMaterial;
 
                             lumen::render::PbrMaterialUbo sub_mat_ubo {};
@@ -1965,7 +2014,13 @@ static int run_demo3d() {
                                   scene_env.ibl_strength);
         uniformBuffers[currentFrame].update(ubo);
 
-        if (!use_gltf_multimat) {
+        const auto *ub_mesh = ecs_scene.registry().try_get<
+            lumen::scene::MeshComponent>(drawable);
+        const auto *ub_slots = ecs_scene.registry().try_get<
+            lumen::scene::MeshMaterialSlotsComponent>(drawable);
+        const bool skip_single_mat_ubo =
+            lumen::scene::mesh_uses_submesh_materials(ub_mesh, ub_slots);
+        if (!skip_single_mat_ubo) {
             lumen::render::PbrMaterialUbo matUbo {};
             if (drawable != ::entt::null &&
                 ecs_scene.registry().all_of<lumen::scene::MaterialComponent>(

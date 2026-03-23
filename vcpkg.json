@@ -59,15 +59,6 @@
       "features": ["opt", "rtti", "tools"]
     },
     {
-      "name": "tinyobjloader",
-      "version>=": "2.0.0rc13",
-      "features": ["double"]
-    },
-    {
-      "name": "tinygltf",
-      "version>=": "2.9.6"
-    },
-    {
       "name": "vulkan-memory-allocator",
       "version>=": "3.3.0"
     },
@@ -240,6 +231,10 @@
         "on-demand",
         "verbose"
       ]
+    },
+    {
+      "name": "assimp",
+      "version>=": "6.0.4"
     }
   ]
 }

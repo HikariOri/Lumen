@@ -1,6 +1,6 @@
 /**
  * @file gltf_loader.hpp
- * @brief glTF 2.0 / GLB 加载（tinygltf），贴图支持 PNG/JPEG（stb）与 KTX/KTX2（libktx）
+ * @brief glTF 2.0 / GLB 加载（Assimp），材质贴图路径由导入器解析（外链贴图；内嵌贴图路径形如 *N 时当前不填路径）
  */
 
 #pragma once

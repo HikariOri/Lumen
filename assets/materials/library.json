@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "materials": {
+    "default_checker": {
+      "base_color_factor": [1.0, 1.0, 1.0, 1.0],
+      "metallic_factor": 0.0,
+      "roughness_factor": 0.45,
+      "ao_factor": 1.0,
+      "emissive_factor": [0.0, 0.0, 0.0],
+      "alpha_mode": "opaque",
+      "alpha_cutoff": 0.5,
+      "double_sided": false,
+      "spec_gloss_texture_in_mr_slot": false,
+      "albedo_path": "",
+      "normal_path": "",
+      "metallic_roughness_path": "",
+      "ao_path": "",
+      "emissive_path": ""
+    }
+  }
+}

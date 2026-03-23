@@ -1,6 +1,6 @@
 /**
  * @file obj_loader.hpp
- * @brief OBJ 模型加载：基于 tinyobjloader，输出 Vulkan 可用的顶点数据
+ * @brief OBJ 等网格模型加载：基于 Assimp，输出 Vulkan 可用的顶点数据
  */
 
 #pragma once
