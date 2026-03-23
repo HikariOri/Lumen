@@ -214,57 +214,6 @@ ImGuizmo::OPERATION scene_gizmo_to_operation(SceneGizmoTool t) {
     }
 }
 
-/// 顶栏内控件：切换 Scene 主视图渲染模式（与 0–3 快捷键一致）
-void demo3d_render_mode_toolbar_ui(uint32_t &render_mode) {
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-                        ImVec2 { 6.0f, ImGui::GetStyle().ItemSpacing.y });
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("渲染模式");
-    ImGui::SameLine(0.0f, 14.0f);
-
-    struct ModeEntry {
-        const char *label;
-        const char *tooltip;
-        uint32_t mode;
-    };
-    static constexpr std::array<ModeEntry, 4> kModes { {
-        { "Lit", "PBR 光照（与 Scene  dock 一致）\n快捷键：0", 0 },
-        { "Wireframe", "线框\n快捷键：1", 1 },
-        { "Normal", "法线可视化\n快捷键：2", 2 },
-        { "Depth", "深度可视化\n快捷键：3", 3 },
-    } };
-
-    for (std::size_t i = 0; i < kModes.size(); ++i) {
-        if (i > 0) {
-            ImGui::SameLine();
-        }
-        const ModeEntry &m = kModes[i];
-        const bool sel = (render_mode == m.mode);
-        if (sel) {
-            ImGui::PushStyleColor(ImGuiCol_Button,
-                                  ImGui::GetStyleColorVec4(ImGuiCol_Header));
-            ImGui::PushStyleColor(
-                ImGuiCol_ButtonHovered,
-                ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
-            ImGui::PushStyleColor(
-                ImGuiCol_ButtonActive,
-                ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-        }
-        if (ImGui::Button(m.label)) {
-            render_mode = m.mode;
-        }
-        if (sel) {
-            ImGui::PopStyleColor(3);
-        }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort |
-                                 ImGuiHoveredFlags_Stationary)) {
-            ImGui::SetTooltip("%s", m.tooltip);
-        }
-    }
-
-    ImGui::PopStyleVar();
-}
-
 } // namespace
 
 /// XZ 地面网格：`kind` 0 细线、1 粗线（每 10 格）、2 世界 +X 轴、3 世界 +Z 轴
@@ -1276,41 +1225,8 @@ static int run_demo3d() {
                 VkRect2D scissor { { 0, 0 }, swapchain.extent() };
                 vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-                ImGuiViewport *const main_vp = ImGui::GetMainViewport();
-                const ImGuiStyle &ig_style = ImGui::GetStyle();
-                const float toolbar_pad_y = ig_style.WindowPadding.y;
-                const float toolbar_h =
-                    ImGui::GetFrameHeight() + toolbar_pad_y * 2.0f;
-
-                ImGui::SetNextWindowPos(main_vp->WorkPos);
-                ImGui::SetNextWindowSize(main_vp->WorkSize);
-                ImGui::SetNextWindowViewport(main_vp->ID);
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
-                                    ImVec2 { 0.0f, 0.0f });
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-                ImGui::Begin(
-                    "##Demo3DMainDockHost", nullptr,
-                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-                        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                        ImGuiWindowFlags_NoBringToFrontOnFocus |
-                        ImGuiWindowFlags_NoNavFocus |
-                        ImGuiWindowFlags_NoDocking);
-                ImGui::PopStyleVar(2);
-
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
-                                    ImVec2 { 8.0f, toolbar_pad_y });
-                ImGui::BeginChild(
-                    "##RenderToolbar", ImVec2 { 0.0f, toolbar_h },
-                    ImGuiChildFlags_Border, ImGuiWindowFlags_NoScrollbar);
-                demo3d_render_mode_toolbar_ui(renderMode);
-                ImGui::EndChild();
-                ImGui::PopStyleVar();
-
-                const ImGuiID dockspaceId = ImGui::GetID("##Demo3DDockSpace");
-                ImGui::DockSpace(dockspaceId, ImVec2 { 0.0f, 0.0f },
-                                 ImGuiDockNodeFlags_None);
-                ImGui::End();
-
+                ImGuiID dockspaceId =
+                    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
                 ui_panels.set_default_dock_id(dockspaceId);
                 ImGui::SetNextWindowDockID(dockspaceId, ImGuiCond_FirstUseEver);
                 lumen::ui::imgui_texture_view_panel(
@@ -1364,7 +1280,15 @@ static int run_demo3d() {
                 ImGui::SetNextWindowSize(ImVec2(280, 0),
                                          ImGuiCond_FirstUseEver);
                 ImGui::Begin("Demo3D");
-                ImGui::TextDisabled("渲染模式：窗口顶部工具栏（或数字键 0–3）。");
+                ImGui::Text("Render Mode");
+                int mode = static_cast<int>(renderMode);
+                ImGui::RadioButton("Lit", &mode, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Wireframe", &mode, 1);
+                ImGui::RadioButton("Normal", &mode, 2);
+                ImGui::SameLine();
+                ImGui::RadioButton("Depth", &mode, 3);
+                renderMode = static_cast<uint32_t>(mode);
                 ImGui::ColorEdit4("Clear Color", glm::value_ptr(clearColor));
                 ImGui::ColorEdit4("Model Color", glm::value_ptr(modelColor));
                 ImGui::Separator();
@@ -1464,8 +1388,7 @@ static int run_demo3d() {
         "对准选中 Drawable 中心。Alt+左键环绕、Alt+中键平移、Alt+右键"
         "或滚轮缩放；右键+移动环视，右键+WASD 平移枢轴、E/Q "
         "升降。模型：Hierarchy + "
-        "Inspector / Gizmo（Q/W/E/R）；顶部工具栏或 [0]–[3] 切换渲染模式；[ESC] "
-        "退出");
+        "Inspector / Gizmo（Q/W/E/R） [0]–[3] 渲染模式 [ESC] 退出");
 
     constexpr float kZoomSpeed { 0.25f };
 
