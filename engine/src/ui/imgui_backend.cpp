@@ -16,7 +16,8 @@ namespace lumen::ui {
 namespace {
 
 /**
- * @brief Lumen 编辑器默认 ImGui 样式：深蓝灰底、冷色强调，与 3D 视口常见清屏色协调
+ * @brief Lumen 编辑器默认 ImGui 样式：深蓝灰底、冷色强调，与 3D
+ * 视口常见清屏色协调
  */
 void apply_lumen_imgui_style() {
     ImGuiStyle &style = ImGui::GetStyle();
@@ -105,6 +106,49 @@ void apply_lumen_imgui_style() {
     c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.04f, 0.05f, 0.07f, 0.62f);
 }
 
+/**
+ * @brief 与 TheCherno **Hazel** `ImGuiLayer::SetDarkThemeColors` 一致的暗色主题
+ *（见 github.com/TheCherno/Hazel `Hazel/src/Hazel/ImGui/ImGuiLayer.cpp`）。
+ *
+ * Hazel 在启用 Viewports 时还将 `WindowRounding = 0` 且保证 `WindowBg` 不透明；
+ * Lumen 当前未接 ImGui 多视口，仍采用相同圆角与窗口底色以贴近其 Dock 区观感。
+ */
+void apply_hazel_imgui_style() {
+    ImGuiStyle &style = ImGui::GetStyle();
+    ImGui::StyleColorsDark(&style);
+
+    style.WindowRounding = 0.0f;
+    style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+
+    ImVec4 *colors = style.Colors;
+    colors[ImGuiCol_WindowBg] = ImVec4 { 0.1f, 0.105f, 0.11f, 1.0f };
+
+    colors[ImGuiCol_Header] = ImVec4 { 0.2f, 0.205f, 0.21f, 1.0f };
+    colors[ImGuiCol_HeaderHovered] = ImVec4 { 0.3f, 0.305f, 0.31f, 1.0f };
+    colors[ImGuiCol_HeaderActive] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+
+    colors[ImGuiCol_Button] = ImVec4 { 0.2f, 0.205f, 0.21f, 1.0f };
+    colors[ImGuiCol_ButtonHovered] = ImVec4 { 0.3f, 0.305f, 0.31f, 1.0f };
+    colors[ImGuiCol_ButtonActive] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+
+    colors[ImGuiCol_FrameBg] = ImVec4 { 0.2f, 0.205f, 0.21f, 1.0f };
+    colors[ImGuiCol_FrameBgHovered] = ImVec4 { 0.3f, 0.305f, 0.31f, 1.0f };
+    colors[ImGuiCol_FrameBgActive] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+
+    colors[ImGuiCol_Tab] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+    colors[ImGuiCol_TabHovered] = ImVec4 { 0.38f, 0.3805f, 0.381f, 1.0f };
+    colors[ImGuiCol_TabActive] = ImVec4 { 0.28f, 0.2805f, 0.281f, 1.0f };
+    colors[ImGuiCol_TabUnfocused] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+    colors[ImGuiCol_TabUnfocusedActive] = ImVec4 { 0.2f, 0.205f, 0.21f, 1.0f };
+
+    colors[ImGuiCol_TitleBg] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+    colors[ImGuiCol_TitleBgActive] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+    colors[ImGuiCol_TitleBgCollapsed] = ImVec4 { 0.15f, 0.1505f, 0.151f, 1.0f };
+
+    // Dock 空区与主窗底色一致（Hazel 未单独设置，此处避免与默认 Dark 差异过大）
+    colors[ImGuiCol_DockingEmptyBg] = colors[ImGuiCol_WindowBg];
+}
+
 } // namespace
 
 bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
@@ -115,19 +159,18 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    apply_lumen_imgui_style();
+    apply_hazel_imgui_style();
 
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     {
-        const float size =
-            info.cjk_font_size_pixels > 0.0f ? info.cjk_font_size_pixels
-                                             : 18.0f;
-        const bool has_sc =
-            info.cjk_font_ttf_path != nullptr &&
-            info.cjk_font_ttf_path[0] != '\0';
+        const float size = info.cjk_font_size_pixels > 0.0f
+                               ? info.cjk_font_size_pixels
+                               : 18.0f;
+        const bool has_sc = info.cjk_font_ttf_path != nullptr &&
+                            info.cjk_font_ttf_path[0] != '\0';
         const bool has_jp_merge =
             info.cjk_font_japanese_merge_path != nullptr &&
             info.cjk_font_japanese_merge_path[0] != '\0';
@@ -138,10 +181,9 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
                 info.cjk_font_ttf_path, size, nullptr,
                 io.Fonts->GetGlyphRangesDefault());
             if (!base) {
-                LUMEN_LOG_WARN(
-                    "ImGui: failed to load primary CJK font ({}); "
-                    "falling back to default font",
-                    info.cjk_font_ttf_path);
+                LUMEN_LOG_WARN("ImGui: failed to load primary CJK font ({}); "
+                               "falling back to default font",
+                               info.cjk_font_ttf_path);
                 io.Fonts->AddFontDefault();
             } else {
                 ImFontConfig merge_cfg {};
@@ -154,10 +196,9 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
                     info.cjk_font_japanese_merge_path, size, &merge_cfg,
                     io.Fonts->GetGlyphRangesJapanese());
                 if (!jp) {
-                    LUMEN_LOG_WARN(
-                        "ImGui: failed to merge Japanese font ({}); "
-                        "Japanese glyphs may be missing",
-                        info.cjk_font_japanese_merge_path);
+                    LUMEN_LOG_WARN("ImGui: failed to merge Japanese font ({}); "
+                                   "Japanese glyphs may be missing",
+                                   info.cjk_font_japanese_merge_path);
                 }
             }
         } else if (has_sc) {

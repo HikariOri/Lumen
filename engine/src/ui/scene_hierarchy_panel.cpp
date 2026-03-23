@@ -88,7 +88,7 @@ void SceneHierarchyPanel::on_imgui_render() {
         return;
     }
 
-    ImGui::Begin("Hierarchy");
+    ImGui::Begin("Scene Hierarchy");
     ::entt::registry &reg = scene_->registry();
 
     if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {

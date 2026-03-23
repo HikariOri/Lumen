@@ -7,10 +7,10 @@
 #include "scene/components.hpp"
 #include "scene/scene.hpp"
 #include "ui/editor_selection.hpp"
+#include "ui/imgui_hazel_helpers.hpp"
 
-#include <algorithm>
-#include <cfloat>
 #include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 
 #include <ImGuizmo.h>
@@ -21,71 +21,30 @@
 namespace lumen::ui {
 namespace {
 
-/// 与 Unity / UE 视口一致的轴向色：X 红、Y 绿、Z 蓝
-constexpr ImVec4 kAxisX { 0.95f, 0.32f, 0.32f, 1.0f };
-constexpr ImVec4 kAxisY { 0.40f, 0.82f, 0.42f, 1.0f };
-constexpr ImVec4 kAxisZ { 0.38f, 0.62f, 0.98f, 1.0f };
-
-/// 与 `drag_float3_color_row` 搭配的标签列宽（最长文案 + 内边距），保证多行右侧控件左缘对齐。
-float label_column_width_for_vec3_rows() {
-    const ImGuiStyle &st = ImGui::GetStyle();
-    float w = 0.0f;
-    for (const char *s :
-         {"Position", "Rotation (deg)", "Scale", "Direction (local)"}) {
-        w = std::max(w, ImGui::CalcTextSize(s).x);
-    }
-    return w + st.ItemInnerSpacing.x;
-}
-
-/// 单行：■红 ■绿 ■蓝 各带一个 DragFloat（无 X/Y/Z 文字）
-[[nodiscard]] bool drag_float3_color_row(const char *group_id, float *v3,
-                                           float speed, float min_v, float max_v,
-                                           const char *fmt) {
-    ImGui::PushID(group_id);
-    const float block_sz = ImGui::GetFrameHeight();
-    const float avail = ImGui::GetContentRegionAvail().x;
-    constexpr float gap_block_to_drag { 4.0f };
-    constexpr float gap_between_axes { 6.0f };
-    const float drag_total =
-        avail - 3.0f * block_sz - 3.0f * gap_block_to_drag -
-        2.0f * gap_between_axes;
-    float drag_w = drag_total / 3.0f;
-    if (drag_w < 24.0f) {
-        drag_w = 24.0f;
-    }
-
-    const ImVec4 colors[] = { kAxisX, kAxisY, kAxisZ };
-    bool changed = false;
-    for (int i = 0; i < 3; ++i) {
-        if (i > 0) {
-            ImGui::SameLine(0, gap_between_axes);
-        }
-        ImGui::PushID(i);
-        ImGui::InvisibleButton("blk", ImVec2(block_sz, block_sz));
-        const ImVec2 r0 = ImGui::GetItemRectMin();
-        const ImVec2 r1 = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled(
-            r0, r1, ImGui::ColorConvertFloat4ToU32(colors[i]), 2.0f);
-        ImGui::GetWindowDrawList()->AddRect(r0, r1, IM_COL32(0, 0, 0, 72), 2.0f);
-        ImGui::SameLine(0, gap_block_to_drag);
-        ImGui::SetNextItemWidth(drag_w);
-        if (min_v < max_v) {
-            changed |= ImGui::DragFloat("##v", &v3[i], speed, min_v, max_v, fmt);
-        } else {
-            changed |= ImGui::DragFloat("##v", &v3[i], speed, 0.0f, 0.0f, fmt);
-        }
-        ImGui::PopID();
-    }
-    ImGui::PopID();
-    return changed;
-}
-
 static ::entt::entity g_material_path_entity { ::entt::null };
 static char g_mat_albedo_path[512] {};
 static char g_mat_normal_path[512] {};
 static char g_mat_mr_path[512] {};
 static char g_mat_ao_path[512] {};
 static char g_mat_emissive_path[512] {};
+
+[[nodiscard]] bool material_path_non_empty(const char *buf) {
+    if (!buf || !buf[0]) {
+        return false;
+    }
+    const char *p = buf;
+    while (*p == ' ' || *p == '\t') {
+        ++p;
+    }
+    return *p != '\0';
+}
+
+static const void *kCmpEntity { reinterpret_cast<const void *>(uintptr_t { 1 }) };
+static const void *kCmpTransform { reinterpret_cast<const void *>(uintptr_t { 2 }) };
+static const void *kCmpHierarchy { reinterpret_cast<const void *>(uintptr_t { 3 }) };
+static const void *kCmpRendering { reinterpret_cast<const void *>(uintptr_t { 4 }) };
+static const void *kCmpMaterial { reinterpret_cast<const void *>(uintptr_t { 5 }) };
+static const void *kCmpLight { reinterpret_cast<const void *>(uintptr_t { 6 }) };
 
 } // namespace
 
@@ -98,7 +57,7 @@ void SceneInspectorPanel::on_imgui_render() {
         return;
     }
 
-    ImGui::Begin("Inspector");
+    ImGui::Begin("Properties");
     ::entt::registry &reg = scene_->registry();
     const ::entt::entity e = selection_->entity;
 
@@ -108,14 +67,23 @@ void SceneInspectorPanel::on_imgui_render() {
         return;
     }
 
-    if (ImGui::CollapsingHeader("Entity", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (auto *name = reg.try_get<lumen::scene::NameComponent>(e)) {
-            char buf[256];
-            std::snprintf(buf, sizeof(buf), "%s", name->name.c_str());
-            if (ImGui::InputText("Name", buf, sizeof(buf))) {
-                name->name = buf;
-            }
+    // Hazel：顶部实体名 + 同行「Add Component」
+    if (auto *name = reg.try_get<lumen::scene::NameComponent>(e)) {
+        char name_buf[256];
+        std::snprintf(name_buf, sizeof(name_buf), "%s", name->name.c_str());
+        if (ImGui::InputTextWithHint("##EntityName", "Name", name_buf,
+                                     sizeof(name_buf))) {
+            name->name = name_buf;
         }
+    }
+    ImGui::SameLine();
+    ImGui::PushItemWidth(-1.0f);
+    if (ImGui::Button("Add Component")) {
+        ImGui::OpenPopup("AddComponentPopup");
+    }
+    ImGui::PopItemWidth();
+
+    if (imgui_hazel_component_begin("Entity", kCmpEntity)) {
         if (const auto *oid = reg.try_get<lumen::scene::ObjectId>(e)) {
             ImGui::BeginDisabled();
             char idBuf[32];
@@ -126,64 +94,37 @@ void SceneInspectorPanel::on_imgui_render() {
             ImGui::TextDisabled(
                 "Pick / 序列化用 uint32，与 EnTT 句柄无关。");
         }
+        ImGui::TreePop();
     }
 
     if (reg.all_of<lumen::scene::TransformComponent>(e)) {
-        if (ImGui::CollapsingHeader("Transform",
-                                    ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (imgui_hazel_component_begin("Transform", kCmpTransform)) {
             auto &tr = reg.get<lumen::scene::TransformComponent>(e);
-            float pos[3];
-            float rotDeg[3];
-            float sc[3];
-            ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(tr.matrix), pos,
-                                                  rotDeg, sc);
+            glm::vec3 pos {};
+            glm::vec3 rot_deg {};
+            glm::vec3 scl {};
+            ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(tr.matrix),
+                                                  glm::value_ptr(pos),
+                                                  glm::value_ptr(rot_deg),
+                                                  glm::value_ptr(scl));
             ImGui::TextDisabled("Local space");
             bool edited = false;
-            const float label_col_w = label_column_width_for_vec3_rows();
-            if (ImGui::BeginTable("##transform_vec3", 2,
-                                  ImGuiTableFlags_SizingStretchProp)) {
-                ImGui::TableSetupColumn("lbl",
-                                        ImGuiTableColumnFlags_WidthFixed,
-                                        label_col_w);
-                ImGui::TableSetupColumn("row", ImGuiTableColumnFlags_WidthStretch);
-
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted("Position");
-                ImGui::TableSetColumnIndex(1);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                edited |= drag_float3_color_row("pos", pos, 0.01f, 0.0f, 0.0f,
-                                                "%.3f");
-
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted("Rotation (deg)");
-                ImGui::TableSetColumnIndex(1);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                edited |= drag_float3_color_row("rot", rotDeg, 0.5f, 0.0f, 0.0f,
-                                                "%.1f");
-
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted("Scale");
-                ImGui::TableSetColumnIndex(1);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                edited |= drag_float3_color_row("scl", sc, 0.01f, 1e-2f, 1e3f,
-                                                "%.3f");
-
-                ImGui::EndTable();
-            }
+            edited |= imgui_hazel_draw_vec3("Position", pos, 0.0f, 100.0f, 0.01f,
+                                            "%.3f");
+            edited |= imgui_hazel_draw_vec3("Rotation (deg)", rot_deg, 0.0f,
+                                            100.0f, 0.5f, "%.1f");
+            edited |= imgui_hazel_draw_vec3("Scale", scl, 1.0f, 100.0f, 0.01f,
+                                            "%.3f", 1e-2f, 1e3f);
             if (edited) {
-                ImGuizmo::RecomposeMatrixFromComponents(pos, rotDeg, sc,
-                                                        glm::value_ptr(tr.matrix));
+                ImGuizmo::RecomposeMatrixFromComponents(
+                    glm::value_ptr(pos), glm::value_ptr(rot_deg),
+                    glm::value_ptr(scl), glm::value_ptr(tr.matrix));
             }
+            ImGui::TreePop();
         }
     }
 
-    if (ImGui::CollapsingHeader("Hierarchy", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (imgui_hazel_component_begin("Hierarchy", kCmpHierarchy)) {
         if (auto *par = reg.try_get<lumen::scene::ParentComponent>(e)) {
             if (par->parent != ::entt::null && reg.valid(par->parent)) {
                 const auto *pn =
@@ -199,9 +140,10 @@ void SceneInspectorPanel::on_imgui_render() {
         } else {
             ImGui::TextUnformatted("Parent: (none)");
         }
+        ImGui::TreePop();
     }
 
-    if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (imgui_hazel_component_begin("Rendering", kCmpRendering)) {
         if (reg.all_of<lumen::scene::DrawableTag>(e)) {
             ImGui::TextUnformatted("Drawable: enabled (mesh uses first drawable)");
             if (ImGui::Button("Remove Drawable")) {
@@ -213,11 +155,11 @@ void SceneInspectorPanel::on_imgui_render() {
                 reg.emplace<lumen::scene::DrawableTag>(e);
             }
         }
+        ImGui::TreePop();
     }
 
     if (reg.all_of<lumen::scene::MaterialComponent>(e)) {
-        if (ImGui::CollapsingHeader("Material",
-                                    ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (imgui_hazel_component_begin("Material", kCmpMaterial)) {
             auto &mat = reg.get<lumen::scene::MaterialComponent>(e);
             if (e != g_material_path_entity) {
                 g_material_path_entity = e;
@@ -232,27 +174,65 @@ void SceneInspectorPanel::on_imgui_render() {
                 std::snprintf(g_mat_emissive_path, sizeof(g_mat_emissive_path),
                               "%s", mat.emissive_path.c_str());
             }
-            ImGui::ColorEdit4("Base color factor",
-                              glm::value_ptr(mat.base_color_factor));
-            ImGui::DragFloat("Metallic factor", &mat.metallic_factor, 0.01f,
-                             0.0f, 1.0f, "%.2f");
-            ImGui::DragFloat("Roughness factor", &mat.roughness_factor, 0.01f,
-                             0.04f, 1.0f, "%.2f");
-            ImGui::DragFloat("AO factor", &mat.ao_factor, 0.01f, 0.0f, 1.0f,
-                             "%.2f");
-            ImGui::DragFloat3("Emissive factor",
-                              glm::value_ptr(mat.emissive_factor), 0.01f);
+            ImGui::TextDisabled(
+                "标量与贴图二选一：路径非空则仅用贴图；空则仅用标量。");
+
             ImGui::Separator();
-            ImGui::InputText("Albedo path", g_mat_albedo_path,
+            ImGui::TextUnformatted("Base color");
+            ImGui::InputText("Albedo texture path", g_mat_albedo_path,
                              sizeof(g_mat_albedo_path));
-            ImGui::InputText("Normal path", g_mat_normal_path,
+            if (material_path_non_empty(g_mat_albedo_path)) {
+                ImGui::TextDisabled(
+                    "已启用反照率贴图（× Model color）；不再用 Base color 乘 RGB。");
+            } else {
+                ImGui::ColorEdit4("Base color (scalar)",
+                                  glm::value_ptr(mat.base_color_factor));
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Normal");
+            ImGui::InputText("Normal map path", g_mat_normal_path,
                              sizeof(g_mat_normal_path));
-            ImGui::InputText("Metallic/Roughness path", g_mat_mr_path,
+            if (!material_path_non_empty(g_mat_normal_path)) {
+                ImGui::TextDisabled("无法线贴图：使用几何法线。");
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Metallic / Roughness");
+            ImGui::InputText("Metallic-Roughness texture path", g_mat_mr_path,
                              sizeof(g_mat_mr_path));
-            ImGui::InputText("AO path", g_mat_ao_path, sizeof(g_mat_ao_path));
-            ImGui::InputText("Emissive path", g_mat_emissive_path,
+            if (material_path_non_empty(g_mat_mr_path)) {
+                ImGui::TextDisabled("已启用 MR 贴图：B=金属，G=粗糙（glTF）。");
+            } else {
+                ImGui::DragFloat("Metallic (scalar)", &mat.metallic_factor, 0.01f,
+                                 0.0f, 1.0f, "%.2f");
+                ImGui::DragFloat("Roughness (scalar)", &mat.roughness_factor,
+                                 0.01f, 0.04f, 1.0f, "%.2f");
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Ambient occlusion");
+            ImGui::InputText("AO texture path", g_mat_ao_path,
+                             sizeof(g_mat_ao_path));
+            if (material_path_non_empty(g_mat_ao_path)) {
+                ImGui::TextDisabled("已启用 AO 贴图（R 通道）。");
+            } else {
+                ImGui::DragFloat("AO (scalar)", &mat.ao_factor, 0.01f, 0.0f, 1.0f,
+                                 "%.2f");
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Emissive");
+            ImGui::InputText("Emissive texture path", g_mat_emissive_path,
                              sizeof(g_mat_emissive_path));
-            if (ImGui::Button("Apply texture paths", ImVec2(-1, 0))) {
+            if (material_path_non_empty(g_mat_emissive_path)) {
+                ImGui::TextDisabled("已启用自发光贴图。");
+            } else {
+                ImGui::DragFloat3("Emissive (scalar)",
+                                  glm::value_ptr(mat.emissive_factor), 0.01f);
+            }
+
+            if (ImGui::Button("Apply material", ImVec2(-1.0f, 0.0f))) {
                 mat.albedo_path = g_mat_albedo_path;
                 mat.normal_path = g_mat_normal_path;
                 mat.metallic_roughness_path = g_mat_mr_path;
@@ -262,17 +242,16 @@ void SceneInspectorPanel::on_imgui_render() {
                     selection_->material_texture_reload_requested = true;
                 }
             }
-            if (ImGui::Button("Remove Material", ImVec2(-1, 0))) {
+            if (ImGui::Button("Remove Material##mat", ImVec2(-1.0f, 0.0f))) {
                 reg.remove<lumen::scene::MaterialComponent>(e);
                 g_material_path_entity = ::entt::null;
             }
+            ImGui::TreePop();
         }
     }
 
     if (reg.all_of<lumen::scene::LightComponent>(e)) {
-        if (ImGui::CollapsingHeader(
-                "Light", ImGuiTreeNodeFlags_DefaultOpen |
-                             ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (imgui_hazel_component_begin("Light", kCmpLight)) {
             auto &light = reg.get<lumen::scene::LightComponent>(e);
             int type_i = static_cast<int>(light.type);
             if (ImGui::Combo("Type", &type_i,
@@ -284,24 +263,9 @@ void SceneInspectorPanel::on_imgui_render() {
                              "%.2f");
             if (light.type == lumen::scene::LightType::Directional ||
                 light.type == lumen::scene::LightType::Spot) {
-                const float label_col_w = label_column_width_for_vec3_rows();
-                if (ImGui::BeginTable("##light_dir_vec3", 2,
-                                      ImGuiTableFlags_SizingStretchProp)) {
-                    ImGui::TableSetupColumn(
-                        "lbl", ImGuiTableColumnFlags_WidthFixed, label_col_w);
-                    ImGui::TableSetupColumn("row",
-                                            ImGuiTableColumnFlags_WidthStretch);
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::AlignTextToFramePadding();
-                    ImGui::TextUnformatted("Direction (local)");
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    (void)drag_float3_color_row(
-                        "ldir", glm::value_ptr(light.local_direction), 0.01f,
-                        0.0f, 0.0f, "%.3f");
-                    ImGui::EndTable();
-                }
+                (void)imgui_hazel_draw_vec3("Direction (local)",
+                                            light.local_direction, 0.0f, 120.0f,
+                                            0.01f, "%.3f");
             }
             if (light.type == lumen::scene::LightType::Point ||
                 light.type == lumen::scene::LightType::Spot) {
@@ -323,14 +287,10 @@ void SceneInspectorPanel::on_imgui_render() {
             if (ImGui::Button("Remove Light")) {
                 reg.remove<lumen::scene::LightComponent>(e);
             }
+            ImGui::TreePop();
         }
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    if (ImGui::Button("Add Component", ImVec2(-1, 0))) {
-        ImGui::OpenPopup("AddComponentPopup");
-    }
     if (ImGui::BeginPopup("AddComponentPopup")) {
         if (!reg.all_of<lumen::scene::LightComponent>(e)) {
             if (ImGui::MenuItem("Light")) {

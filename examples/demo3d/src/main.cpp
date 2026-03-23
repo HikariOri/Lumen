@@ -17,8 +17,8 @@
 #include "render/pass/render_graph.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
-#include "render/pipeline.hpp"
 #include "render/pbr_material_ubo.hpp"
+#include "render/pipeline.hpp"
 #include "render/resource/cubemap_file_loader.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
@@ -35,6 +35,7 @@
 #include "scene/scene_orbit_camera.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
+#include "ui/environment_panel.hpp"
 #include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
 #include "ui/imgui_backend.hpp"
@@ -42,7 +43,6 @@
 #include "ui/light_viewport_gizmos.hpp"
 #include "ui/log_panel.hpp"
 #include "ui/scene_hierarchy_panel.hpp"
-#include "ui/environment_panel.hpp"
 #include "ui/scene_inspector_panel.hpp"
 #include "ui/texture_view_panel.hpp"
 
@@ -70,7 +70,8 @@
 
 using Vertex = lumen::core::ObjVertex;
 
-/// Scene UBO：与 `cube.vert` / `cube.frag` / `skybox.*` 的 `SceneUBO` 一致（std140）
+/// Scene UBO：与 `cube.vert` / `cube.frag` / `skybox.*` 的 `SceneUBO`
+/// 一致（std140）
 ///
 /// 注意：GLSL `mat3` 在 std140 中按 3×vec4 列存储（48 字节），与 `glm::mat3`
 /// （36 字节）不一致，会导致后续 `cameraWorld`、`lights` 整体错位。此处用
@@ -385,8 +386,10 @@ static int run_demo3d() {
         lumen::core::get_resource_path("shaders/grid.frag.spv");
     lumen::render::ShaderModule grid_vert_shader;
     lumen::render::ShaderModule grid_frag_shader;
-    if (!grid_vert_shader.create_from_file(ctx.device(), grid_vert_path.c_str()) ||
-        !grid_frag_shader.create_from_file(ctx.device(), grid_frag_path.c_str())) {
+    if (!grid_vert_shader.create_from_file(ctx.device(),
+                                           grid_vert_path.c_str()) ||
+        !grid_frag_shader.create_from_file(ctx.device(),
+                                           grid_frag_path.c_str())) {
         LUMEN_APP_LOG_ERROR("地面网格着色器加载失败");
         return -1;
     }
@@ -450,8 +453,8 @@ static int run_demo3d() {
     lumen::render::Texture mat_tex_ao;
     lumen::render::Texture mat_tex_emissive;
 
-    const std::string kDefaultAlbedoPath =
-        lumen::core::get_resource_path("assets/textures/ikun2026_happy_new_year.jpg");
+    const std::string kDefaultAlbedoPath = lumen::core::get_resource_path(
+        "assets/textures/ikun2026_happy_new_year.jpg");
     if (!mat_tex_albedo.create_from_file(ctx, kDefaultAlbedoPath.c_str(),
                                          ctx.graphics_queue(), cmdPool)) {
         constexpr uint32_t kTexSize = 64;
@@ -468,8 +471,8 @@ static int run_demo3d() {
             }
         }
         mat_tex_albedo.create_from_memory(ctx, pixels.data(), pixels.size(),
-                                          kTexSize, kTexSize, ctx.graphics_queue(),
-                                          cmdPool);
+                                          kTexSize, kTexSize,
+                                          ctx.graphics_queue(), cmdPool);
     }
 
     std::array<std::vector<std::uint8_t>, 6> sky_face_pixels {};
@@ -519,19 +522,20 @@ static int run_demo3d() {
     constexpr float kGridStep { 1.0f };
     constexpr float kGridPlaneY { 0.0005f };
     fill_ground_grid_vertices(kGridHalfCells, kGridStep, kGridPlaneY,
-                                ground_grid_vertices);
+                              ground_grid_vertices);
     const uint32_t grid_vertex_count =
         static_cast<uint32_t>(ground_grid_vertices.size());
     lumen::render::VertexBuffer grid_vertex_buffer;
-    if (!grid_vertex_buffer.create(
-            ctx, ground_grid_vertices.size() * sizeof(GroundGridVertex))) {
+    if (!grid_vertex_buffer.create(ctx, ground_grid_vertices.size() *
+                                            sizeof(GroundGridVertex))) {
         return -1;
     }
     grid_vertex_buffer.upload(ground_grid_vertices.data(),
                               ground_grid_vertices.size() *
                                   sizeof(GroundGridVertex));
 
-    // Descriptor：Set0 场景 UBO + env 立方体 + BRDF LUT；Set1 材质 UBO + 五张贴图
+    // Descriptor：Set0 场景 UBO + env 立方体 + BRDF LUT；Set1 材质 UBO +
+    // 五张贴图
     lumen::render::DescriptorSetLayout sceneDescLayout;
     sceneDescLayout.create(
         ctx, { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
@@ -542,28 +546,27 @@ static int run_demo3d() {
                  VK_SHADER_STAGE_FRAGMENT_BIT } });
 
     lumen::render::DescriptorSetLayout materialDescLayout;
-    materialDescLayout.create(
-        ctx,
-        { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-             VK_SHADER_STAGE_FRAGMENT_BIT } });
+    materialDescLayout.create(ctx,
+                              { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                                  VK_SHADER_STAGE_FRAGMENT_BIT },
+                                { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  1, VK_SHADER_STAGE_FRAGMENT_BIT },
+                                { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  1, VK_SHADER_STAGE_FRAGMENT_BIT },
+                                { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  1, VK_SHADER_STAGE_FRAGMENT_BIT },
+                                { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  1, VK_SHADER_STAGE_FRAGMENT_BIT },
+                                { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  1, VK_SHADER_STAGE_FRAGMENT_BIT } });
 
     lumen::render::DescriptorPool descPool;
-    descPool.create(ctx,
-                    { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        kMaxFramesInFlight * 2 },
-                      { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        kMaxFramesInFlight * 7 } },
-                    kMaxFramesInFlight * 2);
+    descPool.create(
+        ctx,
+        { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight * 2 },
+          { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            kMaxFramesInFlight * 7 } },
+        kMaxFramesInFlight * 2);
 
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight> uniformBuffers;
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight>
@@ -573,7 +576,8 @@ static int run_demo3d() {
 
     for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
         uniformBuffers[i].create(ctx, sizeof(SceneUbo));
-        materialUniformBuffers[i].create(ctx, sizeof(lumen::render::PbrMaterialUbo));
+        materialUniformBuffers[i].create(ctx,
+                                         sizeof(lumen::render::PbrMaterialUbo));
         descPool.allocate(ctx.device(), sceneDescLayout.handle(),
                           descriptorSetsScene[i]);
         descPool.allocate(ctx.device(), materialDescLayout.handle(),
@@ -608,7 +612,8 @@ static int run_demo3d() {
         if (scene_env.cubemap_directory.empty()) {
             std::array<std::vector<std::uint8_t>, 6> sky_face_pixels {};
             constexpr std::uint32_t kEnvFaceSize { 256 };
-            demo3d::pbr::fill_procedural_sky_faces(kEnvFaceSize, sky_face_pixels);
+            demo3d::pbr::fill_procedural_sky_faces(kEnvFaceSize,
+                                                   sky_face_pixels);
             const void *sky_face_ptrs[6] = {
                 sky_face_pixels[0].data(), sky_face_pixels[1].data(),
                 sky_face_pixels[2].data(), sky_face_pixels[3].data(),
@@ -630,8 +635,8 @@ static int run_demo3d() {
             bool env_loaded = false;
             if (fs::is_directory(env_path, fsec)) {
                 env_loaded = lumen::render::load_cubemap_from_face_files(
-                    ctx, resolved, ctx.graphics_queue(), cmdPool, env_sampler_cfg,
-                    env_cubemap, &err);
+                    ctx, resolved, ctx.graphics_queue(), cmdPool,
+                    env_sampler_cfg, env_cubemap, &err);
             } else if (fs::is_regular_file(env_path, fsec)) {
                 std::string ext = env_path.extension().string();
                 for (char &c : ext) {
@@ -639,8 +644,8 @@ static int run_demo3d() {
                         std::tolower(static_cast<unsigned char>(c)));
                 }
                 if (ext == ".hdr") {
-                    env_loaded =
-                        lumen::render::load_cubemap_from_hdr_equirectangular_file(
+                    env_loaded = lumen::render::
+                        load_cubemap_from_hdr_equirectangular_file(
                             ctx, resolved, ctx.graphics_queue(), cmdPool,
                             env_sampler_cfg, env_cubemap, 0, &err);
                 } else {
@@ -681,8 +686,9 @@ static int run_demo3d() {
     pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
     pushRange.size = sizeof(PushConstants);
-    pipelineLayout.create(ctx, { sceneDescLayout.handle(), materialDescLayout.handle() },
-                          { pushRange });
+    pipelineLayout.create(
+        ctx, { sceneDescLayout.handle(), materialDescLayout.handle() },
+        { pushRange });
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
     pipeConfig.stages.push_back(
@@ -946,13 +952,13 @@ static int run_demo3d() {
                 }
                 const std::string rp = resolve_asset_path(p);
                 return t.create_from_file(ctx, rp.c_str(), ctx.graphics_queue(),
-                                        cmdPool);
+                                          cmdPool);
             };
-            const std::string alb =
-                mc.albedo_path.empty() ? kDefaultAlbedoPath
-                                       : resolve_asset_path(mc.albedo_path);
-            if (!mat_tex_albedo.create_from_file(ctx, alb.c_str(),
-                                                 ctx.graphics_queue(), cmdPool)) {
+            const std::string alb = mc.albedo_path.empty()
+                                        ? kDefaultAlbedoPath
+                                        : resolve_asset_path(mc.albedo_path);
+            if (!mat_tex_albedo.create_from_file(
+                    ctx, alb.c_str(), ctx.graphics_queue(), cmdPool)) {
                 LUMEN_APP_LOG_WARN("反照率加载失败: {}", alb);
                 mat_tex_albedo = lumen::render::Texture {};
             }
@@ -989,8 +995,7 @@ static int run_demo3d() {
     ui_panels.add(std::make_unique<lumen::ui::SceneInspectorPanel>(
         &ecs_scene, &editor_selection));
     ui_panels.add(std::make_unique<lumen::ui::EnvironmentPanel>(
-        &scene_env,
-        [&]() { reload_environment_gpu(); },
+        &scene_env, [&]() { reload_environment_gpu(); },
         [&]() { reload_environment_gpu(); }));
 
     auto sceneTextureId =
@@ -1073,9 +1078,9 @@ static int run_demo3d() {
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       sky_pipeline.handle());
                     VkDescriptorSet sky_ds = descriptorSetsScene[currentFrame];
-                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                            pipelineLayout.handle(), 0, 1,
-                                            &sky_ds, 0, nullptr);
+                    vkCmdBindDescriptorSets(
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout.handle(), 0, 1, &sky_ds, 0, nullptr);
                     VkBuffer sky_vb = sky_vertex_buffer.handle();
                     VkDeviceSize sky_off { 0 };
                     vkCmdBindVertexBuffers(cmd, 0, 1, &sky_vb, &sky_off);
@@ -1100,9 +1105,10 @@ static int run_demo3d() {
                 vkCmdPushConstants(cmd, pipelineLayout.handle(),
                                    VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(PushConstants), &pushData);
-                VkDescriptorSet mesh_sets[2] = { descriptorSetsScene[currentFrame],
-                                                   descriptorSetsMaterial
-                                                       [currentFrame] };
+                VkDescriptorSet mesh_sets[2] = {
+                    descriptorSetsScene[currentFrame],
+                    descriptorSetsMaterial[currentFrame]
+                };
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         pipelineLayout.handle(), 0, 2,
                                         mesh_sets, 0, nullptr);
@@ -1694,9 +1700,8 @@ static int run_demo3d() {
                 ecs_scene.registry().get<lumen::scene::MaterialComponent>(
                     drawable);
             matUbo.base_color_factor = mc.base_color_factor;
-            matUbo.mr_ao_factors =
-                glm::vec4(mc.metallic_factor, mc.roughness_factor, mc.ao_factor,
-                          0.0f);
+            matUbo.mr_ao_factors = glm::vec4(
+                mc.metallic_factor, mc.roughness_factor, mc.ao_factor, 0.0f);
             matUbo.emissive_factor =
                 glm::vec4(mc.emissive_factor.x, mc.emissive_factor.y,
                           mc.emissive_factor.z, 0.0f);
