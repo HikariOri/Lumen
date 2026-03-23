@@ -11,7 +11,7 @@ struct GPULight {
     vec4 params;
 };
 
-layout(set = 0, binding = 0) uniform UBO {
+layout(set = 0, binding = 0) uniform SceneUBO {
     mat4 model;
     mat4 mvp;
     mat4 normalMatrix;
@@ -20,7 +20,6 @@ layout(set = 0, binding = 0) uniform UBO {
     vec4 sceneParams;
     mat4 skyMvp;
     mat4 skyOrientInv;
-    vec4 pbrParams;
     vec4 envParams;
 } ubo;
 

@@ -67,6 +67,17 @@ public:
         const SamplerConfig &samplerConfig = {});
 
     /**
+     * @brief 从 6 面 RGBA32F 像素创建立方体贴图（顺序 +X,-X,+Y,-Y,+Z,-Z），含
+     * Mipmap
+     *
+     * 每面为 `faceSize×faceSize` 连续 RGBA 浮点（线性）；用于 HDR IBL 等。
+     */
+    bool create_cubemap_from_rgba32f_faces(
+        const Context &ctx, const void *const faces[6], uint32_t faceSize,
+        VkQueue transferQueue, CommandPool &cmdPool,
+        const SamplerConfig &samplerConfig = {});
+
+    /**
      * @brief 从内存创建纹理（如渲染结果、程序化生成等）
      * @param ctx 已初始化的 Context
      * @param data 像素数据指针（行优先，紧挨存储）

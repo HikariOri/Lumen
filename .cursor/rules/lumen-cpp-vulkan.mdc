@@ -27,6 +27,14 @@ alwaysApply: false
 
 - 着色器编译与路径约定以仓库 CMake 与 `get_resource_path` 为准；SPIR-V 输出路径与运行时加载保持一致。
 
+## 编译检查
+
+写完代码之后不要去生成、编译，用户会自己自己做这一步。
+
+## filesystem 的约定
+
+不要使用标准库的 filesystem，而是使用 ghc-filesystem。
+
 ## 日志
 
 - 引擎内：`LUMEN_LOG_*`；应用/示例：`LUMEN_APP_LOG_*`。详见 `docs/reference/logging.md`。

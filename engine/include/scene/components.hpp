@@ -11,6 +11,7 @@
 #include <entt/entt.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 namespace lumen {
 namespace scene {
@@ -50,6 +51,28 @@ struct ParentComponent {
 
 /// 标记参与当前 demo 网格绘制的实体（首个带此标记者用于主视图矩阵）
 struct DrawableTag {};
+
+/**
+ * @brief PBR 材质参数与贴图路径（金属–粗糙度工作流）
+ *
+ * 路径为空时使用引擎占位纹理；运行时应在 GPU 侧解析为 Texture 并写 Descriptor。
+ */
+struct MaterialComponent {
+    glm::vec4 base_color_factor { 1.0f, 1.0f, 1.0f, 1.0f };
+    float metallic_factor { 1.0f };
+    float roughness_factor { 1.0f };
+    float ao_factor { 1.0f };
+    float _pad0 {};
+    glm::vec3 emissive_factor { 0.0f, 0.0f, 0.0f };
+    float _pad1 {};
+
+    std::string albedo_path;
+    std::string normal_path;
+    /// glTF：B=金属，G=粗糙
+    std::string metallic_roughness_path;
+    std::string ao_path;
+    std::string emissive_path;
+};
 
 /**
  * @brief 光源类型（与 GPU `GPULight.position.w` 编码一致：0/1/2）

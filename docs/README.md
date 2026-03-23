@@ -49,6 +49,7 @@
 | [render-graph.md](design/render-graph.md) | RenderGraph 概念、与引擎对照、系统设计 |
 | [scene-ecs.md](design/scene-ecs.md) | Scene 与 ECS |
 | [vulkan-materials.md](design/vulkan-materials.md) | Vulkan 材质系统 |
+| [material-system-ibl-pbr.md](design/material-system-ibl-pbr.md) | 材质系统、IBL、PBR 扩展与材质/环境面板 — 设计与分阶段实现 |
 | [imgui-integration.md](design/imgui-integration.md) | ImGui 后端与 3D 纹理绘制 |
 | [ui-panels.md](design/ui-panels.md) | UI 面板与资源面板约定 |
 | [editor-ui.md](design/editor-ui.md) | Editor UI（Console、Command 等）递进设计 |

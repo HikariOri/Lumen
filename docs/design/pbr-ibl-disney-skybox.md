@@ -2,6 +2,8 @@
 
 本文说明 **Lumen** 中在 `examples/demo3d` 落地的 **金属–粗糙度 PBR**、**基于图像的光照（IBL）**、**天空盒**，以及着色器里采用的 **迪士尼原则性 BRDF 中的漫反射项 + 工业界常用的 GGX 镜面项** 的组合。正文排版遵循 [guides/chinese-typography.md](../guides/chinese-typography.md)。
 
+**扩展规划**（每物体材质、环境贴图文件加载、Descriptor 拆分、Inspector 材质块等）见 [material-system-ibl-pbr.md](material-system-ibl-pbr.md)。
+
 ---
 
 ## 1. 概述

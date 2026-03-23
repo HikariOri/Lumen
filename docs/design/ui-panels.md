@@ -43,6 +43,7 @@ engine/src/scene/
 
 * **自由函数面板**（如 `imgui_texture_view_panel`）：由调用方在帧内直接调用。
 * **PanelManager**：统一对实现了 `IPanel` 的面板调用 `on_imgui_render()`，适合日志、GPU 信息、**Hierarchy / Inspector**（数据源为 `lumen::scene::Scene` + `EditorSelection`）等可注册窗口。
+* **材质 / 环境（IBL）**：规划中的参数与贴图编辑、环境立方体贴图加载见 [material-system-ibl-pbr.md](material-system-ibl-pbr.md)（可落在 Inspector 折叠块或独立 `IPanel`）。
 
 所有 ImGui 绘制**需在 ImGui 帧内**完成（`imgui_backend_new_frame()` 之后、`imgui_backend_render(cmd)` 之前）。
 

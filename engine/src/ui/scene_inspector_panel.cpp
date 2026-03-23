@@ -6,6 +6,7 @@
 
 #include "scene/components.hpp"
 #include "scene/scene.hpp"
+#include "ui/editor_selection.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -78,6 +79,13 @@ float label_column_width_for_vec3_rows() {
     ImGui::PopID();
     return changed;
 }
+
+static ::entt::entity g_material_path_entity { ::entt::null };
+static char g_mat_albedo_path[512] {};
+static char g_mat_normal_path[512] {};
+static char g_mat_mr_path[512] {};
+static char g_mat_ao_path[512] {};
+static char g_mat_emissive_path[512] {};
 
 } // namespace
 
@@ -207,6 +215,60 @@ void SceneInspectorPanel::on_imgui_render() {
         }
     }
 
+    if (reg.all_of<lumen::scene::MaterialComponent>(e)) {
+        if (ImGui::CollapsingHeader("Material",
+                                    ImGuiTreeNodeFlags_DefaultOpen)) {
+            auto &mat = reg.get<lumen::scene::MaterialComponent>(e);
+            if (e != g_material_path_entity) {
+                g_material_path_entity = e;
+                std::snprintf(g_mat_albedo_path, sizeof(g_mat_albedo_path), "%s",
+                              mat.albedo_path.c_str());
+                std::snprintf(g_mat_normal_path, sizeof(g_mat_normal_path), "%s",
+                              mat.normal_path.c_str());
+                std::snprintf(g_mat_mr_path, sizeof(g_mat_mr_path), "%s",
+                              mat.metallic_roughness_path.c_str());
+                std::snprintf(g_mat_ao_path, sizeof(g_mat_ao_path), "%s",
+                              mat.ao_path.c_str());
+                std::snprintf(g_mat_emissive_path, sizeof(g_mat_emissive_path),
+                              "%s", mat.emissive_path.c_str());
+            }
+            ImGui::ColorEdit4("Base color factor",
+                              glm::value_ptr(mat.base_color_factor));
+            ImGui::DragFloat("Metallic factor", &mat.metallic_factor, 0.01f,
+                             0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Roughness factor", &mat.roughness_factor, 0.01f,
+                             0.04f, 1.0f, "%.2f");
+            ImGui::DragFloat("AO factor", &mat.ao_factor, 0.01f, 0.0f, 1.0f,
+                             "%.2f");
+            ImGui::DragFloat3("Emissive factor",
+                              glm::value_ptr(mat.emissive_factor), 0.01f);
+            ImGui::Separator();
+            ImGui::InputText("Albedo path", g_mat_albedo_path,
+                             sizeof(g_mat_albedo_path));
+            ImGui::InputText("Normal path", g_mat_normal_path,
+                             sizeof(g_mat_normal_path));
+            ImGui::InputText("Metallic/Roughness path", g_mat_mr_path,
+                             sizeof(g_mat_mr_path));
+            ImGui::InputText("AO path", g_mat_ao_path, sizeof(g_mat_ao_path));
+            ImGui::InputText("Emissive path", g_mat_emissive_path,
+                             sizeof(g_mat_emissive_path));
+            if (ImGui::Button("Apply texture paths", ImVec2(-1, 0))) {
+                mat.albedo_path = g_mat_albedo_path;
+                mat.normal_path = g_mat_normal_path;
+                mat.metallic_roughness_path = g_mat_mr_path;
+                mat.ao_path = g_mat_ao_path;
+                mat.emissive_path = g_mat_emissive_path;
+                if (selection_) {
+                    selection_->material_texture_reload_requested = true;
+                }
+            }
+            if (ImGui::Button("Remove Material", ImVec2(-1, 0))) {
+                reg.remove<lumen::scene::MaterialComponent>(e);
+                g_material_path_entity = ::entt::null;
+            }
+        }
+    }
+
     if (reg.all_of<lumen::scene::LightComponent>(e)) {
         if (ImGui::CollapsingHeader(
                 "Light", ImGuiTreeNodeFlags_DefaultOpen |
@@ -285,6 +347,12 @@ void SceneInspectorPanel::on_imgui_render() {
         if (!reg.all_of<lumen::scene::TransformComponent>(e)) {
             if (ImGui::MenuItem("Transform")) {
                 reg.emplace<lumen::scene::TransformComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!reg.all_of<lumen::scene::MaterialComponent>(e)) {
+            if (ImGui::MenuItem("Material")) {
+                reg.emplace<lumen::scene::MaterialComponent>(e);
                 ImGui::CloseCurrentPopup();
             }
         }

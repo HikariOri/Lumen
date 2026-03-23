@@ -18,7 +18,7 @@ struct GPULight {
     vec4 params;
 };
 
-layout(set = 0, binding = 0) uniform UBO {
+layout(set = 0, binding = 0) uniform SceneUBO {
     mat4 model;
     mat4 mvp;
     mat4 normalMatrix;
@@ -27,13 +27,23 @@ layout(set = 0, binding = 0) uniform UBO {
     vec4 sceneParams;
     mat4 skyMvp;
     mat4 skyOrientInv;
-    vec4 pbrParams;
     vec4 envParams;
-} ubo;
+} scene;
 
-layout(set = 0, binding = 1) uniform sampler2D texSampler;
-layout(set = 0, binding = 2) uniform samplerCube envMap;
-layout(set = 0, binding = 3) uniform sampler2D brdfLUT;
+layout(set = 0, binding = 1) uniform samplerCube envMap;
+layout(set = 0, binding = 2) uniform sampler2D brdfLUT;
+
+layout(set = 1, binding = 0) uniform MaterialUBO {
+    vec4 baseColorFactor;
+    vec4 mrAoFactors;
+    vec4 emissiveFactor;
+} matUbo;
+
+layout(set = 1, binding = 1) uniform sampler2D albedoMap;
+layout(set = 1, binding = 2) uniform sampler2D normalMap;
+layout(set = 1, binding = 3) uniform sampler2D metallicRoughnessMap;
+layout(set = 1, binding = 4) uniform sampler2D aoMap;
+layout(set = 1, binding = 5) uniform sampler2D emissiveMap;
 
 const int kMaxLights = 8;
 const float PI = 3.14159265359;
@@ -77,6 +87,27 @@ float spotFactor(vec3 lightPos, vec3 worldPos, vec3 spotDir, float cosOuter,
     float theta = dot(l2f, spotDir);
     float denom = max(cosInner - cosOuter, 1e-5);
     return clamp((theta - cosOuter) / denom, 0.0, 1.0);
+}
+
+mat3 cotangent_frame(vec3 N, vec3 p, vec2 uv) {
+    vec3 dp1 = dFdx(p);
+    vec3 dp2 = dFdy(p);
+    vec2 duv1 = dFdx(uv);
+    vec2 duv2 = dFdy(uv);
+    float det = duv1.x * duv2.y - duv1.y * duv2.x;
+    if (abs(det) < 1e-8)
+        return mat3(vec3(1, 0, 0), vec3(0, 1, 0), N);
+    float invdet = 1.0 / det;
+    vec3 T = normalize((dp1 * duv2.y - dp2 * duv1.y) * invdet);
+    vec3 B = normalize((-dp1 * duv2.x + dp2 * duv1.x) * invdet);
+    return mat3(T, B, N);
+}
+
+vec3 perturb_normal(vec3 N, vec3 worldPos, vec3 V, vec2 uv, vec3 map) {
+    map = map * 2.0 - 1.0;
+    map.y = -map.y;
+    mat3 TBN = cotangent_frame(N, worldPos, uv);
+    return normalize(TBN * map);
 }
 
 void accum_light_pbr(GPULight L, vec3 N, vec3 V, vec3 albedo, float metallic,
@@ -146,27 +177,31 @@ void main() {
         return;
     }
 
-    vec3 N = normalize(fragNormal);
-    vec3 V = normalize(ubo.cameraWorld.xyz - fragWorldPos);
+    vec3 V = normalize(scene.cameraWorld.xyz - fragWorldPos);
+    vec3 N0 = normalize(fragNormal);
+    vec3 tn = texture(normalMap, fragUV).rgb;
+    vec3 N = perturb_normal(N0, fragWorldPos, V, fragUV, tn);
 
-    float metallic = clamp(ubo.pbrParams.x, 0.0, 1.0);
-    float roughness = clamp(ubo.pbrParams.y, 0.04, 1.0);
-    float ao = clamp(ubo.pbrParams.z, 0.0, 1.0);
-    float iblStrength = max(ubo.pbrParams.w, 0.0);
+    float exposure = max(scene.envParams.x, 0.0);
+    float maxMip = max(scene.envParams.y, 0.0);
+    float diffMip = max(scene.envParams.z, 0.0);
+    float iblStrength = max(scene.envParams.w, 0.0);
 
-    float exposure = max(ubo.envParams.x, 0.0);
-    float maxMip = max(ubo.envParams.y, 0.0);
-    float diffMip = max(ubo.envParams.z, 0.0);
+    vec4 texColor = texture(albedoMap, fragUV);
+    vec3 albedo = texColor.rgb * matUbo.baseColorFactor.rgb * pc.modelColor.rgb;
 
-    vec4 texColor = texture(texSampler, fragUV);
-    vec3 albedo = texColor.rgb * pc.modelColor.rgb;
+    vec4 mrSample = texture(metallicRoughnessMap, fragUV);
+    float metallic = clamp(mrSample.b * matUbo.mrAoFactors.x, 0.0, 1.0);
+    float roughness =
+        clamp(mrSample.g * matUbo.mrAoFactors.y, 0.04, 1.0);
+    float ao = clamp(texture(aoMap, fragUV).r * matUbo.mrAoFactors.z, 0.0, 1.0);
 
-    int nLights = int(ubo.sceneParams.x + 0.5);
+    int nLights = int(scene.sceneParams.x + 0.5);
     nLights = min(nLights, kMaxLights);
 
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < nLights; ++i) {
-        accum_light_pbr(ubo.lights[i], N, V, albedo, metallic, roughness, Lo);
+        accum_light_pbr(scene.lights[i], N, V, albedo, metallic, roughness, Lo);
     }
 
     float NdotV = max(dot(N, V), 1e-4);
@@ -185,6 +220,8 @@ void main() {
     vec3 spec_ibl = prefiltered * (F0 * brdf.x + brdf.y) * ao;
 
     vec3 ambient = (diffuse_ibl + spec_ibl) * iblStrength;
-    vec3 color = ambient + Lo;
-    outColor = vec4(color, texColor.a * pc.modelColor.a);
+    vec3 emissive =
+        texture(emissiveMap, fragUV).rgb * matUbo.emissiveFactor.rgb;
+    vec3 color = ambient + Lo + emissive;
+    outColor = vec4(color, texColor.a * pc.modelColor.a * matUbo.baseColorFactor.a);
 }
