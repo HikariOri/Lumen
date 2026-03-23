@@ -159,7 +159,7 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    apply_hazel_imgui_style();
+    apply_lumen_imgui_style();
 
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
