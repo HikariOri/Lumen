@@ -177,6 +177,29 @@ bool Context::pick_physical_device_(VkSurfaceKHR surface) {
     return false;
 }
 
+bool Context::create_vma_allocator_() {
+    if (vmaAllocator_ != nullptr)
+        return true;
+
+    VmaVulkanFunctions vf {};
+    vf.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vf.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo aci {};
+    aci.physicalDevice = physicalDevice_;
+    aci.device = device_;
+    aci.instance = instance_;
+    aci.pVulkanFunctions = &vf;
+    aci.vulkanApiVersion = physicalDeviceProperties2_.properties.apiVersion;
+
+    const VkResult r = vmaCreateAllocator(&aci, &vmaAllocator_);
+    if (r != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("vmaCreateAllocator 失败: {}", static_cast<int>(r));
+        return false;
+    }
+    return true;
+}
+
 bool Context::create_logical_device_(VkSurfaceKHR surface) {
     float queuePriority { 1.0f };
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
@@ -288,6 +311,13 @@ bool Context::init_device(VkSurfaceKHR surface) {
     }
     if (!create_logical_device_(surface))
         return false;
+    if (!create_vma_allocator_()) {
+        vkDestroyDevice(device_, nullptr);
+        device_ = VK_NULL_HANDLE;
+        graphicsQueue_ = VK_NULL_HANDLE;
+        presentQueue_ = VK_NULL_HANDLE;
+        return false;
+    }
     auto info = physical_device_info();
     LUMEN_LOG_INFO("Vulkan 设备初始化完成: {} ({})", info.deviceName,
                    device_type_name(info.deviceType));
@@ -313,11 +343,11 @@ Context::Context(Context &&other) noexcept
       vulkan12Features_ { other.vulkan12Features_ },
       vulkan13Features_ { other.vulkan13Features_ },
       vulkan14Features_ { other.vulkan14Features_ },
-      physicalDeviceMemoryProperties_ {
-          other.physicalDeviceMemoryProperties_
-      } {
+      physicalDeviceMemoryProperties_ { other.physicalDeviceMemoryProperties_ },
+      vmaAllocator_ { other.vmaAllocator_ } {
     relink_properties_chain_();
     relink_features_chain_();
+    other.vmaAllocator_ = nullptr;
     other.instance_ = VK_NULL_HANDLE;
     other.physicalDevice_ = VK_NULL_HANDLE;
     other.device_ = VK_NULL_HANDLE;
@@ -348,8 +378,10 @@ Context &Context::operator=(Context &&other) noexcept {
     vulkan13Features_ = other.vulkan13Features_;
     vulkan14Features_ = other.vulkan14Features_;
     physicalDeviceMemoryProperties_ = other.physicalDeviceMemoryProperties_;
+    vmaAllocator_ = other.vmaAllocator_;
     relink_properties_chain_();
     relink_features_chain_();
+    other.vmaAllocator_ = nullptr;
     other.instance_ = VK_NULL_HANDLE;
     other.physicalDevice_ = VK_NULL_HANDLE;
     other.device_ = VK_NULL_HANDLE;
@@ -359,6 +391,10 @@ Context &Context::operator=(Context &&other) noexcept {
 }
 
 void Context::destroy_() {
+    if (vmaAllocator_ != nullptr) {
+        vmaDestroyAllocator(vmaAllocator_);
+        vmaAllocator_ = nullptr;
+    }
     if (device_ != VK_NULL_HANDLE) {
         LUMEN_LOG_DEBUG("销毁逻辑设备");
         vkDestroyDevice(device_, nullptr);

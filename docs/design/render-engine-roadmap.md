@@ -92,8 +92,8 @@
 |------|------|-------------|
 | **Core** | 引擎生命周期、配置、日志、全局服务定位 | Engine, Config, Logger |
 | **Platform** | 窗口与输入抽象；SDL3 后端，创建 Vulkan Surface | IWindow, IInput, WindowConfig；SDL3Backend |
-| **VkContext** | Instance、PhysicalDevice、Device、Queue、Swapchain | VkContext, VkSwapchain |
-| **VkMemory** | 分配器、Buffer/Image 封装、 staging、上传 | VkAllocator, VkBuffer, VkImage |
+| **VkContext** | Instance、PhysicalDevice、Device、Queue、Swapchain | `Context`（`context.hpp`）、Swapchain |
+| **VkMemory** | GPU 内存（VMA）、Buffer/Image/Texture 封装、staging、上传 | `VmaAllocator`（`Context::vma_allocator()`）、`Buffer`、`Image`、`Texture` |
 | **VkPipeline** | 管线布局、Graphics/Compute 管线、缓存 | Pipeline (重写), PipelineCache |
 | **VkDescriptor** | 描述符池、布局、集、绑定 | DescriptorPool, DescriptorSetLayout |
 | **RenderPass** | 渲染通道定义、子通道、附件、依赖 | RenderPass, Framebuffer |
@@ -487,11 +487,11 @@ engine/
 │   │   └── backend/
 │   │       └── sdl3_window.hpp      # SDL3 窗口/输入实现
 │   ├── render/
-│   │   ├── context.hpp              # Vulkan 实例、设备、队列、Surface
+│   │   ├── context.hpp              # Vulkan 实例、设备、队列；VMA（`vma_allocator()`）
 │   │   ├── swapchain.hpp            # Swapchain、帧同步
 │   │   ├── resource/
-│   │   │   ├── buffer.hpp           # VkBuffer 封装
-│   │   │   ├── image.hpp            # VkImage、View、采样
+│   │   │   ├── buffer.hpp           # VkBuffer + VMA 分配
+│   │   │   ├── image.hpp            # VkImage、View、VMA 分配
 │   │   │   ├── sampler.hpp
 │   │   │   └── descriptor.hpp       # 描述符池、布局、集
 │   │   ├── pipeline.hpp             # 管线布局、Graphics/Compute 管线
@@ -672,7 +672,7 @@ engine/
 - **驱动与验证层**：不同厂商 Vulkan 行为差异；开发期务必开启 Validation，发布前可关闭并做回归测试。
 - **同步**：每帧正确使用 Fence/Semaphore，避免资源写读冲突（Shadow、GBuffer、Post、UI 之间）。
 - **描述符与绑定**：提前规划 UBO/贴图数量与更新频率，避免每物体一描述符集导致池耗尽；可多用动态 UBO 或 push constant。
-- **内存**：大 Buffer/Image 建议用专用分配器（如 VMA）减少碎片与分配次数。
+- **内存**：引擎侧 `Buffer` / `Image` / `Texture` 已通过 **VMA**（`vulkan-memory-allocator`）做子分配；Swapchain 图像等仍由 KHR swapchain / 驱动路径管理，不经过 VMA。自定义大量离屏资源时仍注意 `maxMemoryAllocationCount` 与碎片。
 - **色彩与线性空间**：贴图 sRGB 约定、HDR 中间目标与最终 sRGB 输出需统一，避免过曝或发灰。
 - **扩展**：按需启用 extension（如 VK_KHR_dynamic_rendering、VK_EXT_descriptor_indexing），并做 fallback 或特性检测。
 

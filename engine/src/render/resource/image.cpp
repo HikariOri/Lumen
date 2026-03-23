@@ -8,7 +8,6 @@
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
 
-
 #include <stb_image.h>
 
 #include <cmath>
@@ -17,20 +16,6 @@
 namespace lumen::render {
 
 namespace {
-
-uint32_t find_memory_type(VkPhysicalDevice physical, uint32_t typeFilter,
-                          VkMemoryPropertyFlags props) {
-    VkPhysicalDeviceMemoryProperties memProps;
-    vkGetPhysicalDeviceMemoryProperties(physical, &memProps);
-
-    for (uint32_t i { 0 }; i < memProps.memoryTypeCount; ++i) {
-        if ((typeFilter & (1u << i)) &&
-            (memProps.memoryTypes[i].propertyFlags & props) == props) {
-            return i;
-        }
-    }
-    return UINT32_MAX;
-}
 
 uint32_t calculate_mip_levels(uint32_t width, uint32_t height) {
     return static_cast<uint32_t>(
@@ -44,7 +29,14 @@ bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
     if (info.width == 0 || info.height == 0)
         return false;
 
+    VmaAllocator vma = ctx.vma_allocator();
+    if (vma == nullptr) {
+        LUMEN_LOG_ERROR("Image 创建失败: VMA 未初始化");
+        return false;
+    }
+
     device_ = ctx.device();
+    vma_allocator_ = vma;
     width_ = info.width;
     height_ = info.height;
     format_ = info.format;
@@ -72,30 +64,20 @@ bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
         imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     }
 
-    VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &image_);
+    VmaAllocationCreateInfo allocCreate {};
+    allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
+
+    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
+                                     &image_, &allocation_, nullptr);
     if (result != VK_SUCCESS) {
         LUMEN_LOG_ERROR("Image 创建失败: {} ({}x{})", static_cast<int>(result),
                         info.width, info.height);
-        return false;
-    }
-
-    VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(device_, image_, &memReqs);
-
-    VkMemoryAllocateInfo allocInfo { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-    allocInfo.allocationSize = memReqs.size;
-    allocInfo.memoryTypeIndex =
-        find_memory_type(ctx.physical_device(), memReqs.memoryTypeBits,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    result = vkAllocateMemory(device_, &allocInfo, nullptr, &memory_);
-    if (result != VK_SUCCESS) {
-        vkDestroyImage(device_, image_, nullptr);
+        device_ = VK_NULL_HANDLE;
+        vma_allocator_ = nullptr;
         image_ = VK_NULL_HANDLE;
+        allocation_ = nullptr;
         return false;
     }
-
-    vkBindImageMemory(device_, image_, memory_, 0);
 
     VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewInfo.image = image_;
@@ -167,26 +149,28 @@ void Image::destroy_() {
         vkDestroyImageView(device_, imageView_, nullptr);
         imageView_ = VK_NULL_HANDLE;
     }
-    if (image_ != VK_NULL_HANDLE) {
-        vkDestroyImage(device_, image_, nullptr);
+    if (image_ != VK_NULL_HANDLE && vma_allocator_ != nullptr &&
+        allocation_ != nullptr) {
+        vmaDestroyImage(vma_allocator_, image_, allocation_);
         image_ = VK_NULL_HANDLE;
+        allocation_ = nullptr;
     }
-    if (memory_ != VK_NULL_HANDLE) {
-        vkFreeMemory(device_, memory_, nullptr);
-        memory_ = VK_NULL_HANDLE;
-    }
+    vma_allocator_ = nullptr;
+    device_ = VK_NULL_HANDLE;
 }
 
 Image::~Image() { destroy_(); }
 
 Image::Image(Image &&other) noexcept
-    : device_ { other.device_ }, image_ { other.image_ },
-      memory_ { other.memory_ }, imageView_ { other.imageView_ },
-      format_ { other.format_ }, width_ { other.width_ },
-      height_ { other.height_ }, mipLevels_ { other.mipLevels_ } {
+    : device_ { other.device_ }, vma_allocator_ { other.vma_allocator_ },
+      image_ { other.image_ }, allocation_ { other.allocation_ },
+      imageView_ { other.imageView_ }, format_ { other.format_ },
+      width_ { other.width_ }, height_ { other.height_ },
+      mipLevels_ { other.mipLevels_ } {
     other.device_ = VK_NULL_HANDLE;
+    other.vma_allocator_ = nullptr;
     other.image_ = VK_NULL_HANDLE;
-    other.memory_ = VK_NULL_HANDLE;
+    other.allocation_ = nullptr;
     other.imageView_ = VK_NULL_HANDLE;
 }
 
@@ -195,16 +179,18 @@ Image &Image::operator=(Image &&other) noexcept {
         return *this;
     destroy_();
     device_ = other.device_;
+    vma_allocator_ = other.vma_allocator_;
     image_ = other.image_;
-    memory_ = other.memory_;
+    allocation_ = other.allocation_;
     imageView_ = other.imageView_;
     format_ = other.format_;
     width_ = other.width_;
     height_ = other.height_;
     mipLevels_ = other.mipLevels_;
     other.device_ = VK_NULL_HANDLE;
+    other.vma_allocator_ = nullptr;
     other.image_ = VK_NULL_HANDLE;
-    other.memory_ = VK_NULL_HANDLE;
+    other.allocation_ = nullptr;
     other.imageView_ = VK_NULL_HANDLE;
     return *this;
 }

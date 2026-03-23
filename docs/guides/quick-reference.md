@@ -25,6 +25,7 @@
 | 时间 | `lumen::core::steady_seconds()`、`FrameDeltaClock`（见 [time.md](../reference/time.md)） |
 | 日志 | `LUMEN_APP_LOG_*`（应用层）|
 | 设备等待 | `ctx.wait_idle()` |
+| GPU 缓冲 / 图像内存 | `Context::init_device` 后使用 `ctx.vma_allocator()`；`Buffer` / `Image` / `Texture` 内部通过 **VMA** 分配（非裸 `vkAllocateMemory`） |
 | 场景轨道相机 | `lumen::scene::SceneOrbitCamera`、`SceneCameraController`、`frame_orbit_on_drawable`（见 [scene-camera.md](../design/scene-camera.md)） |
 | Swapchain 重建 | `recreate_swapchain_resources(ctx, swapchain, framebuffers, frameSync, renderPass.handle(), w, h, framesInFlight, depthImageView)` |
 

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
 namespace lumen {
@@ -42,7 +43,7 @@ struct BufferCreateInfo {
  * @class Buffer
  * @brief Vulkan Buffer 封装
  *
- * RAII 管理 Buffer 与 DeviceMemory。
+ * RAII 管理 Buffer 与 VMA 分配。
  * 通用类型，也可使用专用类型：VertexBuffer、IndexBuffer、UniformBuffer、StagingBuffer。
  */
 class Buffer {
@@ -94,8 +95,9 @@ private:
     void destroy_();
 
     VkDevice device_ { VK_NULL_HANDLE };
+    VmaAllocator vma_allocator_ { nullptr };
     VkBuffer buffer_ { VK_NULL_HANDLE };
-    VkDeviceMemory memory_ { VK_NULL_HANDLE };
+    VmaAllocation allocation_ { nullptr };
     size_t size_ { 0 };
 };
 

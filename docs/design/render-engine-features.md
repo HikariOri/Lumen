@@ -30,7 +30,7 @@
 
 - [ ] Buffer 封装（Vertex/Index/Uniform/Staging）
 - [ ] Image 封装（2D/Cube、Mip、Format）
-- [ ] 内存分配策略（可选 VMA）
+- [x] 内存分配：**Vulkan Memory Allocator（VMA）**；`Context::init_device` 后通过 `vma_allocator()` 供 `Buffer` / `Image` / `Texture` 使用（子分配、减少 `vkAllocateMemory` 次数）
 - [ ] Staging 上传（纹理、顶点数据）
 - [ ] Sampler（Filter、AddressMode、Anisotropy）
 
@@ -295,6 +295,7 @@
 
 | 模块/类 | 用途 |
 |--------|------|
+| `Context` | Vulkan Instance / Device / Queue；`init_device` 后提供 `vma_allocator()`（VMA） |
 | Material / MaterialAsset / MaterialInstance | PBR 参数与贴图槽、资产与实例、用于 UBO/Descriptor 与着色器 |
 | Transform | 层级与世界矩阵，驱动 MVP 与光照位置 |
 | Camera | 相机参数与 View/Projection |

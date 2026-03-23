@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 
 namespace lumen {
 namespace render {
@@ -200,6 +201,9 @@ public:
     /// 是否已初始化 Device
     [[nodiscard]] bool has_device() const { return device_ != VK_NULL_HANDLE; }
 
+    /// VMA 分配器（init_device 成功后有效，销毁设备前由 Context 释放）
+    [[nodiscard]] VmaAllocator vma_allocator() const { return vmaAllocator_; }
+
     /**
      * @brief 等待设备所有操作完成（阻塞直到 GPU 空闲）
      * @note 在重建 Swapchain、资源销毁等操作前调用
@@ -212,6 +216,7 @@ private:
     void relink_features_chain_();
     bool pick_physical_device_(VkSurfaceKHR surface);
     bool create_logical_device_(VkSurfaceKHR surface);
+    bool create_vma_allocator_();
 
     VkInstance instance_ { VK_NULL_HANDLE };
     VkPhysicalDevice physicalDevice_ { VK_NULL_HANDLE };
@@ -255,6 +260,8 @@ private:
     };
 
     VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_ {};
+
+    VmaAllocator vmaAllocator_ { nullptr };
 };
 
 } // namespace render

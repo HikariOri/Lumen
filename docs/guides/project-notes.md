@@ -54,6 +54,13 @@
 - 有多帧并发（`framesInFlight > 1`）时，应为每帧使用独立的 UBO 和 DescriptorSet
 - 否则前一帧 GPU 仍在读时，当前帧会覆盖同一 buffer，造成闪烁或错误
 
+### 3.5 GPU 内存（VMA）
+
+- **依赖**：`Buffer` / `Image` / `Texture` 创建需要 **`Context::init_device` 已成功**，此时 `vma_allocator()` 非空；仅 `init_instance` 时无法分配这些资源。
+- **实现**：使用 [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)（vcpkg：`vulkan-memory-allocator`）；实现编译单元为 `engine/src/render/vma.cpp`（`VMA_IMPLEMENTATION`）。
+- **生命周期**：`Context` 析构时先 **`vmaDestroyAllocator`**，再销毁 `VkDevice`，顺序勿颠倒。
+- **范围**：Swapchain 图像等仍由 Vulkan swapchain 分配，不经 VMA。
+
 ---
 
 ## 四、Shadertoy 项目

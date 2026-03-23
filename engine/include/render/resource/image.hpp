@@ -9,6 +9,7 @@
 
 #include <cstdint>
 
+#include <vk_mem_alloc.h>
 #include <vulkan/vulkan.h>
 
 namespace lumen {
@@ -43,7 +44,7 @@ struct ImageCreateInfo {
  * @class Image
  * @brief Vulkan Image 封装
  *
- * RAII 管理 Image、DeviceMemory 与 ImageView。
+ * RAII 管理 Image、VMA 分配与 ImageView。
  */
 class Image {
 public:
@@ -105,8 +106,9 @@ private:
     void destroy_();
 
     VkDevice device_ { VK_NULL_HANDLE };
+    VmaAllocator vma_allocator_ { nullptr };
     VkImage image_ { VK_NULL_HANDLE };
-    VkDeviceMemory memory_ { VK_NULL_HANDLE };
+    VmaAllocation allocation_ { nullptr };
     VkImageView imageView_ { VK_NULL_HANDLE };
     VkFormat format_ { VK_FORMAT_UNDEFINED };
     uint32_t width_ { 0 };

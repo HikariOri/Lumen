@@ -1,6 +1,6 @@
 # Lumen 文档索引
 
-**编写规范**：正文中文排版遵循 [guides/chinese-typography.md](guides/chinese-typography.md)；文内 C++ 示例遵循 [reference/cpp-style.md](reference/cpp-style.md)。**技术栈表述**应与工程一致：**C++23**、**Vulkan 1.4**（见根目录 `CMakeLists.txt` 与 `engine/include/render/context.hpp`）。
+**编写规范**：正文中文排版遵循 [guides/chinese-typography.md](guides/chinese-typography.md)；文内 C++ 示例遵循 [reference/cpp-style.md](reference/cpp-style.md)。**技术栈表述**应与工程一致：**C++23**、**Vulkan 1.4**（见根目录 `CMakeLists.txt` 与 `engine/include/render/context.hpp`）；**GPU 设备内存**由 **VMA**（Vulkan Memory Allocator，`Context::vma_allocator()`）管理 `Buffer` / `Image` / `Texture`，详见 [project-notes.md](guides/project-notes.md) 第 3.5 节。
 
 文档按用途分为三类目录：
 
