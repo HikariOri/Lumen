@@ -157,7 +157,7 @@ void write_material_descriptor_images(
 }
 
 constexpr uint32_t kMaxFramesInFlight { 2 };
-constexpr const char *kGltfPath { "assets/model/adamHead/adamHead.gltf" };
+constexpr const char *kGltfPath { "assets/model/Sponza/glTF/Sponza.gltf" };
 constexpr const char *kObjPath { "assets/model/Mythra_1.04/Mythra_1.04.obj" };
 /// ViewManipulate 命中区边长；略小可减少与 Dock 边界的溢出感
 constexpr float kViewCubeSize { 96.0f };

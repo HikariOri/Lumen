@@ -1,3 +1,4 @@
 add_subdirectory(sandbox)
 add_subdirectory(shadertoy)
 add_subdirectory(demo3d)
+add_subdirectory(tinygltf_raw_load_test)

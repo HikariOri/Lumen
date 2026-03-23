@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -24,6 +25,15 @@ namespace render {
 class Context;
 class CommandPool;
 struct ImageCreateInfo;
+
+/**
+ * @brief 立方体单 mip 的 RGBA8 面数据（顺序 +X,-X,+Y,-Y,+Z,-Z），与
+ * `create_cubemap_from_rgba8_mip_chain` 配套
+ */
+struct CubemapRgba8MipLevel {
+    uint32_t face_size { 0 };
+    std::array<const uint8_t *, 6> faces {};
+};
 
 /**
  * @class Texture
@@ -43,17 +53,14 @@ public:
     ~Texture();
 
     /**
-     * @brief 从文件创建纹理（PNG/JPG，sRGB）
-     * @param ctx 已初始化的 Context
-     * @param filePath 图片路径
-     * @param transferQueue 用于传输的队列（通常用 graphics_queue）
-     * @param cmdPool 命令池（需与 transferQueue 同族）
-     * @param samplerConfig 可选 Sampler 配置
-     * @return 成功返回 true
+     * @brief 从文件创建纹理（PNG/JPG）
+     * @param format 颜色贴图用 `R8G8B8A8_SRGB`；**数据贴图**（glTF metallicRoughness、
+     * normal、occlusion）须用 `R8G8B8A8_UNORM` 以保持通道线性
      */
     bool create_from_file(const Context &ctx, const char *filePath,
                           VkQueue transferQueue, CommandPool &cmdPool,
-                          const SamplerConfig &samplerConfig = {});
+                          const SamplerConfig &samplerConfig = {},
+                          VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
 
     /**
      * @brief 从 KTX / KTX2 文件创建纹理（libktx 解码为 RGBA8 后上传）
@@ -69,10 +76,29 @@ public:
      *
      * 每面为 `faceSize×faceSize` 连续 RGBA8；用于天空盒、IBL 环境贴图等。
      */
+    /**
+     * @param format `SRGB` 表示 texel 为 sRGB 编码；**线性** 环境数据（如 CPU 积分）应使用
+     * `VK_FORMAT_R8G8B8A8_UNORM`
+     */
     bool create_cubemap_from_rgba8_faces(
         const Context &ctx, const void *const faces[6], uint32_t faceSize,
         VkQueue transferQueue, CommandPool &cmdPool,
-        const SamplerConfig &samplerConfig = {});
+        const SamplerConfig &samplerConfig = {},
+        VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
+
+    /**
+     * @brief 从完整 mip 链创建立方体贴图（每级 6 面 RGBA8，顺序 +X,-X,+Y,-Y,+Z,-Z）
+     *
+     * `mip_levels[i].face_size` 须为 `mip_levels[0].face_size >> i`（右移 i 位，最小为
+     * 1），不自动生成 mip。
+     *
+     * @param format 同 `create_cubemap_from_rgba8_faces`
+     */
+    bool create_cubemap_from_rgba8_mip_chain(
+        const Context &ctx, const CubemapRgba8MipLevel *mip_levels,
+        size_t mip_level_count, VkQueue transferQueue, CommandPool &cmdPool,
+        const SamplerConfig &samplerConfig = {},
+        VkFormat format = VK_FORMAT_R8G8B8A8_SRGB);
 
     /**
      * @brief 从 6 面 RGBA32F 像素创建立方体贴图（顺序 +X,-X,+Y,-Y,+Z,-Z），含

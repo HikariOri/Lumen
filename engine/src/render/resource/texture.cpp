@@ -203,7 +203,8 @@ bool Texture::create_from_memory(const Context &ctx, const void *data,
 
 bool Texture::create_from_file(const Context &ctx, const char *filePath,
                                VkQueue transferQueue, CommandPool &cmdPool,
-                               const SamplerConfig &samplerConfig) {
+                               const SamplerConfig &samplerConfig,
+                               VkFormat format) {
     stbi_set_flip_vertically_on_load(
         1); // Vulkan 纹理 (0,0)=左下，stb 默认行 0=顶部，需翻转
     int w = 0, h = 0, channels = 0;
@@ -218,8 +219,7 @@ bool Texture::create_from_file(const Context &ctx, const char *filePath,
     const size_t imageSize = static_cast<size_t>(texWidth) * texHeight * 4;
 
     bool ok = create_from_pixels_(ctx, pixels, imageSize, texWidth, texHeight,
-                                  VK_FORMAT_R8G8B8A8_SRGB, transferQueue,
-                                  cmdPool, true);
+                                  format, transferQueue, cmdPool, true);
     stbi_image_free(pixels);
 
     if (!ok) {
@@ -461,13 +461,18 @@ bool Texture::create_cubemap_from_rgba8_faces(const Context &ctx,
                                               uint32_t faceSize,
                                               VkQueue transferQueue,
                                               CommandPool &cmdPool,
-                                              const SamplerConfig &samplerConfig) {
+                                              const SamplerConfig &samplerConfig,
+                                              VkFormat format) {
     for (uint32_t i = 0; i < 6; ++i) {
         if (faces[i] == nullptr) {
             return false;
         }
     }
     if (faceSize == 0) {
+        return false;
+    }
+    if (format != VK_FORMAT_R8G8B8A8_SRGB &&
+        format != VK_FORMAT_R8G8B8A8_UNORM) {
         return false;
     }
 
@@ -477,7 +482,7 @@ bool Texture::create_cubemap_from_rgba8_faces(const Context &ctx,
         static_cast<size_t>(faceSize) * faceSize * 4u;
     const size_t total_bytes = face_bytes * 6u;
     mipLevels_ = calculate_mip_levels(faceSize, faceSize);
-    format_ = VK_FORMAT_R8G8B8A8_SRGB;
+    format_ = format;
     width_ = faceSize;
     height_ = faceSize;
     device_ = ctx.device();
@@ -584,6 +589,180 @@ bool Texture::create_cubemap_from_rgba8_faces(const Context &ctx,
             cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
     }
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(transferQueue);
+
+    cmdPool.free(buffers);
+
+    if (!create_sampler_(ctx, samplerConfig)) {
+        destroy_();
+        return false;
+    }
+    return true;
+}
+
+bool Texture::create_cubemap_from_rgba8_mip_chain(
+    const Context &ctx, const CubemapRgba8MipLevel *mip_levels,
+    size_t mip_level_count, VkQueue transferQueue, CommandPool &cmdPool,
+    const SamplerConfig &samplerConfig, VkFormat format) {
+    if (mip_levels == nullptr || mip_level_count == 0) {
+        return false;
+    }
+    if (format != VK_FORMAT_R8G8B8A8_SRGB &&
+        format != VK_FORMAT_R8G8B8A8_UNORM) {
+        return false;
+    }
+    const uint32_t base = mip_levels[0].face_size;
+    if (base == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < mip_level_count; ++i) {
+        const uint32_t expected =
+            std::max(1u, base >> static_cast<uint32_t>(i));
+        if (mip_levels[i].face_size != expected) {
+            return false;
+        }
+        for (uint32_t f = 0; f < 6u; ++f) {
+            if (mip_levels[i].faces[f] == nullptr) {
+                return false;
+            }
+        }
+    }
+
+    destroy_();
+
+    size_t staging_total = 0;
+    for (size_t i = 0; i < mip_level_count; ++i) {
+        const size_t fs = static_cast<size_t>(mip_levels[i].face_size);
+        staging_total += 6u * fs * fs * 4u;
+    }
+
+    mipLevels_ = static_cast<uint32_t>(mip_level_count);
+    format_ = format;
+    width_ = base;
+    height_ = base;
+    device_ = ctx.device();
+    vma_allocator_ = ctx.vma_allocator();
+    if (vma_allocator_ == nullptr) {
+        device_ = VK_NULL_HANDLE;
+        return false;
+    }
+
+    Buffer staging;
+    BufferCreateInfo stagingInfo { staging_total, BufferUsage::Staging, true };
+    if (!staging.create(ctx, stagingInfo)) {
+        return false;
+    }
+    {
+        std::vector<uint8_t> concat(staging_total);
+        size_t off = 0;
+        for (size_t mip = 0; mip < mip_level_count; ++mip) {
+            const uint32_t fs = mip_levels[mip].face_size;
+            const size_t face_bytes =
+                static_cast<size_t>(fs) * static_cast<size_t>(fs) * 4u;
+            for (uint32_t f = 0; f < 6u; ++f) {
+                std::memcpy(concat.data() + off, mip_levels[mip].faces[f],
+                            face_bytes);
+                off += face_bytes;
+            }
+        }
+        staging.upload(concat.data(), staging_total);
+    }
+
+    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = base;
+    imageInfo.extent.height = base;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = mipLevels_;
+    imageInfo.arrayLayers = 6;
+    imageInfo.format = format_;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    VmaAllocationCreateInfo allocCreate {};
+    allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
+
+    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
+                                     &image_, &allocation_, nullptr);
+    if (result != VK_SUCCESS) {
+        device_ = VK_NULL_HANDLE;
+        vma_allocator_ = nullptr;
+        image_ = VK_NULL_HANDLE;
+        allocation_ = nullptr;
+        return false;
+    }
+
+    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    viewInfo.image = image_;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.format = format_;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = mipLevels_;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 6;
+
+    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
+    if (result != VK_SUCCESS) {
+        destroy_();
+        return false;
+    }
+
+    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    if (buffers.empty()) {
+        destroy_();
+        return false;
+    }
+    VkCommandBuffer cmd = buffers[0];
+
+    VkCommandBufferBeginInfo beginInfo {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    };
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &beginInfo);
+
+    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                                 mipLevels_, 0, 6);
+
+    VkDeviceSize buffer_offset = 0;
+    for (uint32_t mip = 0; mip < mipLevels_; ++mip) {
+        const uint32_t fs = mip_levels[mip].face_size;
+        for (uint32_t f = 0; f < 6u; ++f) {
+            VkBufferImageCopy region {};
+            region.bufferOffset = buffer_offset;
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = mip;
+            region.imageSubresource.baseArrayLayer = f;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset = { 0, 0, 0 };
+            region.imageExtent = { fs, fs, 1 };
+
+            vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                   &region);
+            buffer_offset += static_cast<VkDeviceSize>(fs) *
+                             static_cast<VkDeviceSize>(fs) * 4u;
+        }
+    }
+
+    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0,
+                                 mipLevels_, 0, 6);
 
     vkEndCommandBuffer(cmd);
 
