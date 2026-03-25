@@ -19,7 +19,6 @@
  *   6. 初始化 Swapchain 和渲染资源
  *   7. 进入渲染循环
  * @see https://docs.vulkan.org/tutorial/html/chapters/overview.html
- * :contentReference[oaicite:1]{index=1}
  */
 
 #pragma once

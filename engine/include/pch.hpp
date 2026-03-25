@@ -4,6 +4,7 @@
 #include <optional>
 #include <ostream>
 #include <random>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>

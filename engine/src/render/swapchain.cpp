@@ -1,6 +1,24 @@
 /**
  * @file swapchain.cpp
  * @brief Swapchain 实现
+ *
+ * 本文件实现 Vulkan WSI（窗口系统集成）核心逻辑：
+ * - 查询 Surface 能力
+ * - 创建 Swapchain
+ * - 获取 Image + 创建 ImageView
+ * - acquire / present 流程
+ * - resize / 重建
+ *
+ * 📌 核心模型：
+ * Swapchain 本质是一个“图像队列”：
+ *   acquire → 渲染 → present → 归还队列 :contentReference[oaicite:0]{index=0}
+ *
+ * 📌 渲染循环：
+ *   vkAcquireNextImageKHR
+ *        ↓
+ *   vkQueueSubmit（渲染）
+ *        ↓
+ *   vkQueuePresentKHR（归还图像） :contentReference[oaicite:1]{index=1}
  */
 
 #include "render/swapchain.hpp"
@@ -8,7 +26,6 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/pass/render_pass.hpp"
-
 
 #include <algorithm>
 #include <limits>
@@ -18,12 +35,31 @@ namespace render {
 
 namespace {
 
+/**
+ * @brief Swapchain 支持信息
+ *
+ * 包含：
+ * - Surface 能力（extent / imageCount / transform）
+ * - 支持的格式
+ * - 支持的 present mode
+ */
 struct SwapchainSupportDetails {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> presentModes;
 };
 
+/**
+ * @brief 查询物理设备对 Surface 的支持情况
+ *
+ * 📌 Vulkan 特点：
+ * - WSI 不是 core，需要单独查询
+ * - 不同 GPU / 平台差异很大
+ *
+ * ⚠️ 必须检查：
+ * - formats 不为空
+ * - presentModes 不为空
+ */
 SwapchainSupportDetails query_swapchain_support(VkPhysicalDevice physical,
                                                 VkSurfaceKHR surface) {
     SwapchainSupportDetails details {};
@@ -50,6 +86,19 @@ SwapchainSupportDetails query_swapchain_support(VkPhysicalDevice physical,
     return details;
 }
 
+/**
+ * @brief 选择 Surface 格式
+ *
+ * 优先使用：
+ * - 指定 format（如果用户提供）
+ * - SRGB 色彩空间（常见默认）
+ *
+ * fallback：
+ * - 返回第一个可用格式
+ *
+ * 📌 常见最佳选择：
+ *   VK_FORMAT_B8G8R8A8_SRGB
+ */
 VkSurfaceFormatKHR
 choose_surface_format(const std::vector<VkSurfaceFormatKHR> &formats,
                       VkFormat preferFormat, VkColorSpaceKHR preferColorSpace) {
@@ -62,12 +111,40 @@ choose_surface_format(const std::vector<VkSurfaceFormatKHR> &formats,
     return formats.empty() ? VkSurfaceFormatKHR {} : formats[0];
 }
 
+/**
+ * @brief 选择 Present Mode
+ *
+ * 优先：
+ * - MAILBOX（低延迟 + 无撕裂）
+ *
+ * fallback：
+ * - FIFO（Vulkan 保证支持，类似 VSync） :contentReference[oaicite:2]{index=2}
+ *
+ * 📌 模式说明：
+ * FIFO：
+ *   队列模式 → 垂直同步
+ *
+ * MAILBOX：
+ *   覆盖旧帧 → 低延迟
+ */
 VkPresentModeKHR choose_present_mode(const std::vector<VkPresentModeKHR> &modes,
                                      VkPresentModeKHR prefer) {
     auto it = std::find(modes.begin(), modes.end(), prefer);
     return it != modes.end() ? prefer : VK_PRESENT_MODE_FIFO_KHR;
 }
 
+/**
+ * @brief 选择 Swapchain extent（分辨率）
+ *
+ * 📌 两种情况：
+ * 1. 平台固定（如 Android）
+ *    → 使用 caps.currentExtent
+ *
+ * 2. 可变（如桌面）
+ *    → clamp 到合法范围
+ *
+ * ⚠️ width / height 可能不合法（窗口最小化）
+ */
 VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR &caps, uint32_t width,
                          uint32_t height) {
     if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
@@ -83,6 +160,20 @@ VkExtent2D choose_extent(const VkSurfaceCapabilitiesKHR &caps, uint32_t width,
 
 } // namespace
 
+/**
+ * @brief 创建 Swapchain
+ *
+ * 步骤：
+ * 1. 保存 Context 信息（device / queues）
+ * 2. 查询支持能力
+ * 3. 创建 Swapchain
+ * 4. 获取 images
+ * 5. 创建 image views
+ *
+ * 📌 注意：
+ * - images 由 Vulkan 分配（不可手动释放）
+ * - imageViews 由我们创建（必须手动销毁）
+ */
 bool Swapchain::create(const Context &ctx, VkSurfaceKHR surface, uint32_t width,
                        uint32_t height, const SwapchainConfig &config) {
     device_ = ctx.device();
@@ -102,6 +193,25 @@ bool Swapchain::create(const Context &ctx, VkSurfaceKHR surface, uint32_t width,
     return ok;
 }
 
+/**
+ * @brief 内部：创建 VkSwapchainKHR
+ *
+ * 📌 核心参数解释：
+ *
+ * minImageCount：
+ *   实际 image 数量 = min + 1（通常 triple buffering）
+ *
+ * imageUsage：
+ *   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+ *
+ * sharingMode：
+ *   - EXCLUSIVE（性能最好）
+ *   - CONCURRENT（跨 queue family）
+ *
+ * 📌 imageCount 规则：
+ *   必须 ≥ minImageCount
+ *   且 ≤ maxImageCount
+ */
 bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
                                   const SwapchainConfig &config) {
     auto support = query_swapchain_support(physicalDevice_, surface_);
@@ -167,6 +277,19 @@ bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
     return true;
 }
 
+/**
+ * @brief 为每个 Swapchain Image 创建 ImageView
+ *
+ * 📌 原因：
+ * - VkImage 不能直接用于渲染
+ * - 必须通过 VkImageView 描述访问方式
+ *
+ * 📌 aspectMask：
+ * - COLOR_ATTACHMENT → VK_IMAGE_ASPECT_COLOR_BIT
+ *
+ * ⚠️ 错误处理：
+ * - 失败时回滚已创建的 view（你做对了 ✔）
+ */
 bool Swapchain::create_image_views_() {
     imageViews_.resize(images_.size());
     for (size_t i { 0 }; i < images_.size(); ++i) {
@@ -199,6 +322,34 @@ bool Swapchain::create_image_views_() {
     return true;
 }
 
+/**
+ * @brief 获取下一张可渲染图像
+ *
+ * @param imageAvailableSemaphore
+ *        GPU signal：图像可用
+ *
+ * 📌 本质：
+ * 从 Swapchain 队列中“取出一张图像”
+ *
+ * 📌 同步：
+ * - 不能直接使用 image！
+ * - 必须等待 semaphore
+ *
+ * ⚠️ 关键语义：
+ * - acquire 只是“获得 index”
+ * - 不保证 GPU 已经可以写！
+ *
+ * 👉 必须：
+ *   vkQueueSubmit 等待 semaphore
+ *
+ * 📌 返回值：
+ * - VK_SUCCESS → 正常
+ * - VK_SUBOPTIMAL_KHR → 可以用但不理想
+ * - VK_ERROR_OUT_OF_DATE_KHR → 必须重建 :contentReference[oaicite:3]{index=3}
+ *
+ * ❗ 当前问题（你的实现）：
+ * - 丢失 VkResult（严重建议修复）
+ */
 uint32_t Swapchain::acquire_next_image(VkSemaphore imageAvailableSemaphore,
                                        VkFence fence, uint64_t timeoutNs) {
     uint32_t index { 0 };
@@ -207,6 +358,26 @@ uint32_t Swapchain::acquire_next_image(VkSemaphore imageAvailableSemaphore,
     return result == VK_SUCCESS ? index : UINT32_MAX;
 }
 
+/**
+ * @brief 提交图像到显示系统
+ *
+ * @param renderFinishedSemaphore
+ *        GPU signal：渲染完成
+ *
+ * 📌 本质：
+ * - 将图像“归还”给 Swapchain
+ * - 并提交给显示系统
+ *
+ * 📌 同步：
+ * - present 会等待 renderFinishedSemaphore
+ *
+ * 📌 关键语义：
+ * - 调用 present 后 → 图像不再属于应用
+ *
+ * ⚠️ 返回值：
+ * - VK_ERROR_OUT_OF_DATE_KHR → 必须重建
+ * - VK_SUBOPTIMAL_KHR → 建议重建
+ */
 VkResult Swapchain::present(VkQueue queue, uint32_t imageIndex,
                             VkSemaphore renderFinishedSemaphore) {
     VkPresentInfoKHR presentInfo { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
@@ -218,6 +389,19 @@ VkResult Swapchain::present(VkQueue queue, uint32_t imageIndex,
     return vkQueuePresentKHR(queue, &presentInfo);
 }
 
+/**
+ * @brief 重建 Swapchain
+ *
+ * 步骤：
+ * 1. destroy old swapchain
+ * 2. create new swapchain
+ *
+ * ⚠️ 必须保证：
+ * - GPU 不再使用旧资源
+ *
+ * 👉 通常：
+ *   vkDeviceWaitIdle()
+ */
 bool Swapchain::resize(uint32_t width, uint32_t height) {
     LUMEN_LOG_DEBUG("Swapchain 调整大小 {}x{}", width, height);
     destroy_();
@@ -230,6 +414,16 @@ bool Swapchain::resize(uint32_t width, uint32_t height) {
     return ok;
 }
 
+/**
+ * @brief 销毁 Swapchain
+ *
+ * 顺序：
+ * 1. ImageViews（我们创建）
+ * 2. Swapchain（Vulkan 对象）
+ *
+ * 📌 images 不需要销毁：
+ * - 由 Swapchain 管理
+ */
 void Swapchain::destroy_() {
     if (!imageViews_.empty() || swapchain_ != VK_NULL_HANDLE) {
         LUMEN_LOG_DEBUG("销毁 Swapchain (imageViews={})", imageViews_.size());
@@ -247,6 +441,24 @@ void Swapchain::destroy_() {
 
 Swapchain::~Swapchain() { destroy_(); }
 
+/**
+ * @brief 完整重建流程（工业级写法 ✔）
+ *
+ * 顺序：
+ *   wait_idle
+ *   ↓
+ *   destroy framebuffers（重要！）
+ *   ↓
+ *   resize swapchain
+ *   ↓
+ *   recreate framebuffers
+ *   ↓
+ *   recreate sync objects
+ *
+ * ⚠️ 关键点：
+ * - Framebuffer 必须先销毁（你写对了！）
+ * - 否则 ImageView 仍被引用 → validation error
+ */
 bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
                                   Framebuffer &framebuffers,
                                   FrameSync &frameSync, VkRenderPass renderPass,

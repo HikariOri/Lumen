@@ -1,26 +1,44 @@
 /**
  * @file event_debug.hpp
- * @brief 输入事件调试：将鼠标键盘事件输出到日志
+ * @brief 输入事件调试工具：将键盘与鼠标事件输出到日志系统
  *
- * 通过 add_sdl_event_handler 注册，不影响现有回调。
- * 日志含 [ImGui: capture] 或 [ImGui: game]，表示该帧输入被 ImGui 捕获或由游戏处理。
- * 使用 LUMEN_LOG_DEBUG，Release 下无输出。需在 imgui_setup_event_pump 之后调用。
+ * 该模块用于调试输入系统，通过注册额外的 SDL 事件 handler，
+ * 将输入事件打印到引擎日志中，不会影响现有事件回调链。
+ *
+ * 日志格式会包含：
+ * - [ImGui: capture] 表示当前帧输入被 ImGui 捕获
+ * - [ImGui: game]    表示输入传递给游戏逻辑处理
+ *
+ * 注意事项：
+ * - 使用 LUMEN_LOG_DEBUG 输出，Release 构建下默认无日志
+ * - 依赖 ImGui 事件状态，必须在 imgui_setup_event_pump 之后调用
  */
 
 #pragma once
 
+#include "platform/event_pump.hpp"
+
 namespace lumen {
 namespace platform {
 
-class EventPump;
-
 /**
- * @brief 注册输入调试 handler，将键盘鼠标事件输出到 engine 日志
+ * @brief 注册输入调试处理器（Input Debug Handler）
  *
- * 会 add_sdl_event_handler，与 ImGui、应用回调共存。
- * 日志级别为 Debug，需 Logger 已初始化。
+ * 向 EventPump 中添加一个额外的 SDL 事件处理回调，用于：
+ * - 打印键盘事件（按下 / 释放）
+ * - 打印鼠标事件（移动 / 按键 / 滚轮）
+ * - 标记当前输入是否被 ImGui 捕获
  *
- * @param pump 事件泵
+ * 该 handler：
+ * - 与 ImGui handler、应用层 handler 共存
+ * - 不会中断或吞掉事件（只做观测）
+ *
+ * 使用场景：
+ * - 调试输入系统是否正确分发
+ * - 排查 ImGui 与游戏输入冲突
+ * - 验证事件顺序与帧行为
+ *
+ * @param pump 事件泵（EventPump 实例），用于注册 handler
  */
 void add_input_debug_handler(EventPump &pump);
 
