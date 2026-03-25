@@ -26,9 +26,7 @@ void ensure_epoch_locked() {
 
 } // namespace
 
-void anchor_steady_epoch() {
-    ensure_epoch_locked();
-}
+void anchor_steady_epoch() { ensure_epoch_locked(); }
 
 double steady_seconds() {
     ensure_epoch_locked();

@@ -7,7 +7,6 @@
 #include "core/logger.hpp"
 #include "platform/event_pump.hpp"
 
-
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -21,7 +20,7 @@ bool Window::create(const WindowConfig &config) {
         return false;
     }
 
-    uint32_t flags = SDL_WINDOW_VULKAN;
+    auto flags = SDL_WINDOW_VULKAN;
     if (config.resizable) {
         flags |= SDL_WINDOW_RESIZABLE;
     }
@@ -40,6 +39,11 @@ bool Window::create(const WindowConfig &config) {
 
     if (config.fullscreen) {
         SDL_SetWindowFullscreen(window_, true);
+        int w {};
+        int h {};
+        get_framebuffer_size(&w, &h);
+        width_ = static_cast<uint32_t>(w);
+        height_ = static_cast<uint32_t>(h);
     }
 
     LUMEN_LOG_DEBUG("窗口创建成功 {}x{} \"{}\"", width_, height_, config.title);
@@ -47,13 +51,17 @@ bool Window::create(const WindowConfig &config) {
 }
 
 std::vector<const char *> Window::get_vulkan_instance_extensions() const {
-    if (!window_)
+    if (!window_) {
+        LUMEN_LOG_WARN("window 未初始化");
         return {};
+    }
 
     uint32_t count { 0 };
     const char *const *names = SDL_Vulkan_GetInstanceExtensions(&count);
-    if (!names || count == 0)
+    if (!names || count == 0) {
+        LUMEN_LOG_WARN("未获取到 Vulkan Extensions");
         return {};
+    }
 
     std::vector<const char *> result(count);
     for (uint32_t i { 0 }; i < count; ++i) {
@@ -63,8 +71,10 @@ std::vector<const char *> Window::get_vulkan_instance_extensions() const {
 }
 
 VkSurfaceKHR Window::create_vulkan_surface(VkInstance instance) const {
-    if (!window_ || instance == VK_NULL_HANDLE)
+    if (!window_ || instance == VK_NULL_HANDLE) {
+        LUMEN_LOG_WARN("window 或 instance 未初始化");
         return VK_NULL_HANDLE;
+    }
 
     VkSurfaceKHR surface { VK_NULL_HANDLE };
     if (!SDL_Vulkan_CreateSurface(window_, instance, nullptr, &surface)) {
@@ -75,30 +85,39 @@ VkSurfaceKHR Window::create_vulkan_surface(VkInstance instance) const {
     return surface;
 }
 
+VkSurfaceKHR
+Window::create_vulkan_surface(const render::Context &context) const {
+    return create_vulkan_surface(context.instance());
+}
+
 bool Window::poll_events() {
     EventPump pump;
     return pump.poll();
 }
 
 uint32_t Window::width() const {
-    if (!window_)
+    if (!window_) {
         return 0;
-    int w { 0 }, h { 0 };
+    }
+    int w { 0 };
+    int h { 0 };
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     return static_cast<uint32_t>(w > 0 ? w : width_);
 }
 
 uint32_t Window::height() const {
-    if (!window_)
+    if (!window_) {
         return 0;
+    }
     int w { 0 }, h { 0 };
     SDL_GetWindowSizeInPixels(window_, &w, &h);
     return static_cast<uint32_t>(h > 0 ? h : height_);
 }
 
 void Window::get_framebuffer_size(int *w, int *h) const {
-    if (!window_ || !w || !h)
+    if (!window_ || !w || !h) {
         return;
+    }
     SDL_GetWindowSizeInPixels(window_, w, h);
 }
 
@@ -133,8 +152,9 @@ Window::Window(Window &&other) noexcept
 }
 
 Window &Window::operator=(Window &&other) noexcept {
-    if (this == &other)
+    if (this == &other) {
         return *this;
+    }
     destroy_();
     window_ = other.window_;
     width_ = other.width_;

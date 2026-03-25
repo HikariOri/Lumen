@@ -5,6 +5,8 @@
 
 #include "platform/event.hpp"
 
+#include <concepts>
+
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
 
@@ -32,14 +34,18 @@ std::string_view modifier_name(Modifier mod) {
         return "None";
     }
     // 组合修饰键：返回第一个非 None 的名称，简化处理
-    if (has_modifier(mod, Modifier::Shift))
+    if (has_modifier(mod, Modifier::Shift)) {
         return "Shift";
-    if (has_modifier(mod, Modifier::Ctrl))
+    }
+    if (has_modifier(mod, Modifier::Ctrl)) {
         return "Ctrl";
-    if (has_modifier(mod, Modifier::Alt))
+    }
+    if (has_modifier(mod, Modifier::Alt)) {
         return "Alt";
-    if (has_modifier(mod, Modifier::Gui))
+    }
+    if (has_modifier(mod, Modifier::Gui)) {
         return "Gui";
+    }
     return "None";
 }
 
@@ -47,22 +53,29 @@ std::string_view event_type_name(const Event &e) {
     return std::visit(
         [](auto &&arg) -> std::string_view {
             using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, EventQuit>)
+            if constexpr (std::same_as<T, EventQuit>)
                 return "Quit";
-            if constexpr (std::is_same_v<T, EventKeyDown>)
+            if constexpr (std::same_as<T, EventKeyDown>)
                 return "KeyDown";
-            if constexpr (std::is_same_v<T, EventKeyUp>)
+            if constexpr (std::same_as<T, EventKeyUp>)
                 return "KeyUp";
-            if constexpr (std::is_same_v<T, EventMouseButtonDown>)
+            if constexpr (std::same_as<T, EventMouseButtonDown>)
                 return "MouseButtonDown";
-            if constexpr (std::is_same_v<T, EventMouseButtonUp>)
+            if constexpr (std::same_as<T, EventMouseButtonUp>)
                 return "MouseButtonUp";
-            if constexpr (std::is_same_v<T, EventMouseMove>)
+            if constexpr (std::same_as<T, EventMouseMove>)
                 return "MouseMove";
-            if constexpr (std::is_same_v<T, EventMouseWheel>)
+            if constexpr (std::same_as<T, EventMouseWheel>)
                 return "MouseWheel";
-            if constexpr (std::is_same_v<T, EventWindowResize>)
+            if constexpr (std::same_as<T, EventWindowResize>)
                 return "WindowResize";
+            if constexpr (std::same_as<T, EventWindowMinimize>)
+                return "EventWindowMinimize";
+            if constexpr (std::same_as<T, EventWindowMaximize>)
+                return "EventWindowMaximize";
+            if constexpr (std::same_as<T, EventWindowRestore>)
+                return "EventWindowRestore";
+
             return "Unknown";
         },
         e);

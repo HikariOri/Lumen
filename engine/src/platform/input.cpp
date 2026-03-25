@@ -8,8 +8,9 @@
 namespace lumen::platform {
 
 bool Input::is_key_down(KeyCode key) const {
-    if (key >= k_max_keys)
+    if (key >= k_max_keys) {
         return false;
+    }
     return keys_[key];
 }
 
@@ -28,8 +29,9 @@ void Input::reset_delta_() {
 }
 
 void Input::update_key_(KeyCode key, bool down) {
-    if (key < k_max_keys)
+    if (key < k_max_keys) {
         keys_[key] = down;
+    }
 }
 
 void Input::update_mouse_button_(MouseButton btn, bool down) {
@@ -47,13 +49,19 @@ void Input::update_mouse_position_(float x, float y) {
 
 void Input::update_modifiers_(uint16_t sdlMods) {
     mods_ = Modifier::None;
-    if (sdlMods & 0x0003u) // SDL_KMOD_LSHIFT | SDL_KMOD_RSHIFT
+
+    constexpr auto SDL_SHIFT = SDL_KMOD_LSHIFT | SDL_KMOD_RSHIFT;
+    constexpr auto SDK_CTRL = SDL_KMOD_LCTRL | SDL_KMOD_RCTRL;
+    constexpr auto SDL_ALT = SDL_KMOD_LALT | SDL_KMOD_RALT;
+    constexpr auto SDL_GUI = SDL_KMOD_LGUI | SDL_KMOD_RGUI;
+
+    if (sdlMods & SDL_SHIFT)
         mods_ = mods_ | Modifier::Shift;
-    if (sdlMods & 0x00C0u) // SDL_KMOD_LCTRL | SDL_KMOD_RCTRL
+    if (sdlMods & SDK_CTRL)
         mods_ = mods_ | Modifier::Ctrl;
-    if (sdlMods & 0x0300u) // SDL_KMOD_LALT | SDL_KMOD_RALT
+    if (sdlMods & SDL_ALT)
         mods_ = mods_ | Modifier::Alt;
-    if (sdlMods & 0x0C00u) // SDL_KMOD_LGUI | SDL_KMOD_RGUI
+    if (sdlMods & SDL_GUI)
         mods_ = mods_ | Modifier::Gui;
 }
 

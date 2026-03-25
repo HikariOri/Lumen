@@ -14,6 +14,7 @@
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_mouse.h>
+#include <variant>
 
 namespace lumen::platform {
 
@@ -43,6 +44,7 @@ MouseButton sdl_button_to_mouse_button(uint8_t btn) {
 
 } // namespace
 
+// TODO: 支持一次性推入多个事件，再一起 dispatch
 bool EventPump::poll() {
     events_.clear();
     input_.reset_delta_();
@@ -50,20 +52,22 @@ bool EventPump::poll() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         for (const auto &fn : sdl_event_handlers_) {
-            if (fn)
+            if (fn) {
                 fn(&e);
+            }
         }
         switch (static_cast<SDL_EventType>(e.type)) {
         case SDL_EVENT_QUIT:
             events_.emplace_back(std::in_place_type<EventQuit>);
             dispatch_(events_);
-            if (on_quit_)
+            if (on_quit_) {
                 on_quit_();
+            }
             return false;
 
         case SDL_EVENT_KEY_DOWN: {
             auto &k = e.key;
-            KeyCode code = static_cast<KeyCode>(k.scancode);
+            auto code = static_cast<KeyCode>(k.scancode);
             input_.update_key_(code, true);
             input_.update_modifiers_(static_cast<uint16_t>(k.mod));
             events_.emplace_back(std::in_place_type<EventKeyDown>, code,
@@ -72,7 +76,7 @@ bool EventPump::poll() {
         }
         case SDL_EVENT_KEY_UP: {
             auto &k = e.key;
-            KeyCode code = static_cast<KeyCode>(k.scancode);
+            auto code = static_cast<KeyCode>(k.scancode);
             input_.update_key_(code, false);
             input_.update_modifiers_(static_cast<uint16_t>(k.mod));
             events_.emplace_back(std::in_place_type<EventKeyUp>, code,
@@ -133,9 +137,22 @@ bool EventPump::poll() {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             events_.emplace_back(std::in_place_type<EventQuit>);
             dispatch_(events_);
-            if (on_quit_)
+            if (on_quit_) {
                 on_quit_();
+            }
             return false;
+
+        case SDL_EVENT_WINDOW_MINIMIZED:
+            events_.emplace_back(std::in_place_type<EventWindowMinimize>);
+            dispatch_(events_);
+
+        case SDL_EVENT_WINDOW_MAXIMIZED:
+            events_.emplace_back(std::in_place_type<EventWindowMaximize>);
+            dispatch_(events_);
+
+        case SDL_EVENT_WINDOW_RESTORED:
+            events_.emplace_back(std::in_place_type<EventWindowRestore>);
+            dispatch_(events_);
 
         default: break;
         }
@@ -183,6 +200,15 @@ void EventPump::dispatch_(const EventList &events) {
         } else if (std::holds_alternative<EventWindowResize>(e) &&
                    on_window_resize_) {
             on_window_resize_(std::get<EventWindowResize>(e));
+        } else if (std::holds_alternative<EventWindowMinimize>(e) &&
+                   on_window_minimize_) {
+            on_window_minimize_(std::get<EventWindowMinimize>(e));
+        } else if (std::holds_alternative<EventWindowMaximize>(e) &&
+                   on_window_maximize_) {
+            on_window_maximize_(std::get<EventWindowMaximize>(e));
+        } else if (std::holds_alternative<EventWindowRestore>(e) &&
+                   on_window_restore_) {
+            on_window_restore_(std::get<EventWindowRestore>(e));
         }
     }
 }

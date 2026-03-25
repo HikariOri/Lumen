@@ -57,12 +57,12 @@ spdlog::sink_ptr make_file_sink(const LoggerPathConfig &cfg) {
     return std::make_shared<spdlog::sinks::basic_file_sink_mt>(cfg.filePath);
 }
 
-std::shared_ptr<spdlog::logger> create_logger(
-    const char *name, const LoggerConfig &config,
-    const LoggerPathConfig &pathCfg,
-    const spdlog::sink_ptr &shared_log_view_sink) {
+std::shared_ptr<spdlog::logger>
+create_logger(const char *name, const bool &enableConsole,
+              const LoggerPathConfig &pathCfg,
+              const spdlog::sink_ptr &shared_log_view_sink) {
     std::vector<spdlog::sink_ptr> sinks;
-    if (config.enableConsole) {
+    if (enableConsole) {
         sinks.emplace_back(make_console_sink());
     }
     if (auto file = make_file_sink(pathCfg)) {
@@ -103,15 +103,16 @@ bool Logger::init_(const LoggerConfig &config) {
         log_view_sink = make_log_view_sink();
     }
 
-    auto engineLogger = create_logger(k_engine_logger_name, config,
-                                        config.engine, log_view_sink);
+    auto engineLogger =
+        create_logger(k_engine_logger_name, config.enableConsole, config.engine,
+                      log_view_sink);
     if (!engineLogger) {
         return false;
     }
     spdlog::register_logger(engineLogger);
 
-    auto appLogger =
-        create_logger(k_app_logger_name, config, config.app, log_view_sink);
+    auto appLogger = create_logger(k_app_logger_name, config.enableConsole,
+                                   config.app, log_view_sink);
     if (appLogger) {
         spdlog::register_logger(appLogger);
     }

@@ -30,7 +30,8 @@ void LogViewBuffer::push_line(spdlog::level::level_enum level,
                               std::string message) {
     std::lock_guard lock(mutex_);
     lines_.push_back(LogViewLine { level, std::move(time_str),
-                                  std::move(logger_name), std::move(message) });
+                                   std::move(logger_name),
+                                   std::move(message) });
     while (lines_.size() > max_lines_) {
         lines_.pop_front();
     }

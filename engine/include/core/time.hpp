@@ -1,6 +1,6 @@
 /**
  * @file time.hpp
- * @brief 单调时钟与帧间隔：基于 std::chrono::steady_clock，不依赖 SDL
+ * @brief 单调时钟与帧间隔：基于 std::chrono::steady_clock
  */
 
 #pragma once
@@ -27,10 +27,11 @@ void anchor_steady_epoch();
 double steady_seconds();
 
 /**
- * @brief 帧间隔计时：在构造时采样当前 steady 时间，每次 tick_seconds() 返回与上一次的间隔
+ * @brief 帧间隔计时：在构造时采样当前 steady 时间，每次 tick_seconds()
+ * 返回与上一次的间隔
  *
- * 典型用法：在进入主循环前构造，每帧调用 `tick_seconds()` 得到 dt。第一次调用的 dt
- * 为「从构造到首次 tick」的间隔（与原先手动 lastTime/now 写法一致）。
+ * 典型用法：在进入主循环前构造，每帧调用 `tick_seconds()` 得到 dt。第一次调用的
+ * dt 为「从构造到首次 tick」的间隔（与原先手动 lastTime/now 写法一致）。
  */
 class FrameDeltaClock {
 public:
