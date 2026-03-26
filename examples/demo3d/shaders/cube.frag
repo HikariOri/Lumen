@@ -27,7 +27,7 @@ layout(set = 0, binding = 0) uniform SceneUBO {
     vec4 sceneParams;
     mat4 skyMvp;
     mat4 skyOrientInv;
-    vec4 envParams;
+    vec4 envParams; // x exposure, y maxMip, z diffMip, w iblStrength
 } scene;
 
 layout(set = 0, binding = 1) uniform samplerCube envMap;
@@ -49,15 +49,13 @@ layout(set = 1, binding = 5) uniform sampler2D emissiveMap;
 const int kMaxLights = 8;
 const float PI = 3.14159265359;
 
-float schlick_fresnel_u(float u) {
-    float m = clamp(1.0 - u, 0.0, 1.0);
-    float m2 = m * m;
-    return m2 * m2 * m;
-}
+// ================= 工具函数 =================
 
-vec3 fresnel_schlick_roughness(float cos_theta, vec3 F0, float roughness) {
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) *
-                    pow(1.0 - cos_theta, 5.0);
+vec3 srgb_to_linear_rgb(vec3 c) {
+    bvec3 lo = lessThanEqual(c, vec3(0.04045));
+    vec3 a = c / 12.92;
+    vec3 b = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(b, a, vec3(lo));
 }
 
 float distribution_ggx(float NdotH, float roughness) {
@@ -67,226 +65,169 @@ float distribution_ggx(float NdotH, float roughness) {
     return a2 / (PI * denom * denom + 1e-7);
 }
 
-float v_smith_ggx_height_correlated(float NdotL, float NdotV, float alpha) {
-    float lambdaV = NdotL * (NdotV * (1.0 - alpha) + alpha);
-    float lambdaL = NdotV * (NdotL * (1.0 - alpha) + alpha);
-    return 0.5 / max(lambdaV + lambdaL, 1e-7);
+float geometry_smith(float NdotL, float NdotV, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+
+    float g1 = NdotL / (NdotL * (1.0 - k) + k);
+    float g2 = NdotV / (NdotV * (1.0 - k) + k);
+
+    return g1 * g2;
 }
 
-vec3 disney_diffuse_term(vec3 baseColor, float NdotL, float NdotV, float VoH,
-                         float roughness) {
-    float FL = schlick_fresnel_u(NdotL);
-    float FV = schlick_fresnel_u(NdotV);
-    float Fd90 = 0.5 + 2.0 * roughness * VoH * VoH;
-    float fd = mix(1.0, Fd90, FL) * mix(1.0, Fd90, FV);
-    return baseColor * fd * (1.0 / PI);
+vec3 fresnel_schlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
-float spotFactor(vec3 lightPos, vec3 worldPos, vec3 spotDir, float cosOuter,
-                 float cosInner) {
-    vec3 l2f = normalize(worldPos - lightPos);
-    float theta = dot(l2f, spotDir);
-    float denom = max(cosInner - cosOuter, 1e-5);
-    return clamp((theta - cosOuter) / denom, 0.0, 1.0);
-}
-
-mat3 cotangent_frame(vec3 N, vec3 p, vec2 uv) {
-    vec3 dp1 = dFdx(p);
-    vec3 dp2 = dFdy(p);
-    vec2 duv1 = dFdx(uv);
-    vec2 duv2 = dFdy(uv);
-    float det = duv1.x * duv2.y - duv1.y * duv2.x;
-    if (abs(det) < 1e-8)
-        return mat3(vec3(1, 0, 0), vec3(0, 1, 0), N);
-    float invdet = 1.0 / det;
-    vec3 T = normalize((dp1 * duv2.y - dp2 * duv1.y) * invdet);
-    vec3 B = normalize((-dp1 * duv2.x + dp2 * duv1.x) * invdet);
-    return mat3(T, B, N);
-}
-
-vec3 perturb_normal(vec3 N, vec3 worldPos, vec3 V, vec2 uv, vec3 map) {
-    map = map * 2.0 - 1.0;
-    map.y = -map.y;
-    mat3 TBN = cotangent_frame(N, worldPos, uv);
-    return normalize(TBN * map);
-}
-
-vec3 srgb_to_linear_rgb(vec3 c) {
-    bvec3 lo = lessThanEqual(c, vec3(0.04045));
-    vec3 a = c / 12.92;
-    vec3 b = pow((c + 0.055) / 1.055, vec3(2.4));
-    return mix(b, a, vec3(lo));
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0)
+                 * pow(1.0 - cosTheta, 5.0);
 }
 
 uint material_tex_mask() {
     return floatBitsToUint(matUbo.shaderParams.z);
 }
 
-void accum_light_pbr(GPULight L, vec3 N, vec3 V, vec3 albedo, float metallic,
-                     float roughness, out vec3 Lo) {
-    float kind = L.position.w;
-    vec3 radiance = L.color.rgb * L.color.w;
-    vec3 Ll;
+// ================= 直射光 =================
+
+void accum_light(
+    GPULight L,
+    vec3 N,
+    vec3 V,
+    vec3 albedo,
+    float metallic,
+    float roughness,
+    inout vec3 Lo)
+{
+    vec3 Ldir;
     float atten = 1.0;
 
-    if (kind < 0.5) {
-        Ll = normalize(L.direction.xyz);
+    if (L.position.w < 0.5) {
+        Ldir = normalize(L.direction.xyz);
     } else {
         vec3 toLight = L.position.xyz - fragWorldPos;
         float dist = length(toLight);
-        if (dist < 1e-5)
-            return;
-        Ll = toLight / dist;
-        float maxR = L.params.x;
-        if (dist > maxR)
-            return;
-        atten = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
-        float fade = 1.0 - smoothstep(maxR * 0.85, maxR, dist);
-        atten *= fade;
-        if (kind > 1.5) {
-            vec3 spotDir = normalize(L.direction.xyz);
-            atten *= spotFactor(L.position.xyz, fragWorldPos, spotDir,
-                                L.params.y, L.params.z);
-        }
+        Ldir = toLight / dist;
+        atten = 1.0 / (dist * dist);
     }
 
-    float NdotL = max(dot(N, Ll), 0.0);
-    if (NdotL <= 0.0)
-        return;
+    float NdotL = max(dot(N, Ldir), 0.0);
+    if (NdotL <= 0.0) return;
 
-    vec3 H = normalize(V + Ll);
-    float NdotH = max(dot(N, H), 0.0);
+    vec3 H = normalize(V + Ldir);
+
     float NdotV = max(dot(N, V), 1e-4);
+    float NdotH = max(dot(N, H), 0.0);
     float VdotH = max(dot(V, H), 0.0);
 
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 F = fresnel_schlick_roughness(VdotH, F0, roughness);
-    float alpha = roughness * roughness;
+
+    vec3 F = fresnel_schlick(VdotH, F0);
     float D = distribution_ggx(NdotH, roughness);
-    float Vis = v_smith_ggx_height_correlated(NdotL, NdotV, alpha);
-    vec3 specular = D * Vis * F;
+    float G = geometry_smith(NdotL, NdotV, roughness);
 
-    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
-    vec3 diffuse =
-        kD * disney_diffuse_term(albedo, NdotL, NdotV, VdotH, roughness);
+    vec3 specular = (D * G * F) / (4.0 * NdotL * NdotV + 1e-4);
 
-    Lo += (diffuse + specular) * radiance * atten * NdotL;
+    vec3 kS = F;
+    vec3 kD = (1.0 - kS) * (1.0 - metallic);
+
+    vec3 diffuse = albedo / PI;
+
+    vec3 radiance = L.color.rgb * L.color.w;
+
+    Lo += (kD * diffuse + specular) * radiance * NdotL * atten;
 }
 
+// ================= 主函数 =================
+
 void main() {
-    if (pc.mode == 1u) {
-        outColor = vec4(pc.modelColor.rgb, 1.0);
-        return;
-    }
-    if (pc.mode == 2u) {
-        vec3 n = normalize(fragNormal);
-        outColor = vec4(n * 0.5 + 0.5, 1.0);
-        return;
-    }
-    if (pc.mode == 3u) {
-        float d = gl_FragCoord.z;
-        outColor = vec4(vec3(d), 1.0);
-        return;
-    }
 
     vec3 V = normalize(scene.cameraWorld.xyz - fragWorldPos);
-    vec3 N0 = normalize(fragNormal);
+    vec3 N = normalize(fragNormal);
+
     uint tmask = material_tex_mask();
 
-    vec3 albedo_linear;
-    float albedo_a = 1.0;
+    // -------- albedo --------
+    vec3 albedo;
+    float alpha = 1.0;
+
     if ((tmask & 1u) != 0u) {
         vec4 tc = texture(albedoMap, fragUV);
-        albedo_linear = srgb_to_linear_rgb(tc.rgb) * matUbo.baseColorFactor.rgb;
-        albedo_a = tc.a;
+        albedo = srgb_to_linear_rgb(tc.rgb) * matUbo.baseColorFactor.rgb;
+        alpha = tc.a;
     } else {
-        albedo_linear = matUbo.baseColorFactor.rgb;
-        albedo_a = matUbo.baseColorFactor.a;
-    }
-    vec3 albedo = albedo_linear * pc.modelColor.rgb;
-
-    vec3 N;
-    if ((tmask & 2u) != 0u) {
-        vec3 tn = texture(normalMap, fragUV).rgb;
-        N = perturb_normal(N0, fragWorldPos, V, fragUV, tn);
-    } else {
-        N = N0;
+        albedo = matUbo.baseColorFactor.rgb;
+        alpha = matUbo.baseColorFactor.a;
     }
 
+    albedo *= pc.modelColor.rgb;
+
+    // -------- MR --------
     float metallic;
     float roughness;
+
     if ((tmask & 4u) != 0u) {
-        vec4 mrSample = texture(metallicRoughnessMap, fragUV);
-        // kMatTexBitMrIsSpecularGlossinessMap = 32：KHR spec/gloss 贴图绑在 MR 槽
-        if ((tmask & 32u) != 0u) {
-            metallic = clamp(matUbo.mrAoFactors.x, 0.0, 1.0);
-            float gloss = clamp(mrSample.a * matUbo.mrAoFactors.y, 0.0, 1.0);
-            roughness = clamp(1.0 - gloss, 0.04, 1.0);
-        } else {
-            metallic = clamp(mrSample.b * matUbo.mrAoFactors.x, 0.0, 1.0);
-            roughness = clamp(mrSample.g * matUbo.mrAoFactors.y, 0.04, 1.0);
-        }
+        vec4 mr = texture(metallicRoughnessMap, fragUV);
+        metallic = mr.b * matUbo.mrAoFactors.x;
+        roughness = mr.g * matUbo.mrAoFactors.y;
     } else {
-        metallic = clamp(matUbo.mrAoFactors.x, 0.0, 1.0);
-        roughness = clamp(matUbo.mrAoFactors.y, 0.04, 1.0);
+        metallic = matUbo.mrAoFactors.x;
+        roughness = matUbo.mrAoFactors.y;
     }
 
-    float ao;
-    if ((tmask & 8u) != 0u) {
-        ao = clamp(texture(aoMap, fragUV).r * matUbo.mrAoFactors.z, 0.0, 1.0);
-    } else {
-        ao = clamp(matUbo.mrAoFactors.z, 0.0, 1.0);
-    }
+    roughness = clamp(roughness, 0.04, 1.0);
 
-    float exposure = max(scene.envParams.x, 0.0);
-    float maxMip = max(scene.envParams.y, 0.0);
-    float diffMip = max(scene.envParams.z, 0.0);
-    float iblStrength = max(scene.envParams.w, 0.0);
+    // -------- AO --------
+    float ao = ((tmask & 8u) != 0u)
+        ? texture(aoMap, fragUV).r
+        : 1.0;
 
-    int nLights = int(scene.sceneParams.x + 0.5);
+    // ================= 直射光 =================
+    vec3 Lo = vec3(0.0);
+
+    int nLights = int(scene.sceneParams.x);
     nLights = min(nLights, kMaxLights);
 
-    vec3 Lo = vec3(0.0);
     for (int i = 0; i < nLights; ++i) {
-        accum_light_pbr(scene.lights[i], N, V, albedo, metallic, roughness, Lo);
+        accum_light(scene.lights[i], N, V, albedo, metallic, roughness, Lo);
     }
+
+    // ================= IBL =================
+
+    float exposure = scene.envParams.x;
+    float maxMip = scene.envParams.y;
+    float diffMip = scene.envParams.z;
+    float iblStrength = scene.envParams.w;
 
     float NdotV = max(dot(N, V), 1e-4);
+
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    vec3 F_ibl = fresnel_schlick_roughness(NdotV, F0, roughness);
-    vec3 kS = F_ibl;
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+    vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
 
+    vec3 kS = F;
+    vec3 kD = (1.0 - kS) * (1.0 - metallic);
+
+    // diffuse IBL
     vec3 irradiance = textureLod(envMap, N, diffMip).rgb * exposure;
-    vec3 diffuse_ibl = irradiance * albedo * kD * (1.0 / PI) * ao;
+    vec3 diffuseIBL = irradiance * albedo * kD * ao;
 
+    // specular IBL
     vec3 R = reflect(-V, N);
     float lod = roughness * maxMip;
+
     vec3 prefiltered = textureLod(envMap, R, lod).rgb * exposure;
     vec2 brdf = texture(brdfLUT, vec2(NdotV, roughness)).rg;
-    vec3 spec_ibl = prefiltered * (F0 * brdf.x + brdf.y) * ao;
 
-    vec3 ambient = (diffuse_ibl + spec_ibl) * iblStrength;
+    vec3 specIBL = prefiltered * (F * brdf.x + brdf.y) * ao;
 
-    vec3 emissive;
-    if ((tmask & 16u) != 0u) {
-        emissive = texture(emissiveMap, fragUV).rgb * matUbo.emissiveFactor.rgb;
-    } else {
-        emissive = matUbo.emissiveFactor.rgb;
-    }
+    vec3 ambient = (diffuseIBL + specIBL) * iblStrength;
 
-    vec3 color = ambient + Lo + emissive;
+    // ================= emissive =================
+    vec3 emissive = ((tmask & 16u) != 0u)
+        ? texture(emissiveMap, fragUV).rgb * matUbo.emissiveFactor.rgb
+        : matUbo.emissiveFactor.rgb;
 
-    float alpha = albedo_a * pc.modelColor.a * matUbo.baseColorFactor.a;
-    float amode = matUbo.shaderParams.x;
-    if (amode > 0.5 && amode < 1.5) {
-        if (alpha < matUbo.shaderParams.y)
-            discard;
-    }
+    vec3 color = Lo + ambient + emissive;
 
-    float out_alpha = 1.0;
-    if (amode > 1.5) {
-        out_alpha = alpha;
-    }
-    outColor = vec4(color, out_alpha);
+    outColor = vec4(color, alpha);
 }

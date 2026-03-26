@@ -112,7 +112,8 @@ struct RGPass {
 
 /**
  * @class RenderGraph
- * @brief 渲染图：Setup 阶段 `add_pass`，Compile 阶段 `compile`，Execute 阶段 `execute`
+ * @brief 渲染图：Setup 阶段 `add_pass`，Compile 阶段 `compile`，Execute 阶段
+ * `execute`
  */
 class RenderGraph {
 public:
@@ -122,7 +123,8 @@ public:
     void set_context(const Context *ctx) { ctx_ = ctx; }
 
     /**
-     * @brief Setup：添加 Pass（会使编译结果失效，下次 execute 前需重新 compile）
+     * @brief Setup：添加 Pass（会使编译结果失效，下次 execute 前需重新
+     * compile）
      */
     void add_pass(const RGPass &pass);
 

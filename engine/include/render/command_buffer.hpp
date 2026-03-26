@@ -56,6 +56,8 @@ class Context;
  * - vkResetCommandPool 可以重置所有分配的 buffer
  * - CommandPool 必须在释放所有 buffer 之后销毁
  * - CommandPool 对线程访问不是线程安全的
+ *
+ * @todo 添加 one-shot command buffer 支持
  */
 class CommandPool {
 public:

@@ -76,7 +76,7 @@ struct OffscreenRenderTargetConfig {
      * - VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
      *     → 仅用于渲染，不采样
      *
-     * ⚠ 注意：
+     * @note 注意：
      * 如果要用于 ImGui::Image 或 shader texture sampler，
      * 必须保证 transition 到该 layout
      */
@@ -110,6 +110,7 @@ struct OffscreenRenderTargetConfig {
  */
 class OffscreenRenderTarget {
 public:
+    // 可移动不可复制
     OffscreenRenderTarget() = default;
     OffscreenRenderTarget(const OffscreenRenderTarget &) = delete;
     OffscreenRenderTarget(OffscreenRenderTarget &&other) noexcept;
@@ -260,13 +261,13 @@ public:
      * @brief swapchain format
      */
     [[nodiscard]] VkFormat format() const;
-   
+
     /**
      * @brief image 数量（双/三缓冲）
      */
     [[nodiscard]] uint32_t image_count() const;
-   
-    /**  
+
+    /**
      * @brief 是否有效
      */
     [[nodiscard]] bool is_valid() const;

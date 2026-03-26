@@ -44,7 +44,7 @@ namespace lumen::render {
  *    - VkImageView
  *    - VkFramebuffer
  *
- * ⚠ 注意：
+ * @note 注意：
  * - create 不是幂等的（重复调用会重建资源）
  * - 必须保证旧资源不再被 GPU 使用
  */
@@ -82,8 +82,9 @@ bool OffscreenRenderTarget::create(const Context &ctx,
  */
 bool OffscreenRenderTarget::resize(const Context &ctx, uint32_t width,
                                    uint32_t height) {
-    if (width == 0 || height == 0)
+    if (width == 0 || height == 0) {
         return false;
+    }
 
     width_ = width;
     height_ = height;
@@ -134,7 +135,7 @@ VkRenderPass OffscreenRenderTarget::render_pass() const {
  * --------------------------------------
  * Framebuffer → ImageView → Image → RenderPass
  *
- * ⚠ 注意：
+ * @note 注意：
  * RenderPass 在 Vulkan 中可复用，但本实现随 target 生命周期绑定
  */
 void OffscreenRenderTarget::destroy_() {
