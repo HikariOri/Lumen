@@ -44,7 +44,7 @@ MouseButton sdl_button_to_mouse_button(uint8_t btn) {
 
 } // namespace
 
-// TODO: 支持一次性推入多个事件，再一起 dispatch
+/// @todo 支持一次性推入多个事件，再一起 dispatch
 bool EventPump::poll() {
     events_.clear();
     input_.reset_delta_();

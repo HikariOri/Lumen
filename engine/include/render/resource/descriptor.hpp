@@ -1,14 +1,18 @@
 /**
  * @file descriptor.hpp
- * @brief 描述符池、布局、集：UBO、纹理、Sampler 绑定
+ * @brief 描述符池、布局、描述符集管理（UBO / Texture / Sampler 绑定系统）
  *
- * 管理 DescriptorSetLayout、DescriptorPool、DescriptorSet 的创建与绑定。
+ * Vulkan Descriptor 系统封装：
+ * - DescriptorSetLayout：定义 shader 资源绑定结构（类似 root signature）
+ * - DescriptorPool：负责 DescriptorSet 的分配与生命周期管理
+ * - 写入函数：封装 UBO / Image 绑定更新逻辑
+ *
+ * 本模块是 CPU ↔ GPU 资源绑定的核心桥梁
  */
 
 #pragma once
 
 #include <vector>
-
 #include <vulkan/vulkan.h>
 
 namespace lumen {
@@ -16,71 +20,120 @@ namespace render {
 
 class Context;
 
-/// 描述符类型绑定
+/**
+ * @brief 单个 descriptor binding 描述
+ *
+ * 对应 shader 中的：
+ * layout(set = X, binding = Y)
+ *
+ * Vulkan 中 binding 定义资源类型与 shader 可见性
+ */
 struct DescriptorBinding {
+
+    /// shader 中的 binding index（layout(binding = X)）
     uint32_t binding { 0 };
+
+    /// 资源类型（UBO / Texture / Sampler / StorageBuffer 等）
     VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+
+    /// array 数量（支持 descriptor array，例如 texture array）
     uint32_t count { 1 };
+
+    /// shader 可见阶段（vertex / fragment / compute）
     VkShaderStageFlags stages { VK_SHADER_STAGE_VERTEX_BIT };
 };
 
-/// 描述符池大小（按类型）
+/**
+ * @brief DescriptorPool 中各类型资源的容量配置
+ *
+ * Vulkan DescriptorPool 本质是“固定容量内存池”
+ * 必须提前声明各类型 descriptor 的最大数量
+ */
 struct DescriptorPoolSize {
+
+    /// descriptor 类型
     VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+
+    /// 此类型最多可分配多少个 descriptor
     uint32_t count { 0 };
 };
 
 /**
  * @class DescriptorSetLayout
- * @brief 描述符集布局
+ * @brief 描述符布局（Shader Interface Definition）
+ *
+ * 等价于：
+ * - OpenGL: uniform layout
+ * - D3D12: root signature
+ *
+ * 决定 shader 能访问哪些资源，以及绑定结构
  */
 class DescriptorSetLayout {
 public:
+    /// 可移动不可复制
     DescriptorSetLayout() = default;
     DescriptorSetLayout(const DescriptorSetLayout &) = delete;
     DescriptorSetLayout(DescriptorSetLayout &&other) noexcept;
     DescriptorSetLayout &operator=(const DescriptorSetLayout &) = delete;
     DescriptorSetLayout &operator=(DescriptorSetLayout &&other) noexcept;
+
     ~DescriptorSetLayout();
 
     /**
-     * @brief 创建布局
-     * @param ctx Context
-     * @param bindings 绑定列表
-     * @return 成功返回 true
+     * @brief 创建 descriptor set layout
+     *
+     * 内部会转换 DescriptorBinding → VkDescriptorSetLayoutBinding
+     *
+     * Vulkan API：
+     * vkCreateDescriptorSetLayout
      */
     bool create(const Context &ctx,
                 const std::vector<DescriptorBinding> &bindings);
 
+    /// 获取 Vulkan 原生 handle
     [[nodiscard]] VkDescriptorSetLayout handle() const { return layout_; }
+
+    /// 是否已创建
     [[nodiscard]] bool is_valid() const { return layout_ != VK_NULL_HANDLE; }
 
 private:
     void destroy_();
 
+    /// 关联 device（用于 destroy）
     VkDevice device_ { VK_NULL_HANDLE };
+
+    /// Vulkan descriptor set layout
     VkDescriptorSetLayout layout_ { VK_NULL_HANDLE };
 };
 
 /**
  * @class DescriptorPool
- * @brief 描述符池
+ * @brief Descriptor 分配池（类似 allocator）
+ *
+ * Vulkan DescriptorPool 是预分配系统：
+ * - 所有 DescriptorSet 必须从 pool 分配
+ * - pool size 必须提前声明
  */
 class DescriptorPool {
 public:
     DescriptorPool() = default;
+
     DescriptorPool(const DescriptorPool &) = delete;
     DescriptorPool(DescriptorPool &&other) noexcept;
+
     DescriptorPool &operator=(const DescriptorPool &) = delete;
     DescriptorPool &operator=(DescriptorPool &&other) noexcept;
+
     ~DescriptorPool();
 
     /**
-     * @brief 创建池
-     * @param ctx Context
-     * @param poolSizes 各类型数量
-     * @param maxSets 最大 DescriptorSet 数量
-     * @return 成功返回 true
+     * @brief 创建 descriptor pool
+     *
+     * maxSets：最多可分配多少 DescriptorSet
+     * poolSizes：各类型 descriptor 容量
+     *
+     * Vulkan API：
+     * vkCreateDescriptorPool
      */
     bool create(const Context &ctx,
                 const std::vector<DescriptorPoolSize> &poolSizes,
@@ -88,15 +141,20 @@ public:
 
     /**
      * @brief 分配 DescriptorSet
-     * @param layout 布局
-     * @param outSet 输出句柄
-     * @return 成功返回 true
+     *
+     * Vulkan API：
+     * vkAllocateDescriptorSets
      */
     bool allocate(VkDevice device, VkDescriptorSetLayout layout,
                   VkDescriptorSet &outSet);
 
     /**
-     * @brief 重置池（释放所有已分配的 Set）
+     * @brief 重置 pool（释放所有 DescriptorSet）
+     *
+     * Vulkan API：
+     * vkResetDescriptorPool
+     *
+     * ⚠️ 会使所有 descriptor set 失效
      */
     void reset();
 
@@ -111,18 +169,31 @@ private:
 };
 
 /**
- * @brief 写入 UBO 到 DescriptorSet
+ * @brief 写入 Buffer（UBO / SSBO）到 DescriptorSet
+ *
+ * 本质：
+ * vkUpdateDescriptorSets → VkWriteDescriptorSet(VkDescriptorBufferInfo)
  */
 void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
                              uint32_t binding, VkDescriptorType type,
                              VkBuffer buffer, size_t offset, size_t range);
 
 /**
- * @brief 写入 Image+Sampler 到 DescriptorSet
+ * @brief 写入 Image + Sampler 到 DescriptorSet
+ *
+ * 常用于：
+ * - 2D Texture
+ * - Cube Map
+ * - IBL
+ *
+ * Vulkan API：
+ * vkUpdateDescriptorSets → VkDescriptorImageInfo
  */
 void write_descriptor_image(
     VkDevice device, VkDescriptorSet set, uint32_t binding,
     VkImageView imageView, VkSampler sampler,
+
+    /// 必须匹配 image 当前 layout，否则 shader 读取 undefined
     VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 } // namespace render

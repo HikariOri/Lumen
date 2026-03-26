@@ -1,0 +1,288 @@
+Date : 2026-03-26 11:08:20
+Directory : d:\temp\Lumen
+Total : 190 files,  34569 codes, 3561 comments, 5888 blanks, all 44018 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| C++      |        115 |     15,985 |      3,398 |      2,615 |     21,998 |
+| JSON     |          4 |      8,856 |          0 |          4 |      8,860 |
+| Markdown |         33 |      5,770 |          3 |      2,539 |      8,312 |
+| PostCSS  |          1 |      1,705 |         22 |        342 |      2,069 |
+| GLSL     |         20 |      1,188 |         50 |        265 |      1,503 |
+| XML      |          2 |        447 |          1 |          1 |        449 |
+| CMake    |         11 |        356 |          0 |         74 |        430 |
+| Slang    |          1 |         95 |         25 |         26 |        146 |
+| HTML     |          2 |         87 |         40 |         10 |        137 |
+| Python   |          1 |         80 |         22 |         12 |        114 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++---------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                      | files      | code       | comment    | blank      | total      |
++---------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                         |        190 |     34,569 |      3,561 |      5,888 |     44,018 |
+| . (Files)                                                                 |          7 |      2,191 |         71 |        589 |      2,851 |
+| assets                                                                    |          5 |      8,699 |          3 |         77 |      8,779 |
+| assets\model                                                              |          5 |      8,699 |          3 |         77 |      8,779 |
+| assets\model\Sponza                                                       |          5 |      8,699 |          3 |         77 |      8,779 |
+| assets\model\Sponza (Files)                                               |          4 |        126 |          3 |         76 |        205 |
+| assets\model\Sponza\glTF                                                  |          1 |      8,573 |          0 |          1 |      8,574 |
+| cmake                                                                     |          3 |        112 |          0 |         23 |        135 |
+| docs                                                                      |         26 |      4,722 |          0 |      2,062 |      6,784 |
+| docs (Files)                                                              |          1 |         47 |          0 |         12 |         59 |
+| docs\design                                                               |         13 |      3,239 |          0 |      1,412 |      4,651 |
+| docs\guides                                                               |          6 |        658 |          0 |        320 |        978 |
+| docs\reference                                                            |          6 |        778 |          0 |        318 |      1,096 |
+| doxygen                                                                   |          4 |      1,793 |         62 |        352 |      2,207 |
+| doxygen (Files)                                                           |          3 |      1,792 |         62 |        352 |      2,206 |
+| doxygen\icons                                                             |          1 |          1 |          0 |          0 |          1 |
+| engine                                                                    |        114 |     10,717 |      3,240 |      1,908 |     15,865 |
+| engine (Files)                                                            |          1 |         50 |          0 |          8 |         58 |
+| engine\assets                                                             |          3 |         95 |         25 |         28 |        148 |
+| engine\assets\shader                                                      |          3 |         95 |         25 |         28 |        148 |
+| engine\assets\shader\glsl                                                 |          2 |          0 |          0 |          2 |          2 |
+| engine\assets\shader\slang                                                |          1 |         95 |         25 |         26 |        146 |
+| engine\include                                                            |         57 |      2,459 |      2,610 |        920 |      5,989 |
+| engine\include (Files)                                                    |          2 |         39 |         11 |         10 |         60 |
+| engine\include\core                                                       |          9 |        316 |        334 |        105 |        755 |
+| engine\include\network                                                    |          1 |         93 |        121 |         30 |        244 |
+| engine\include\platform                                                   |          5 |        311 |        509 |        122 |        942 |
+| engine\include\render                                                     |         20 |      1,153 |      1,250 |        425 |      2,828 |
+| engine\include\render (Files)                                             |         10 |        565 |        749 |        197 |      1,511 |
+| engine\include\render\pass                                                |          3 |        215 |        142 |         85 |        442 |
+| engine\include\render\resource                                            |          7 |        373 |        359 |        143 |        875 |
+| engine\include\scene                                                      |          7 |        230 |        150 |         91 |        471 |
+| engine\include\ui                                                         |         13 |        317 |        235 |        137 |        689 |
+| engine\shaders                                                            |          4 |         39 |          0 |         17 |         56 |
+| engine\src                                                                |         49 |      8,074 |        605 |        935 |      9,614 |
+| engine\src (Files)                                                        |          2 |          2 |          4 |          2 |          8 |
+| engine\src\core                                                           |          8 |      1,207 |         39 |        153 |      1,399 |
+| engine\src\network                                                        |          1 |        248 |         12 |         34 |        294 |
+| engine\src\platform                                                       |          5 |        548 |         23 |         85 |        656 |
+| engine\src\render                                                         |         16 |      4,005 |        446 |        344 |      4,795 |
+| engine\src\render (Files)                                                 |          6 |      1,520 |        331 |        135 |      1,986 |
+| engine\src\render\pass                                                    |          3 |        577 |         20 |         85 |        682 |
+| engine\src\render\resource                                                |          7 |      1,908 |         95 |        124 |      2,127 |
+| engine\src\scene                                                          |          5 |        413 |         15 |         74 |        502 |
+| engine\src\ui                                                             |         12 |      1,651 |         66 |        243 |      1,960 |
+| examples                                                                  |         27 |      5,456 |        162 |        700 |      6,318 |
+| examples (Files)                                                          |          1 |          4 |          0 |          1 |          5 |
+| examples\demo3d                                                           |         10 |      2,476 |         53 |        244 |      2,773 |
+| examples\demo3d (Files)                                                   |          1 |         61 |          0 |          8 |         69 |
+| examples\demo3d\shaders                                                   |          6 |        361 |          1 |         72 |        434 |
+| examples\demo3d\src                                                       |          3 |      2,054 |         52 |        164 |      2,270 |
+| examples\sandbox                                                          |          6 |        555 |         22 |         87 |        664 |
+| examples\sandbox (Files)                                                  |          1 |         31 |          0 |          6 |         37 |
+| examples\sandbox\shaders                                                  |          4 |         45 |          2 |         20 |         67 |
+| examples\sandbox\src                                                      |          1 |        479 |         20 |         61 |        560 |
+| examples\shadertoy                                                        |          4 |        823 |         43 |        168 |      1,034 |
+| examples\shadertoy (Files)                                                |          1 |         17 |          0 |          4 |         21 |
+| examples\shadertoy\shaders                                                |          2 |        488 |         38 |        106 |        632 |
+| examples\shadertoy\src                                                    |          1 |        318 |          5 |         58 |        381 |
+| examples\tinygltf_raw_load_test                                           |          6 |      1,598 |         44 |        200 |      1,842 |
+| examples\tinygltf_raw_load_test (Files)                                   |          1 |         37 |          0 |          9 |         46 |
+| examples\tinygltf_raw_load_test\shaders                                   |          2 |        255 |          9 |         48 |        312 |
+| examples\tinygltf_raw_load_test\src                                       |          3 |      1,306 |         35 |        143 |      1,484 |
+| note                                                                      |          2 |        799 |          1 |        164 |        964 |
+| scripts                                                                   |          1 |         80 |         22 |         12 |        114 |
+| test                                                                      |          1 |          0 |          0 |          1 |          1 |
++---------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++---------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                                  | language | code       | comment    | blank      | total      |
++---------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| d:\temp\Lumen\.cursor_gltf_loader_vs.cpp                                  | C++      |      1,295 |         71 |        334 |      1,700 |
+| d:\temp\Lumen\CMakeLists.txt                                              | CMake    |         44 |          0 |         14 |         58 |
+| d:\temp\Lumen\DEVELOP.md                                                  | Markdown |        321 |          0 |         91 |        412 |
+| d:\temp\Lumen\README.md                                                   | Markdown |         62 |          0 |         29 |         91 |
+| d:\temp\Lumen\assets\model\Sponza\LICENSE.md                              | Markdown |          7 |          1 |          8 |         16 |
+| d:\temp\Lumen\assets\model\Sponza\README.body.md                          | Markdown |         42 |          0 |         27 |         69 |
+| d:\temp\Lumen\assets\model\Sponza\README.md                               | Markdown |         53 |          2 |         40 |         95 |
+| d:\temp\Lumen\assets\model\Sponza\glTF\Sponza.gltf                        | JSON     |      8,573 |          0 |          1 |      8,574 |
+| d:\temp\Lumen\assets\model\Sponza\metadata.json                           | JSON     |         24 |          0 |          1 |         25 |
+| d:\temp\Lumen\cmake\FindExternal.cmake                                    | CMake    |         72 |          0 |         16 |         88 |
+| d:\temp\Lumen\cmake\ShaderCompile.cmake                                   | CMake    |         40 |          0 |          6 |         46 |
+| d:\temp\Lumen\cmake\utils.cmake                                           | CMake    |          0 |          0 |          1 |          1 |
+| d:\temp\Lumen\docs\README.md                                              | Markdown |         47 |          0 |         12 |         59 |
+| d:\temp\Lumen\docs\design\demo3d-pbr-material-system.md                   | Markdown |         95 |          0 |         43 |        138 |
+| d:\temp\Lumen\docs\design\editor-ui.md                                    | Markdown |        455 |          0 |        217 |        672 |
+| d:\temp\Lumen\docs\design\gizmos.md                                       | Markdown |         34 |          0 |         19 |         53 |
+| d:\temp\Lumen\docs\design\imgui-integration.md                            | Markdown |        132 |          0 |         54 |        186 |
+| d:\temp\Lumen\docs\design\material-system-ibl-pbr.md                      | Markdown |        162 |          0 |         92 |        254 |
+| d:\temp\Lumen\docs\design\pbr-ibl-disney-skybox.md                        | Markdown |        102 |          0 |         52 |        154 |
+| d:\temp\Lumen\docs\design\render-engine-features.md                       | Markdown |        255 |          0 |         81 |        336 |
+| d:\temp\Lumen\docs\design\render-engine-roadmap.md                        | Markdown |        572 |          0 |        118 |        690 |
+| d:\temp\Lumen\docs\design\render-graph.md                                 | Markdown |        613 |          0 |        330 |        943 |
+| d:\temp\Lumen\docs\design\scene-camera.md                                 | Markdown |         70 |          0 |         43 |        113 |
+| d:\temp\Lumen\docs\design\scene-ecs.md                                    | Markdown |        438 |          0 |        230 |        668 |
+| d:\temp\Lumen\docs\design\ui-panels.md                                    | Markdown |        183 |          0 |         65 |        248 |
+| d:\temp\Lumen\docs\design\vulkan-materials.md                             | Markdown |        128 |          0 |         68 |        196 |
+| d:\temp\Lumen\docs\guides\ai-assisted-workflow.md                         | Markdown |        157 |          0 |         74 |        231 |
+| d:\temp\Lumen\docs\guides\chinese-typography.md                           | Markdown |        200 |          0 |         97 |        297 |
+| d:\temp\Lumen\docs\guides\cursor-end-to-end-workflow.md                   | Markdown |         73 |          0 |         36 |        109 |
+| d:\temp\Lumen\docs\guides\git-commit-convention.md                        | Markdown |        120 |          0 |         55 |        175 |
+| d:\temp\Lumen\docs\guides\project-notes.md                                | Markdown |         76 |          0 |         46 |        122 |
+| d:\temp\Lumen\docs\guides\quick-reference.md                              | Markdown |         32 |          0 |         12 |         44 |
+| d:\temp\Lumen\docs\reference\cpp-style.md                                 | Markdown |        295 |          0 |        113 |        408 |
+| d:\temp\Lumen\docs\reference\event-input.md                               | Markdown |        211 |          0 |         73 |        284 |
+| d:\temp\Lumen\docs\reference\glm-vulkan.md                                | Markdown |        150 |          0 |         80 |        230 |
+| d:\temp\Lumen\docs\reference\logging.md                                   | Markdown |         87 |          0 |         33 |        120 |
+| d:\temp\Lumen\docs\reference\sdl3-time.md                                 | Markdown |         11 |          0 |          7 |         18 |
+| d:\temp\Lumen\docs\reference\time.md                                      | Markdown |         24 |          0 |         12 |         36 |
+| d:\temp\Lumen\doxygen\delete_me.css                                       | PostCSS  |      1,705 |         22 |        342 |      2,069 |
+| d:\temp\Lumen\doxygen\delete_me.html                                      | HTML     |         12 |          6 |          1 |         19 |
+| d:\temp\Lumen\doxygen\header.html                                         | HTML     |         75 |         34 |          9 |        118 |
+| d:\temp\Lumen\doxygen\icons\cake.svg                                      | XML      |          1 |          0 |          0 |          1 |
+| d:\temp\Lumen\engine\CMakeLists.txt                                       | CMake    |         50 |          0 |          8 |         58 |
+| d:\temp\Lumen\engine\assets\shader\glsl\pbr.frag.glsl                     | GLSL     |          0 |          0 |          1 |          1 |
+| d:\temp\Lumen\engine\assets\shader\glsl\pbr.vert.glsl                     | GLSL     |          0 |          0 |          1 |          1 |
+| d:\temp\Lumen\engine\assets\shader\slang\pbr.slang                        | Slang    |         95 |         25 |         26 |        146 |
+| d:\temp\Lumen\engine\include\core\core.h                                  | C++      |          4 |         27 |          5 |         36 |
+| d:\temp\Lumen\engine\include\core\gltf_loader.hpp                         | C++      |         21 |         14 |          8 |         43 |
+| d:\temp\Lumen\engine\include\core\ktx_texture_rgba8.hpp                   | C++      |         16 |         10 |          7 |         33 |
+| d:\temp\Lumen\engine\include\core\log_ui_sink.hpp                         | C++      |         12 |          4 |          7 |         23 |
+| d:\temp\Lumen\engine\include\core\log_view_buffer.hpp                     | C++      |         36 |         69 |         17 |        122 |
+| d:\temp\Lumen\engine\include\core\logger.hpp                              | C++      |        184 |        153 |         35 |        372 |
+| d:\temp\Lumen\engine\include\core\obj_loader.hpp                          | C++      |         19 |         14 |          9 |         42 |
+| d:\temp\Lumen\engine\include\core\path.hpp                                | C++      |          9 |         16 |          7 |         32 |
+| d:\temp\Lumen\engine\include\core\time.hpp                                | C++      |         15 |         27 |         10 |         52 |
+| d:\temp\Lumen\engine\include\engine.hpp                                   | C++      |          8 |         11 |          2 |         21 |
+| d:\temp\Lumen\engine\include\network\file_downloader.h                    | C++      |         93 |        121 |         30 |        244 |
+| d:\temp\Lumen\engine\include\pch.hpp                                      | C++      |         31 |          0 |          8 |         39 |
+| d:\temp\Lumen\engine\include\platform\event.hpp                           | C++      |        136 |        144 |         34 |        314 |
+| d:\temp\Lumen\engine\include\platform\event_debug.hpp                     | C++      |          7 |         34 |          6 |         47 |
+| d:\temp\Lumen\engine\include\platform\event_pump.hpp                      | C++      |         72 |         87 |         18 |        177 |
+| d:\temp\Lumen\engine\include\platform\input.hpp                           | C++      |         52 |        102 |         30 |        184 |
+| d:\temp\Lumen\engine\include\platform\window.hpp                          | C++      |         44 |        142 |         34 |        220 |
+| d:\temp\Lumen\engine\include\render\command_buffer.hpp                    | C++      |         55 |        128 |         28 |        211 |
+| d:\temp\Lumen\engine\include\render\context.hpp                           | C++      |        152 |        106 |         32 |        290 |
+| d:\temp\Lumen\engine\include\render\material_texture_mask.hpp             | C++      |         36 |          7 |          8 |         51 |
+| d:\temp\Lumen\engine\include\render\pass\render_graph.hpp                 | C++      |         72 |         67 |         35 |        174 |
+| d:\temp\Lumen\engine\include\render\pass\render_pass.hpp                  | C++      |         77 |         38 |         22 |        137 |
+| d:\temp\Lumen\engine\include\render\pass\render_target.hpp                | C++      |         66 |         37 |         28 |        131 |
+| d:\temp\Lumen\engine\include\render\pbr_material_ubo.hpp                  | C++      |         21 |         10 |          9 |         40 |
+| d:\temp\Lumen\engine\include\render\pipeline.hpp                          | C++      |         98 |         46 |         27 |        171 |
+| d:\temp\Lumen\engine\include\render\render.hpp                            | C++      |         16 |          7 |          3 |         26 |
+| d:\temp\Lumen\engine\include\render\resource\buffer.hpp                   | C++      |         80 |        147 |         37 |        264 |
+| d:\temp\Lumen\engine\include\render\resource\cubemap_file_loader.hpp      | C++      |         19 |         15 |          9 |         43 |
+| d:\temp\Lumen\engine\include\render\resource\descriptor.hpp               | C++      |         63 |         44 |         23 |        130 |
+| d:\temp\Lumen\engine\include\render\resource\image.hpp                    | C++      |         56 |         43 |         22 |        121 |
+| d:\temp\Lumen\engine\include\render\resource\pbr_placeholder_textures.hpp | C++      |         32 |          7 |         11 |         50 |
+| d:\temp\Lumen\engine\include\render\resource\sampler.hpp                  | C++      |         34 |         20 |         13 |         67 |
+| d:\temp\Lumen\engine\include\render\resource\texture.hpp                  | C++      |         89 |         83 |         28 |        200 |
+| d:\temp\Lumen\engine\include\render\result.hpp                            | C++      |         40 |         12 |         14 |         66 |
+| d:\temp\Lumen\engine\include\render\shader.hpp                            | C++      |         32 |        148 |         22 |        202 |
+| d:\temp\Lumen\engine\include\render\surface.hpp                           | C++      |         42 |         98 |         18 |        158 |
+| d:\temp\Lumen\engine\include\render\swapchain.hpp                         | C++      |         73 |        187 |         36 |        296 |
+| d:\temp\Lumen\engine\include\scene\components.hpp                         | C++      |         64 |         47 |         18 |        129 |
+| d:\temp\Lumen\engine\include\scene\light.hpp                              | C++      |         18 |         18 |          9 |         45 |
+| d:\temp\Lumen\engine\include\scene\scene.hpp                              | C++      |         32 |         23 |         17 |         72 |
+| d:\temp\Lumen\engine\include\scene\scene_camera_controller.hpp            | C++      |         41 |         18 |         14 |         73 |
+| d:\temp\Lumen\engine\include\scene\scene_environment.hpp                  | C++      |         11 |          8 |          7 |         26 |
+| d:\temp\Lumen\engine\include\scene\scene_orbit_camera.hpp                 | C++      |         54 |         28 |         20 |        102 |
+| d:\temp\Lumen\engine\include\scene\transform.hpp                          | C++      |         10 |          8 |          6 |         24 |
+| d:\temp\Lumen\engine\include\ui\editor_selection.hpp                      | C++      |         11 |          6 |          6 |         23 |
+| d:\temp\Lumen\engine\include\ui\environment_panel.hpp                     | C++      |         24 |         10 |         11 |         45 |
+| d:\temp\Lumen\engine\include\ui\gizmo.hpp                                 | C++      |         20 |         33 |         13 |         66 |
+| d:\temp\Lumen\engine\include\ui\gpu_capabilities_panel.hpp                | C++      |         19 |         15 |          8 |         42 |
+| d:\temp\Lumen\engine\include\ui\imgui_backend.hpp                         | C++      |         27 |         41 |         16 |         84 |
+| d:\temp\Lumen\engine\include\ui\imgui_hazel_helpers.hpp                   | C++      |          9 |         13 |          7 |         29 |
+| d:\temp\Lumen\engine\include\ui\input_bridge.hpp                          | C++      |         13 |         33 |          9 |         55 |
+| d:\temp\Lumen\engine\include\ui\light_viewport_gizmos.hpp                 | C++      |         87 |         20 |         20 |        127 |
+| d:\temp\Lumen\engine\include\ui\log_panel.hpp                             | C++      |         14 |          4 |          7 |         25 |
+| d:\temp\Lumen\engine\include\ui\panel.hpp                                 | C++      |         21 |          5 |          9 |         35 |
+| d:\temp\Lumen\engine\include\ui\scene_hierarchy_panel.hpp                 | C++      |         21 |          4 |         11 |         36 |
+| d:\temp\Lumen\engine\include\ui\scene_inspector_panel.hpp                 | C++      |         18 |          4 |          9 |         31 |
+| d:\temp\Lumen\engine\include\ui\texture_view_panel.hpp                    | C++      |         33 |         47 |         11 |         91 |
+| d:\temp\Lumen\engine\shaders\light_debug.frag                             | GLSL     |          6 |          0 |          3 |          9 |
+| d:\temp\Lumen\engine\shaders\light_debug.vert                             | GLSL     |         11 |          0 |          5 |         16 |
+| d:\temp\Lumen\engine\shaders\light_icon.frag                              | GLSL     |         11 |          0 |          4 |         15 |
+| d:\temp\Lumen\engine\shaders\light_icon.vert                              | GLSL     |         11 |          0 |          5 |         16 |
+| d:\temp\Lumen\engine\src\core\gltf_loader.cpp                             | C++      |        636 |         10 |         55 |        701 |
+| d:\temp\Lumen\engine\src\core\ktx_texture_rgba8.cpp                       | C++      |        175 |          4 |         15 |        194 |
+| d:\temp\Lumen\engine\src\core\log_ui_sink.cpp                             | C++      |         52 |          5 |         10 |         67 |
+| d:\temp\Lumen\engine\src\core\log_view_buffer.cpp                         | C++      |         39 |          3 |         10 |         52 |
+| d:\temp\Lumen\engine\src\core\logger.cpp                                  | C++      |        116 |          4 |         27 |        147 |
+| d:\temp\Lumen\engine\src\core\obj_loader.cpp                              | C++      |        133 |          4 |         15 |        152 |
+| d:\temp\Lumen\engine\src\core\path.cpp                                    | C++      |         26 |          5 |          7 |         38 |
+| d:\temp\Lumen\engine\src\core\time.cpp                                    | C++      |         30 |          4 |         14 |         48 |
+| d:\temp\Lumen\engine\src\engine.cpp                                       | C++      |          0 |          0 |          1 |          1 |
+| d:\temp\Lumen\engine\src\network\file_downloader.cpp                      | C++      |        248 |         12 |         34 |        294 |
+| d:\temp\Lumen\engine\src\platform\event.cpp                               | C++      |         69 |          5 |         11 |         85 |
+| d:\temp\Lumen\engine\src\platform\event_debug.cpp                         | C++      |         98 |          4 |         14 |        116 |
+| d:\temp\Lumen\engine\src\platform\event_pump.cpp                          | C++      |        186 |          6 |         25 |        217 |
+| d:\temp\Lumen\engine\src\platform\input.cpp                               | C++      |         52 |          4 |         13 |         69 |
+| d:\temp\Lumen\engine\src\platform\window.cpp                              | C++      |        143 |          4 |         22 |        169 |
+| d:\temp\Lumen\engine\src\render\command_buffer.cpp                        | C++      |        276 |         66 |         29 |        371 |
+| d:\temp\Lumen\engine\src\render\context.cpp                               | C++      |        432 |        108 |         32 |        572 |
+| d:\temp\Lumen\engine\src\render\pass\render_graph.cpp                     | C++      |        255 |          6 |         43 |        304 |
+| d:\temp\Lumen\engine\src\render\pass\render_pass.cpp                      | C++      |        174 |          5 |         21 |        200 |
+| d:\temp\Lumen\engine\src\render\pass\render_target.cpp                    | C++      |        148 |          9 |         21 |        178 |
+| d:\temp\Lumen\engine\src\render\pipeline.cpp                              | C++      |        266 |          7 |         46 |        319 |
+| d:\temp\Lumen\engine\src\render\resource\buffer.cpp                       | C++      |        232 |         65 |         17 |        314 |
+| d:\temp\Lumen\engine\src\render\resource\cubemap_file_loader.cpp          | C++      |        280 |          4 |         15 |        299 |
+| d:\temp\Lumen\engine\src\render\resource\descriptor.cpp                   | C++      |        144 |          6 |         32 |        182 |
+| d:\temp\Lumen\engine\src\render\resource\image.cpp                        | C++      |        180 |          4 |         15 |        199 |
+| d:\temp\Lumen\engine\src\render\resource\pbr_placeholder_textures.cpp     | C++      |         39 |          4 |          7 |         50 |
+| d:\temp\Lumen\engine\src\render\resource\sampler.cpp                      | C++      |         47 |          4 |         11 |         62 |
+| d:\temp\Lumen\engine\src\render\resource\texture.cpp                      | C++      |        986 |          8 |         27 |      1,021 |
+| d:\temp\Lumen\engine\src\render\shader.cpp                                | C++      |        181 |         31 |         10 |        222 |
+| d:\temp\Lumen\engine\src\render\swapchain.cpp                             | C++      |        362 |        115 |         15 |        492 |
+| d:\temp\Lumen\engine\src\render\vma.cpp                                   | C++      |          3 |          4 |          3 |         10 |
+| d:\temp\Lumen\engine\src\scene\light.cpp                                  | C++      |         95 |          3 |         18 |        116 |
+| d:\temp\Lumen\engine\src\scene\scene.cpp                                  | C++      |        130 |          3 |         16 |        149 |
+| d:\temp\Lumen\engine\src\scene\scene_camera_controller.cpp                | C++      |         79 |          3 |         10 |         92 |
+| d:\temp\Lumen\engine\src\scene\scene_orbit_camera.cpp                     | C++      |         89 |          3 |         20 |        112 |
+| d:\temp\Lumen\engine\src\scene\transform.cpp                              | C++      |         20 |          3 |         10 |         33 |
+| d:\temp\Lumen\engine\src\stb_image.cpp                                    | C++      |          2 |          4 |          1 |          7 |
+| d:\temp\Lumen\engine\src\ui\environment_panel.cpp                         | C++      |         54 |          3 |         13 |         70 |
+| d:\temp\Lumen\engine\src\ui\gizmo.cpp                                     | C++      |         81 |          8 |         17 |        106 |
+| d:\temp\Lumen\engine\src\ui\gpu_capabilities_panel.cpp                    | C++      |         57 |          4 |          8 |         69 |
+| d:\temp\Lumen\engine\src\ui\imgui_backend.cpp                             | C++      |        245 |         20 |         37 |        302 |
+| d:\temp\Lumen\engine\src\ui\imgui_hazel_helpers.cpp                       | C++      |        100 |          5 |         20 |        125 |
+| d:\temp\Lumen\engine\src\ui\input_bridge.cpp                              | C++      |         21 |          4 |         11 |         36 |
+| d:\temp\Lumen\engine\src\ui\light_viewport_gizmos.cpp                     | C++      |        469 |          3 |         44 |        516 |
+| d:\temp\Lumen\engine\src\ui\log_panel.cpp                                 | C++      |         96 |          3 |         20 |        119 |
+| d:\temp\Lumen\engine\src\ui\panel_manager.cpp                             | C++      |         24 |          3 |          8 |         35 |
+| d:\temp\Lumen\engine\src\ui\scene_hierarchy_panel.cpp                     | C++      |        112 |          3 |         24 |        139 |
+| d:\temp\Lumen\engine\src\ui\scene_inspector_panel.cpp                     | C++      |        305 |          4 |         31 |        340 |
+| d:\temp\Lumen\engine\src\ui\texture_view_panel.cpp                        | C++      |         87 |          6 |         10 |        103 |
+| d:\temp\Lumen\examples\CMakeLists.txt                                     | CMake    |          4 |          0 |          1 |          5 |
+| d:\temp\Lumen\examples\demo3d\CMakeLists.txt                              | CMake    |         61 |          0 |          8 |         69 |
+| d:\temp\Lumen\examples\demo3d\shaders\cube.frag                           | GLSL     |        248 |          1 |         44 |        293 |
+| d:\temp\Lumen\examples\demo3d\shaders\cube.vert                           | GLSL     |         31 |          0 |          6 |         37 |
+| d:\temp\Lumen\examples\demo3d\shaders\grid.frag                           | GLSL     |         19 |          0 |          4 |         23 |
+| d:\temp\Lumen\examples\demo3d\shaders\grid.vert                           | GLSL     |         11 |          0 |          5 |         16 |
+| d:\temp\Lumen\examples\demo3d\shaders\skybox.frag                         | GLSL     |         27 |          0 |          7 |         34 |
+| d:\temp\Lumen\examples\demo3d\shaders\skybox.vert                         | GLSL     |         25 |          0 |          6 |         31 |
+| d:\temp\Lumen\examples\demo3d\src\main.cpp                                | C++      |      1,891 |         37 |        138 |      2,066 |
+| d:\temp\Lumen\examples\demo3d\src\pbr_resources.cpp                       | C++      |        152 |          5 |         19 |        176 |
+| d:\temp\Lumen\examples\demo3d\src\pbr_resources.hpp                       | C++      |         11 |         10 |          7 |         28 |
+| d:\temp\Lumen\examples\sandbox\CMakeLists.txt                             | CMake    |         31 |          0 |          6 |         37 |
+| d:\temp\Lumen\examples\sandbox\shaders\texture.frag                       | GLSL     |          7 |          0 |          5 |         12 |
+| d:\temp\Lumen\examples\sandbox\shaders\texture.vert                       | GLSL     |         16 |          1 |          6 |         23 |
+| d:\temp\Lumen\examples\sandbox\shaders\triangle.frag                      | GLSL     |         14 |          1 |          5 |         20 |
+| d:\temp\Lumen\examples\sandbox\shaders\triangle.vert                      | GLSL     |          8 |          0 |          4 |         12 |
+| d:\temp\Lumen\examples\sandbox\src\main.cpp                               | C++      |        479 |         20 |         61 |        560 |
+| d:\temp\Lumen\examples\shadertoy\CMakeLists.txt                           | CMake    |         17 |          0 |          4 |         21 |
+| d:\temp\Lumen\examples\shadertoy\shaders\shadertoy.frag                   | GLSL     |        483 |         36 |        103 |        622 |
+| d:\temp\Lumen\examples\shadertoy\shaders\shadertoy.vert                   | GLSL     |          5 |          2 |          3 |         10 |
+| d:\temp\Lumen\examples\shadertoy\src\main.cpp                             | C++      |        318 |          5 |         58 |        381 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\CMakeLists.txt              | CMake    |         37 |          0 |          9 |         46 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\shaders\gltf_pbr.frag       | GLSL     |        224 |          9 |         42 |        275 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\shaders\gltf_pbr.vert       | GLSL     |         31 |          0 |          6 |         37 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\src\ibl_cpu.cpp             | C++      |        306 |          7 |         26 |        339 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\src\ibl_cpu.hpp             | C++      |         17 |         14 |          9 |         40 |
+| d:\temp\Lumen\examples\tinygltf_raw_load_test\src\main.cpp                | C++      |        983 |         14 |        108 |      1,105 |
+| d:\temp\Lumen\note\buffer&memory.md                                       | Markdown |        353 |          0 |        163 |        516 |
+| d:\temp\Lumen\note\pipeline_ vertex (opt).svg                             | XML      |        446 |          1 |          1 |        448 |
+| d:\temp\Lumen\scripts\mipmapper.py                                        | Python   |         80 |         22 |         12 |        114 |
+| d:\temp\Lumen\test\CMakeLists.txt                                         | CMake    |          0 |          0 |          1 |          1 |
+| d:\temp\Lumen\todo.md                                                     | Markdown |        210 |          0 |        119 |        329 |
+| d:\temp\Lumen\vcpkg-configuration.json                                    | JSON     |         14 |          0 |          1 |         15 |
+| d:\temp\Lumen\vcpkg.json                                                  | JSON     |        245 |          0 |          1 |        246 |
+| Total                                                                     |          |     34,569 |      3,561 |      5,888 |     44,018 |
++---------------------------------------------------------------------------+----------+------------+------------+------------+------------+

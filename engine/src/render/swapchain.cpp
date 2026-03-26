@@ -129,7 +129,7 @@ choose_surface_format(const std::vector<VkSurfaceFormatKHR> &formats,
  */
 VkPresentModeKHR choose_present_mode(const std::vector<VkPresentModeKHR> &modes,
                                      VkPresentModeKHR prefer) {
-    auto it = std::find(modes.begin(), modes.end(), prefer);
+    auto it = std::ranges::find(modes, prefer);
     return it != modes.end() ? prefer : VK_PRESENT_MODE_FIFO_KHR;
 }
 
@@ -216,7 +216,7 @@ bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
                                   const SwapchainConfig &config) {
     auto support = query_swapchain_support(physicalDevice_, surface_);
     if (support.formats.empty() || support.presentModes.empty()) {
-        LUMEN_LOG_ERROR("Swapchain 不支持: formats={} presentModes={}",
+        LUMEN_LOG_ERROR("Swapchain 不支持: formats = {} presentModes = {}",
                         support.formats.size(), support.presentModes.size());
         return false;
     }
@@ -228,11 +228,13 @@ bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
     extent_ = choose_extent(support.capabilities, width, height);
 
     uint32_t imageCount = support.capabilities.minImageCount + 1;
+
+    imageCount = std::max(imageCount, config.imageCount);
+
     if (support.capabilities.maxImageCount > 0 &&
         imageCount > support.capabilities.maxImageCount) {
         imageCount = support.capabilities.maxImageCount;
     }
-    imageCount = std::max(imageCount, config.imageCount);
 
     VkSwapchainCreateInfoKHR createInfo {
         VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
@@ -288,7 +290,7 @@ bool Swapchain::create_swapchain_(uint32_t width, uint32_t height,
  * - COLOR_ATTACHMENT → VK_IMAGE_ASPECT_COLOR_BIT
  *
  * ⚠️ 错误处理：
- * - 失败时回滚已创建的 view（你做对了 ✔）
+ * - 失败时回滚已创建的 view
  */
 bool Swapchain::create_image_views_() {
     imageViews_.resize(images_.size());
@@ -312,6 +314,7 @@ bool Swapchain::create_image_views_() {
         VkResult result =
             vkCreateImageView(device_, &viewInfo, nullptr, &imageViews_[i]);
         if (result != VK_SUCCESS) {
+            LUMEN_LOG_DEBUG("index = {} 的 ImageView 创建失败", i);
             for (size_t j { 0 }; j < i; ++j) {
                 vkDestroyImageView(device_, imageViews_[j], nullptr);
             }
@@ -345,7 +348,7 @@ bool Swapchain::create_image_views_() {
  * 📌 返回值：
  * - VK_SUCCESS → 正常
  * - VK_SUBOPTIMAL_KHR → 可以用但不理想
- * - VK_ERROR_OUT_OF_DATE_KHR → 必须重建 :contentReference[oaicite:3]{index=3}
+ * - VK_ERROR_OUT_OF_DATE_KHR → 必须重建
  *
  * ❗ 当前问题（你的实现）：
  * - 丢失 VkResult（严重建议修复）
