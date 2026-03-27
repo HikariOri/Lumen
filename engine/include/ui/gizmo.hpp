@@ -24,10 +24,11 @@ namespace ui {
  * @brief 在视口矩形内绘制并处理 Gizmo，就地修改 object_world
  * @param viewport_rect Scene Image 的屏幕矩形（与离屏相机一致）
  * @param view 与离屏渲染相同的视图矩阵（列主序）
- * @param proj 与离屏渲染相同的投影矩阵（列主序，含 Vulkan NDC 的 `proj[1][1] *= -1`）。
- *             内部会再抵消该 Y 翻转后传给 ImGuizmo（其按 OpenGL 风格 NDC 计算）。
- * @param object_world 物体世界矩阵，输入输出。每次调用后会对各轴缩放绝对值做下限钳制
- *                    （默认 1e-2），避免缩放过小导致矩阵奇异、无法再放大。
+ * @param proj 与离屏渲染相同的投影矩阵（列主序，含 Vulkan NDC 的 `proj[1][1] *=
+ * -1`）。 内部会再抵消该 Y 翻转后传给 ImGuizmo（其按 OpenGL 风格 NDC 计算）。
+ * @param object_world
+ * 物体世界矩阵，输入输出。每次调用后会对各轴缩放绝对值做下限钳制 （默认
+ * 1e-2），避免缩放过小导致矩阵奇异、无法再放大。
  */
 void imguizmo_manipulate(const TextureViewRect &viewport_rect,
                          const glm::mat4 &view, const glm::mat4 &proj,
@@ -49,7 +50,8 @@ void imguizmo_reset_interaction_state();
  * @brief 方向立方体 (ImGuizmo::ViewManipulate)，用于快速对齐轴向视角
  *
  * 在屏幕固定矩形内绘制；使用前景 DrawList，宜在主视口 Dock 之后调用。
- * 会就地修改 @a view；应用侧宜随后根据 view 同步轨道相机参数（yaw/pitch/radius）。
+ * 会就地修改 @a view；应用侧宜随后根据 view
+ * 同步轨道相机参数（yaw/pitch/radius）。
  *
  * @param length 相机到观察目标距离（与 lookAt 的 orbit 半径一致）
  * @param background_rgba 背景色，建议用 `IM_COL32(r,g,b,a)` 传入

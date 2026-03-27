@@ -51,6 +51,7 @@
 #include "pbr_resources.hpp"
 
 #include <entt/entt.hpp>
+#include <ghc/filesystem.hpp>
 
 #include <algorithm>
 #include <array>
@@ -58,7 +59,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -102,7 +102,7 @@ struct PushConstants {
 namespace {
 
 std::string resolve_asset_path(const std::string &p) {
-    namespace fs = std::filesystem;
+    namespace fs = ghc::filesystem;
     if (p.empty()) {
         return {};
     }
@@ -666,7 +666,7 @@ static int run_demo3d() {
                 return;
             }
         } else {
-            namespace fs = std::filesystem;
+            namespace fs = ghc::filesystem;
             const std::string resolved =
                 resolve_asset_path(scene_env.cubemap_directory);
             const fs::path env_path = fs::path(resolved);

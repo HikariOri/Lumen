@@ -5,6 +5,8 @@
  * 提供窗口创建/销毁、尺寸管理、全屏控制，以及 Vulkan Surface 创建能力。
  *
  * @note 该模块是平台层（platform）的一部分，用于隔离 SDL 与上层渲染逻辑。
+ * 
+ * @todo 设置图标功能
  */
 
 #pragma once
@@ -60,7 +62,6 @@ struct WindowConfig {
  * - 必须在 Vulkan Instance 创建前调用 get_vulkan_instance_extensions()
  * - framebuffer 尺寸可能与窗口尺寸不同（例如高 DPI）
  */
- // TODO: Set Icon
 class Window {
 public:
     Window() = default;

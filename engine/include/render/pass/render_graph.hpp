@@ -1,13 +1,39 @@
 /**
  * @file render_graph.hpp
- * @brief RenderGraph：用资源读写依赖描述渲染流程，自动推导执行顺序与同步
+ * @brief 基于资源依赖的 RenderGraph 渲染调度系统
  *
- * 三阶段模型（与 docs/design/render-graph.md 一致）：
- * - **Setup**：`add_pass` 声明 reads/writes
- * - **Compile**：`compile()` 拓扑排序，产出执行顺序；存在环则失败，不执行
- * - **Execute**：`execute()` 按编译结果插入 barrier / layout 转换并调用各 Pass
+ * RenderGraph 使用“资源读写关系”描述渲染流程，
+ * 自动推导执行顺序与 Vulkan 同步（Layout + Barrier）。
  *
- * 未包含：多线程调度、异步计算、Resource Aliasing。
+ * ---
+ * @section rg_pipeline 三阶段模型
+ *
+ * 1. Setup：
+ *    - 使用 add_pass() 注册 Pass
+ *    - 声明 reads / writes
+ *
+ * 2. Compile：
+ *    - 构建依赖图（写 → 被读）
+ *    - 拓扑排序生成执行顺序
+ *    - 若存在环则失败
+ *
+ * 3. Execute：
+ *    - 自动插入：
+ *      - VkImageLayout 转换
+ *      - Pipeline Barrier
+ *    - 按顺序执行 Pass
+ *
+ * ---
+ * @section rg_features 特性
+ * - 自动依赖分析
+ * - 自动同步（Barrier + Layout）
+ * - 支持 Swapchain / 离屏纹理
+ *
+ * ---
+ * @section rg_limitations 限制
+ * - 不支持多线程调度
+ * - 不支持 Async Compute
+ * - 不支持 Resource Aliasing
  */
 
 #pragma once
@@ -28,81 +54,145 @@ class Context;
 class Framebuffer;
 
 // -----------------------------------------------------------------------------
-// RGImage - 渲染图资源
+// RGImage
 // -----------------------------------------------------------------------------
 
-/// RGImage 资源类型
+/**
+ * @enum RGImageType
+ * @brief RenderGraph 图像类型
+ */
 enum class RGImageType {
     Texture,   ///< 离屏纹理（单图）
-    Swapchain, ///< Swapchain 图像（多图，按 index 选择）
+    Swapchain, ///< Swapchain 图像（多图）
 };
 
 /**
  * @struct RGImage
- * @brief 渲染图图像资源，封装 VkImage/View 及当前 Layout
+ * @brief RenderGraph 图像资源抽象
  *
- * 支持离屏纹理（来自 Image）与 Swapchain 图像。
+ * 统一封装：
+ * - Texture（Image）
+ * - Swapchain
+ *
+ * ---
+ * @section rgimage_layout Layout 管理
+ *
+ * - Texture：
+ *   使用 currentLayout
+ *
+ * - Swapchain：
+ *   使用 perIndexLayouts_
+ *
+ * ---
+ * @warning
+ * Layout 必须由 RenderGraph 维护，外部修改会破坏同步正确性
  */
 struct RGImage {
+
     RGImageType type { RGImageType::Texture };
+
+    /// Texture 模式使用
     VkImage image { VK_NULL_HANDLE };
     VkImageView view { VK_NULL_HANDLE };
+
     VkFormat format { VK_FORMAT_UNDEFINED };
     VkExtent2D extent { 0, 0 };
+
+    /// 是否为深度资源
     bool isDepth { false };
 
-    /// 当前 Layout（Texture 用；Swapchain 用 perIndexLayouts_）
+    /// 当前 Layout（仅 Texture）
     VkImageLayout currentLayout { VK_IMAGE_LAYOUT_UNDEFINED };
 
-    /// Swapchain 模式：每张图的 layout（仅 type==Swapchain 时有效）
+    /// Swapchain：每张图的 Layout
     std::vector<VkImageLayout> perIndexLayouts_;
 
-    /// Swapchain 模式：每张图的 image/view（仅 type==Swapchain 时有效）
+    /// Swapchain 引用（非 owning）
     const Swapchain *swapchain_ { nullptr };
 
     /**
-     * @brief 从 Image 创建离屏 RGImage
+     * @brief 从离屏纹理创建 RGImage
      */
     static RGImage from_texture(const Image &img, bool asDepth = false);
 
     /**
-     * @brief 从 Swapchain 创建 RGImage（按 index 选择当前帧图像）
+     * @brief 从 Swapchain 创建 RGImage
      */
     static RGImage from_swapchain(const Swapchain &swapchain);
 
-    /// 获取指定索引的 image（Swapchain 需传 index）
+    /**
+     * @brief 获取 VkImage
+     */
     [[nodiscard]] VkImage image_at(uint32_t index = 0) const;
 
-    /// 获取指定索引的 view
+    /**
+     * @brief 获取 VkImageView
+     */
     [[nodiscard]] VkImageView view_at(uint32_t index = 0) const;
 
-    /// 获取指定索引的 layout
+    /**
+     * @brief 获取当前 Layout
+     */
     [[nodiscard]] VkImageLayout layout_at(uint32_t index) const;
 
-    /// 设置 layout（Texture 用 index=0）
+    /**
+     * @brief 设置 Layout
+     */
     void set_layout(uint32_t index, VkImageLayout layout);
 
+    /**
+     * @brief 是否为 Swapchain 资源
+     */
     [[nodiscard]] bool is_swapchain() const {
         return type == RGImageType::Swapchain;
     }
+
+    /**
+     * @brief 图像数量
+     */
     [[nodiscard]] uint32_t image_count() const;
 };
 
 // -----------------------------------------------------------------------------
-// RGPass - 渲染节点
+// RGPass
 // -----------------------------------------------------------------------------
 
+/**
+ * @typedef RGPassExecuteFn
+ * @brief Pass 执行函数
+ *
+ * @param cmd Vulkan 命令缓冲
+ * @param swapchainImageIndex 当前帧索引
+ */
 using RGPassExecuteFn =
     std::function<void(VkCommandBuffer cmd, uint32_t swapchainImageIndex)>;
 
 /**
  * @struct RGPass
- * @brief 渲染图节点：声明 reads/writes，提供 execute 回调
+ * @brief RenderGraph 节点（渲染 Pass）
+ *
+ * ---
+ * @section rgpass_dependency 依赖规则
+ *
+ * - 写 → 读：建立执行顺序
+ * - 写 → 写：避免写冲突
+ *
+ * ---
+ * @note
+ * 这里只描述逻辑依赖，同步由 RenderGraph 自动生成
  */
 struct RGPass {
+
+    /// Pass 名称（调试用）
     std::string name;
+
+    /// 读取资源
     std::vector<RGImage *> reads;
+
+    /// 写入资源
     std::vector<RGImage *> writes;
+
+    /// 执行函数
     RGPassExecuteFn execute;
 };
 
@@ -112,61 +202,108 @@ struct RGPass {
 
 /**
  * @class RenderGraph
- * @brief 渲染图：Setup 阶段 `add_pass`，Compile 阶段 `compile`，Execute 阶段
- * `execute`
+ * @brief 渲染图调度器
+ *
+ * ---
+ * @section rg_usage 使用方式
+ *
+ * @code
+ * RenderGraph rg(ctx);
+ *
+ * rg.add_pass(...);
+ * rg.compile();
+ * rg.execute(cmd, index);
+ * @endcode
+ *
+ * ---
+ * @section rg_sync 自动同步
+ *
+ * 自动处理：
+ * - Image Layout 转换
+ * - Pipeline Barrier
  */
 class RenderGraph {
 public:
     RenderGraph() = default;
+
+    /**
+     * @brief 构造函数
+     */
     explicit RenderGraph(const Context *ctx);
 
+    /**
+     * @brief 设置 Context
+     */
     void set_context(const Context *ctx) { ctx_ = ctx; }
 
     /**
-     * @brief Setup：添加 Pass（会使编译结果失效，下次 execute 前需重新
-     * compile）
+     * @brief 添加 Pass
+     *
+     * @note 会使 compile 失效
      */
     void add_pass(const RGPass &pass);
 
     /**
-     * @brief Compile：按「写 → 被读」建边并拓扑排序
-     * @return 成功返回 true；若存在循环依赖返回 false（不打回退顺序）
+     * @brief 编译 RenderGraph
+     *
+     * @retval true 成功
+     * @retval false 存在循环依赖
      */
     [[nodiscard]] bool compile();
 
     /**
-     * @brief 最近一次 compile 是否成功且与当前 passes 一致
+     * @brief 是否已编译
      */
     [[nodiscard]] bool is_compiled() const {
         return compile_ok_ && !compile_stale_;
     }
 
     /**
-     * @brief Execute：若编译过期则先 `compile()`；compile 失败则不录制任何 Pass
-     * @param cmd 命令缓冲
-     * @param swapchainImageIndex 当前 Swapchain 图像索引（用于 write 到
-     * swapchain 的 Pass）
+     * @brief 执行 RenderGraph
+     *
+     * @note
+     * - compile 过期会自动重新编译
+     * - compile 失败不会执行任何 Pass
      */
     void execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex = 0);
 
-    /// 清空所有 Pass 并使编译失效
+    /**
+     * @brief 清空所有 Pass
+     */
     void clear();
 
+    /**
+     * @brief 是否有效
+     */
     [[nodiscard]] bool is_valid() const { return ctx_ != nullptr; }
 
 private:
+    /**
+     * @brief Layout 转换
+     */
     void transition_image_(VkCommandBuffer cmd, RGImage *img,
                            VkImageLayout newLayout, uint32_t index);
+
+    /**
+     * @brief 插入 Pipeline Barrier
+     */
     void pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
                            VkImageLayout oldLayout, VkImageLayout newLayout,
                            uint32_t index);
-    /// 成功时 size()==passes_.size()；存在环时 size()<passes_.size()
+
+    /**
+     * @brief 拓扑排序
+     *
+     * @note 若存在环，返回 size < passes_.size()
+     */
     [[nodiscard]] std::vector<size_t> topo_sort_() const;
 
+private:
     const Context *ctx_ { nullptr };
+
     std::vector<RGPass> passes_;
     std::vector<size_t> execution_order_;
-    /// `add_pass` / `clear` 之后为 true，成功 compile 后为 false
+
     bool compile_stale_ { true };
     bool compile_ok_ { false };
 };

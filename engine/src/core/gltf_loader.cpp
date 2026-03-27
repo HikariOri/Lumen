@@ -10,6 +10,7 @@
 
 #include "scene/components.hpp"
 
+#include <ghc/filesystem.hpp>
 #include <stb_image.h>
 
 #define TINYGLTF_NO_STB_IMAGE
@@ -22,7 +23,6 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -32,17 +32,17 @@ namespace core {
 
 namespace {
 
-namespace fs = std::filesystem;
+namespace fs = ghc::filesystem;
 
 bool ends_with_ci(std::string_view s, std::string_view ext) {
     if (s.size() < ext.size()) {
         return false;
     }
     for (size_t i = 0; i < ext.size(); ++i) {
-        const char a = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(s[s.size() - ext.size() + i])));
-        const char b = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(ext[i])));
+        const char a = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(s[s.size() - ext.size() + i])));
+        const char b =
+            static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
         if (a != b) {
             return false;
         }
@@ -52,8 +52,8 @@ bool ends_with_ci(std::string_view s, std::string_view ext) {
 
 bool tinygltf_load_image(tinygltf::Image *image, const int image_idx,
                          std::string *err, std::string *warn, int /*req_width*/,
-                         int /*req_height*/, const unsigned char *bytes, int size,
-                         void * /*user*/) {
+                         int /*req_height*/, const unsigned char *bytes,
+                         int size, void * /*user*/) {
     (void)image_idx;
     (void)warn;
     if (image == nullptr || bytes == nullptr || size <= 0) {
@@ -63,14 +63,13 @@ bool tinygltf_load_image(tinygltf::Image *image, const int image_idx,
         return false;
     }
 
-    const bool ext_ktx = ends_with_ci(image->uri, ".ktx") ||
-                         ends_with_ci(image->uri, ".ktx2") ||
-                         ends_with_ci(image->name, ".ktx") ||
-                         ends_with_ci(image->name, ".ktx2");
-    const bool magic_ktx =
-        size >= 12 && bytes[0] == static_cast<unsigned char>(0xAB) &&
-        bytes[1] == 'K' && bytes[2] == 'T' && bytes[3] == 'X' &&
-        bytes[4] == ' ';
+    const bool ext_ktx =
+        ends_with_ci(image->uri, ".ktx") || ends_with_ci(image->uri, ".ktx2") ||
+        ends_with_ci(image->name, ".ktx") || ends_with_ci(image->name, ".ktx2");
+    const bool magic_ktx = size >= 12 &&
+                           bytes[0] == static_cast<unsigned char>(0xAB) &&
+                           bytes[1] == 'K' && bytes[2] == 'T' &&
+                           bytes[3] == 'X' && bytes[4] == ' ';
 
     if (ext_ktx || magic_ktx) {
         std::string kerr;
@@ -112,8 +111,8 @@ bool tinygltf_load_image(tinygltf::Image *image, const int image_idx,
     image->component = 4;
     image->bits = 8;
     image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-    image->image.assign(
-        data, data + static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4u);
+    image->image.assign(data, data + static_cast<std::size_t>(w) *
+                                         static_cast<std::size_t>(h) * 4u);
     stbi_image_free(data);
     return true;
 }
@@ -163,9 +162,9 @@ glm::mat4 node_local_matrix(const tinygltf::Node &n) {
     return T * R * S;
 }
 
-void traverse_nodes(const tinygltf::Model &model, int node_idx,
-                    const glm::mat4 &parent,
-                    const std::function<void(int, const glm::mat4 &)> &on_mesh) {
+void traverse_nodes(
+    const tinygltf::Model &model, int node_idx, const glm::mat4 &parent,
+    const std::function<void(int, const glm::mat4 &)> &on_mesh) {
     const tinygltf::Node &node = model.nodes[node_idx];
     const glm::mat4 world = parent * node_local_matrix(node);
     if (node.mesh >= 0) {
@@ -263,11 +262,9 @@ void append_primitive(const tinygltf::Model &model,
         uv_acc = uit->second;
     }
 
-    const glm::mat3 n_world =
-        glm::transpose(glm::inverse(glm::mat3(world)));
+    const glm::mat3 n_world = glm::transpose(glm::inverse(glm::mat3(world)));
 
-    const std::uint32_t vbase =
-        static_cast<std::uint32_t>(out.vertices.size());
+    const std::uint32_t vbase = static_cast<std::uint32_t>(out.vertices.size());
     const size_t vert_start = out.vertices.size();
     for (size_t i = 0; i < vcount; ++i) {
         glm::vec3 p {};
@@ -365,7 +362,8 @@ void set_texture_path(const fs::path &gltf_dir, const tinygltf::Model &model,
 }
 
 /// 与 [Vulkan-Samples](https://github.com/KhronosGroup/Vulkan-Samples) 的
-/// `parse_material` 一致：从 `ParameterMap` 读取标量因子（可覆盖 struct 默认值）。
+/// `parse_material` 一致：从 `ParameterMap` 读取标量因子（可覆盖 struct
+/// 默认值）。
 void apply_material_factors_from_parameter(const std::string &key,
                                            const tinygltf::Parameter &param,
                                            scene::MaterialComponent &out) {
@@ -386,9 +384,10 @@ void apply_material_factors_from_parameter(const std::string &key,
     }
 }
 
-/// 键名含 `Texture` 且 `TextureIndex()` 有效时，按 glTF 语义写入 `MaterialComponent`。
-/// `skip_base_color_texture_from_maps`：KHR spec/gloss 已从扩展写入 diffuse 时，勿让
-/// `values` 里重复的 `baseColorTexture` 覆盖反照率路径。
+/// 键名含 `Texture` 且 `TextureIndex()` 有效时，按 glTF 语义写入
+/// `MaterialComponent`。 `skip_base_color_texture_from_maps`：KHR spec/gloss
+/// 已从扩展写入 diffuse 时，勿让 `values` 里重复的 `baseColorTexture`
+/// 覆盖反照率路径。
 void apply_material_texture_from_key(const std::string &key,
                                      const tinygltf::Parameter &param,
                                      const fs::path &gltf_dir,
@@ -423,11 +422,10 @@ void apply_material_texture_from_key(const std::string &key,
     }
 }
 
-void merge_parameter_maps_into_material(const tinygltf::Material &m,
-                                        const fs::path &gltf_dir,
-                                        const tinygltf::Model &model,
-                                        scene::MaterialComponent &out,
-                                        bool skip_base_color_texture_from_maps) {
+void merge_parameter_maps_into_material(
+    const tinygltf::Material &m, const fs::path &gltf_dir,
+    const tinygltf::Model &model, scene::MaterialComponent &out,
+    bool skip_base_color_texture_from_maps) {
     for (const auto &kv : m.values) {
         apply_material_factors_from_parameter(kv.first, kv.second, out);
         apply_material_texture_from_key(kv.first, kv.second, gltf_dir, model,
@@ -461,8 +459,7 @@ void fill_material(const tinygltf::Model &model, int material_index,
 
     const auto &pbr = m.pbrMetallicRoughness;
     const auto sg_it = m.extensions.find(kExtPbrSpecularGlossiness);
-    const bool has_sg =
-        sg_it != m.extensions.end() && sg_it->second.IsObject();
+    const bool has_sg = sg_it != m.extensions.end() && sg_it->second.IsObject();
 
     if (pbr.baseColorFactor.size() >= 4) {
         out.base_color_factor =
@@ -488,11 +485,11 @@ void fill_material(const tinygltf::Model &model, int material_index,
         if (sg.Has("diffuseFactor") && sg.Get("diffuseFactor").IsArray()) {
             const tinygltf::Value &dfa = sg.Get("diffuseFactor");
             if (dfa.ArrayLen() >= 4) {
-                out.base_color_factor =
-                    glm::vec4(static_cast<float>(dfa.Get(0).GetNumberAsDouble()),
-                              static_cast<float>(dfa.Get(1).GetNumberAsDouble()),
-                              static_cast<float>(dfa.Get(2).GetNumberAsDouble()),
-                              static_cast<float>(dfa.Get(3).GetNumberAsDouble()));
+                out.base_color_factor = glm::vec4(
+                    static_cast<float>(dfa.Get(0).GetNumberAsDouble()),
+                    static_cast<float>(dfa.Get(1).GetNumberAsDouble()),
+                    static_cast<float>(dfa.Get(2).GetNumberAsDouble()),
+                    static_cast<float>(dfa.Get(3).GetNumberAsDouble()));
             }
         }
         if (sg.Has("diffuseTexture")) {
@@ -518,7 +515,8 @@ void fill_material(const tinygltf::Model &model, int material_index,
                          out.normal_path);
     }
     if (m.occlusionTexture.index >= 0) {
-        set_texture_path(gltf_dir, model, m.occlusionTexture.index, out.ao_path);
+        set_texture_path(gltf_dir, model, m.occlusionTexture.index,
+                         out.ao_path);
     }
     if (m.emissiveTexture.index >= 0) {
         set_texture_path(gltf_dir, model, m.emissiveTexture.index,
@@ -554,8 +552,7 @@ void fill_material(const tinygltf::Model &model, int material_index,
         }
 
         if (out.metallic_roughness_path.empty() &&
-            !out.spec_gloss_texture_in_mr_slot &&
-            sg.Has("glossinessFactor") &&
+            !out.spec_gloss_texture_in_mr_slot && sg.Has("glossinessFactor") &&
             sg.Get("glossinessFactor").IsNumber()) {
             const float glossy = static_cast<float>(
                 sg.Get("glossinessFactor").GetNumberAsDouble());
@@ -631,8 +628,7 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
         return false;
     }
 
-    const int scene_index =
-        model.defaultScene >= 0 ? model.defaultScene : 0;
+    const int scene_index = model.defaultScene >= 0 ? model.defaultScene : 0;
     const tinygltf::Scene &scene = model.scenes[scene_index];
 
     int first_material = -1;
