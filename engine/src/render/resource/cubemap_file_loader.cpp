@@ -27,63 +27,80 @@
 namespace lumen::render {
 namespace {
 
-/**
- * @brief 计算 cube face + UV → 方向向量
- *
- * @param face 立方体面索引：
- * 0=+X(px), 1=-X(nx), 2=+Y(py), 3=-Y(ny), 4=+Z(pz), 5=-Z(nz)
- *
- * @param u/v 面内 UV [0,1]
- * @param dir 输出方向向量（归一化）
- *
- * @note 用于 HDR → Cubemap 重建采样
- */
-void face_uv_to_dir(int face, float u, float v, float dir[3]) {
-    const float tu = (u * 2.0F) - 1.F;
-    const float tv = 1.F - (v * 2.F);
+#pragma once
+#include <algorithm>
+#include <cmath>
+#include <numbers>
 
+/**
+ * ============================================================
+ * Cubemap 工具集：HDR (Equirectangular) → Cubemap
+ * ============================================================
+ *
+ * 流程：
+ *   face + uv → direction → latlong uv → HDR采样
+ *
+ * 适用于：
+ *   - IBL
+ *   - Skybox
+ *   - 环境贴图预处理
+ */
+
+/**
+ * @brief Cubemap face + UV → 单位方向向量
+ *
+ * @param face 0~5：
+ *  0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+ * @param u,v  ∈ [0,1]
+ * @param dir  输出单位向量
+ */
+inline void face_uv_to_dir(int face, float u, float v, float dir[3]) {
+    // 1. UV → [-1,1]
+    float tu = u * 2.0f - 1.0f;
+    float tv = 1.0f - v * 2.0f; // 注意 flip Y
+
+    // 2. 根据 face 构造方向
     switch (face) {
     case 0:
-        dir[0] = 1.F;
+        dir[0] = 1.f;
         dir[1] = -tv;
         dir[2] = -tu;
         break; // +X
     case 1:
-        dir[0] = -1.F;
+        dir[0] = -1.f;
         dir[1] = -tv;
         dir[2] = tu;
         break; // -X
     case 2:
         dir[0] = tu;
-        dir[1] = 1.F;
+        dir[1] = 1.f;
         dir[2] = tv;
         break; // +Y
     case 3:
         dir[0] = tu;
-        dir[1] = -1.F;
+        dir[1] = -1.f;
         dir[2] = -tv;
         break; // -Y
     case 4:
         dir[0] = tu;
         dir[1] = -tv;
-        dir[2] = 1.F;
+        dir[2] = 1.f;
         break; // +Z
     case 5:
         dir[0] = -tu;
         dir[1] = -tv;
-        dir[2] = -1.F;
+        dir[2] = -1.f;
         break; // -Z
     default:
-        dir[0] = 0.F;
-        dir[1] = 1.F;
-        dir[2] = 0.F;
+        dir[0] = 0;
+        dir[1] = 1;
+        dir[2] = 0;
         break;
     }
 
-    // normalize
-    const float len =
-        std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
-    if (len > 1e-12F) {
+    // 3. 归一化（非常重要）
+    float len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    if (len > 1e-8f) {
         dir[0] /= len;
         dir[1] /= len;
         dir[2] /= len;
@@ -91,68 +108,115 @@ void face_uv_to_dir(int face, float u, float v, float dir[3]) {
 }
 
 /**
- * @brief 方向向量 → 经纬度 UV（equirectangular）
+ * @brief 方向向量 → 经纬度 UV
  *
- * @param dir 输入方向（单位向量）
- * @param u 输出 [0,1]
- * @param v 输出 [0,1]
+ * @param dir 单位方向
+ * @param u,v 输出 [0,1]
  */
-void dir_to_latlong_uv(const float dir[3], float *u, float *v) {
-    const float phi = std::atan2(dir[2], dir[0]);
-    const float theta = std::acos(std::clamp(dir[1], -1.f, 1.f));
+inline void dir_to_latlong_uv(const float dir[3], float *u, float *v) {
+    // 经度 φ（绕Y轴）
+    float phi = std::atan2(dir[2], dir[0]);
 
-    constexpr float kTwoPi = 6.28318530718F;
-    constexpr float kPi = std::numbers::pi_v<float>;
+    // 纬度 θ（从上往下）
+    float theta = std::acos(std::clamp(dir[1], -1.f, 1.f));
 
-    *u = phi / kTwoPi + 0.5F;
-    *v = 1.f - theta / kPi;
+    constexpr float PI = std::numbers::pi_v<float>;
+    constexpr float TWO_PI = 2.f * PI;
+
+    *u = phi / TWO_PI + 0.5f;
+    *v = 1.f - theta / PI;
 }
 
 /**
- * @brief HDR equirectangular 图双线性采样
+ * @brief HDR latlong 双线性采样
  *
- * @param hdr 输入 HDR 图（RGBA float）
- * @param w/h 分辨率
- * @param u/v UV
- * @param out 输出 RGBA
+ * @param hdr RGBA float
  */
-void sample_equirect_rgba(const float *hdr, int w, int h, float u, float v,
-                          float out[4]) {
-    u = u - std::floor(u);
-    v = std::clamp(v, 0.f, 1.f);
+inline void sample_equirect_rgba(const float *hdr, int w, int h, float u,
+                                 float v, float out[4]) {
+    // 1. wrap/clamp
+    u = u - std::floor(u);       // 横向循环
+    v = std::clamp(v, 0.f, 1.f); // 纵向不循环
 
     if (w <= 1 || h <= 1) {
-        out[0] = out[1] = out[2] = out[3] = 0.f;
+        out[0] = out[1] = out[2] = out[3] = 0;
         return;
     }
 
-    const float x = u * w - 0.5f;
-    const float y = v * h - 0.5f;
+    // 2. 像素坐标（texel center）
+    float x = u * w - 0.5f;
+    float y = v * h - 0.5f;
 
     int x0 = (int)std::floor(x);
     int y0 = (int)std::floor(y);
 
-    const float tx = x - x0;
-    const float ty = y - y0;
+    float tx = x - x0;
+    float ty = y - y0;
 
-    x0 = ((x0 % w) + w) % w;
-    const int x1 = (x0 + 1) % w;
+    // wrap X
+    x0 = (x0 % w + w) % w;
+    int x1 = (x0 + 1) % w;
 
+    // clamp Y
     y0 = std::clamp(y0, 0, h - 1);
-    const int y1 = std::clamp(y0 + 1, 0, h - 1);
+    int y1 = std::clamp(y0 + 1, 0, h - 1);
 
-    const auto idx = [w](int xi, int yi) {
-        return (size_t(yi) * size_t(w) + size_t(xi)) * 4;
-    };
+    auto idx = [w](int xi, int yi) { return (size_t(yi) * w + xi) * 4; };
 
+    // 3. bilinear
     for (int c = 0; c < 4; ++c) {
-        const float s00 = hdr[idx(x0, y0) + c];
-        const float s10 = hdr[idx(x1, y0) + c];
-        const float s01 = hdr[idx(x0, y1) + c];
-        const float s11 = hdr[idx(x1, y1) + c];
+        float s00 = hdr[idx(x0, y0) + c];
+        float s10 = hdr[idx(x1, y0) + c];
+        float s01 = hdr[idx(x0, y1) + c];
+        float s11 = hdr[idx(x1, y1) + c];
 
         out[c] = (1 - tx) * (1 - ty) * s00 + tx * (1 - ty) * s10 +
                  (1 - tx) * ty * s01 + tx * ty * s11;
+    }
+}
+
+/**
+ * ============================================================
+ * 核心函数：HDR → Cubemap
+ * ============================================================
+ *
+ * @param hdr 输入HDR
+ * @param face_size cubemap每面分辨率
+ * @param out 6个face输出（连续内存）
+ */
+inline void
+convert_equirect_to_cubemap(const float *hdr, int w, int h, int face_size,
+                            float *out // size = 6 * face_size * face_size * 4
+) {
+    float dir[3];
+    float uv_u, uv_v;
+    float color[4];
+
+    for (int face = 0; face < 6; ++face) {
+        for (int y = 0; y < face_size; ++y) {
+            for (int x = 0; x < face_size; ++x) {
+
+                float u = (x + 0.5f) / face_size;
+                float v = (y + 0.5f) / face_size;
+
+                // 1. face uv → dir
+                face_uv_to_dir(face, u, v, dir);
+
+                // 2. dir → latlong uv
+                dir_to_latlong_uv(dir, &uv_u, &uv_v);
+
+                // 3. HDR采样
+                sample_equirect_rgba(hdr, w, h, uv_u, uv_v, color);
+
+                // 4. 写入
+                size_t idx =
+                    ((size_t)face * face_size * face_size + y * face_size + x) *
+                    4;
+
+                for (int c = 0; c < 4; ++c)
+                    out[idx + c] = color[c];
+            }
+        }
     }
 }
 

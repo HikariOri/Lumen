@@ -490,5 +490,16 @@ bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
     return true;
 }
 
+bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
+                                  Framebuffer &framebuffers,
+                                  FrameSync &frameSync, const RenderPass &renderPass,
+                                  uint32_t width, uint32_t height,
+                                  uint32_t framesInFlight,
+                                  VkImageView depthImageView) {
+    return recreate_swapchain_resources(
+        ctx, swapchain, framebuffers, frameSync, renderPass.handle(), width, height,
+        framesInFlight, depthImageView);
+}
+
 } // namespace render
 } // namespace lumen

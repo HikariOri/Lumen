@@ -25,7 +25,8 @@ namespace {
     return false;
 }
 
-void draw_entity_node(lumen::scene::Scene *scene, lumen::ui::EditorSelection *sel,
+void draw_entity_node(lumen::scene::Scene *scene,
+                      lumen::ui::EditorSelection *sel,
                       std::vector<::entt::entity> *pending_destroy,
                       ::entt::entity e) {
     if (!scene || !sel || !scene->registry().valid(e)) {
@@ -92,9 +93,9 @@ void SceneHierarchyPanel::on_imgui_render() {
     ::entt::registry &reg = scene_->registry();
 
     if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
-        const float btn_w =
-            (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) *
-            0.5f;
+        const float btn_w = (ImGui::GetContentRegionAvail().x -
+                             ImGui::GetStyle().ItemSpacing.x) *
+                            0.5F;
         if (ImGui::Button("Create empty", ImVec2(btn_w, 0))) {
             ::entt::entity parent { ::entt::null };
             if (reg.valid(selection_->entity)) {

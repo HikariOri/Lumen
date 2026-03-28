@@ -54,19 +54,15 @@ static int run_shadertoy() {
     }
     LUMEN_APP_LOG_INFO("窗口创建成功: {}x{}", window.width(), window.height());
 
-    auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctxConfig;
-    ctxConfig.instanceExtensions.assign(extensions.begin(), extensions.end());
-
     lumen::render::Context ctx;
-    if (!ctx.init_instance(ctxConfig)) {
+    if (!ctx.init_instance(ctxConfig, window)) {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 创建失败");
         return -1;
     }
     LUMEN_APP_LOG_INFO("Shadertoy 启动");
 
-    lumen::render::Surface surface(
-        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(ctx, window);
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Vulkan Surface 创建失败");
         return -1;
@@ -166,9 +162,9 @@ static int run_shadertoy() {
     }
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { vertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { fragShader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     pipeConfig.vertexBindings = {};
     pipeConfig.vertexAttributes = {};
@@ -177,8 +173,7 @@ static int run_shadertoy() {
     pipeConfig.cullMode = VK_CULL_MODE_NONE;
 
     lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
-                         pipeConfig)) {
+    if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
         LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
         return -1;
     }
@@ -246,7 +241,7 @@ static int run_shadertoy() {
         if (needRecreateSwapchain) {
             window.get_framebuffer_size(&fbWidth, &fbHeight);
             lumen::render::recreate_swapchain_resources(
-                ctx, swapchain, framebuffers, frameSync, renderPass.handle(),
+                ctx, swapchain, framebuffers, frameSync, renderPass,
                 static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight),
                 kMaxFramesInFlight, VK_NULL_HANDLE);
             needRecreateSwapchain = false;

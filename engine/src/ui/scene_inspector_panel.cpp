@@ -39,12 +39,18 @@ static char g_mat_emissive_path[512] {};
     return *p != '\0';
 }
 
-static const void *kCmpEntity { reinterpret_cast<const void *>(uintptr_t { 1 }) };
-static const void *kCmpTransform { reinterpret_cast<const void *>(uintptr_t { 2 }) };
-static const void *kCmpHierarchy { reinterpret_cast<const void *>(uintptr_t { 3 }) };
-static const void *kCmpRendering { reinterpret_cast<const void *>(uintptr_t { 4 }) };
-static const void *kCmpMaterial { reinterpret_cast<const void *>(uintptr_t { 5 }) };
-static const void *kCmpLight { reinterpret_cast<const void *>(uintptr_t { 6 }) };
+static const void *kCmpEntity { reinterpret_cast<const void *>(
+    uintptr_t { 1 }) };
+static const void *kCmpTransform { reinterpret_cast<const void *>(
+    uintptr_t { 2 }) };
+static const void *kCmpHierarchy { reinterpret_cast<const void *>(
+    uintptr_t { 3 }) };
+static const void *kCmpRendering { reinterpret_cast<const void *>(
+    uintptr_t { 4 }) };
+static const void *kCmpMaterial { reinterpret_cast<const void *>(
+    uintptr_t { 5 }) };
+static const void *kCmpLight { reinterpret_cast<const void *>(
+    uintptr_t { 6 }) };
 
 } // namespace
 
@@ -91,8 +97,7 @@ void SceneInspectorPanel::on_imgui_render() {
             ImGui::InputText("Object ID", idBuf, sizeof(idBuf),
                              ImGuiInputTextFlags_ReadOnly);
             ImGui::EndDisabled();
-            ImGui::TextDisabled(
-                "Pick / 序列化用 uint32，与 EnTT 句柄无关。");
+            ImGui::TextDisabled("Pick / 序列化用 uint32，与 EnTT 句柄无关。");
         }
         ImGui::TreePop();
     }
@@ -103,14 +108,13 @@ void SceneInspectorPanel::on_imgui_render() {
             glm::vec3 pos {};
             glm::vec3 rot_deg {};
             glm::vec3 scl {};
-            ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(tr.matrix),
-                                                  glm::value_ptr(pos),
-                                                  glm::value_ptr(rot_deg),
-                                                  glm::value_ptr(scl));
+            ImGuizmo::DecomposeMatrixToComponents(
+                glm::value_ptr(tr.matrix), glm::value_ptr(pos),
+                glm::value_ptr(rot_deg), glm::value_ptr(scl));
             ImGui::TextDisabled("Local space");
             bool edited = false;
-            edited |= imgui_hazel_draw_vec3("Position", pos, 0.0f, 100.0f, 0.01f,
-                                            "%.3f");
+            edited |= imgui_hazel_draw_vec3("Position", pos, 0.0f, 100.0f,
+                                            0.01f, "%.3f");
             edited |= imgui_hazel_draw_vec3("Rotation (deg)", rot_deg, 0.0f,
                                             100.0f, 0.5f, "%.1f");
             edited |= imgui_hazel_draw_vec3("Scale", scl, 1.0f, 100.0f, 0.01f,
@@ -129,8 +133,9 @@ void SceneInspectorPanel::on_imgui_render() {
             if (par->parent != ::entt::null && reg.valid(par->parent)) {
                 const auto *pn =
                     reg.try_get<lumen::scene::NameComponent>(par->parent);
-                ImGui::Text("Parent: %s (%u)", pn ? pn->name.c_str() : "?",
-                            static_cast<unsigned>(::entt::to_integral(par->parent)));
+                ImGui::Text(
+                    "Parent: %s (%u)", pn ? pn->name.c_str() : "?",
+                    static_cast<unsigned>(::entt::to_integral(par->parent)));
                 if (ImGui::Button("Clear parent")) {
                     scene_->set_parent(e, ::entt::null);
                 }
@@ -145,7 +150,8 @@ void SceneInspectorPanel::on_imgui_render() {
 
     if (imgui_hazel_component_begin("Rendering", kCmpRendering)) {
         if (reg.all_of<lumen::scene::DrawableTag>(e)) {
-            ImGui::TextUnformatted("Drawable: enabled (mesh uses first drawable)");
+            ImGui::TextUnformatted(
+                "Drawable: enabled (mesh uses first drawable)");
             if (ImGui::Button("Remove Drawable")) {
                 reg.remove<lumen::scene::DrawableTag>(e);
             }
@@ -163,10 +169,10 @@ void SceneInspectorPanel::on_imgui_render() {
             auto &mat = reg.get<lumen::scene::MaterialComponent>(e);
             if (e != g_material_path_entity) {
                 g_material_path_entity = e;
-                std::snprintf(g_mat_albedo_path, sizeof(g_mat_albedo_path), "%s",
-                              mat.albedo_path.c_str());
-                std::snprintf(g_mat_normal_path, sizeof(g_mat_normal_path), "%s",
-                              mat.normal_path.c_str());
+                std::snprintf(g_mat_albedo_path, sizeof(g_mat_albedo_path),
+                              "%s", mat.albedo_path.c_str());
+                std::snprintf(g_mat_normal_path, sizeof(g_mat_normal_path),
+                              "%s", mat.normal_path.c_str());
                 std::snprintf(g_mat_mr_path, sizeof(g_mat_mr_path), "%s",
                               mat.metallic_roughness_path.c_str());
                 std::snprintf(g_mat_ao_path, sizeof(g_mat_ao_path), "%s",
@@ -174,8 +180,8 @@ void SceneInspectorPanel::on_imgui_render() {
                 std::snprintf(g_mat_emissive_path, sizeof(g_mat_emissive_path),
                               "%s", mat.emissive_path.c_str());
             }
-            ImGui::TextDisabled(
-                "标量与贴图二选一：路径非空则绑定贴图并与因子相乘；空则仅用标量因子。");
+            ImGui::TextDisabled("标量与贴图二选一：路径非空则绑定贴图并与因子相"
+                                "乘；空则仅用标量因子。");
 
             ImGui::Separator();
             ImGui::TextUnformatted("Alpha & faces");
@@ -196,8 +202,8 @@ void SceneInspectorPanel::on_imgui_render() {
             ImGui::InputText("Albedo texture path", g_mat_albedo_path,
                              sizeof(g_mat_albedo_path));
             if (material_path_non_empty(g_mat_albedo_path)) {
-                ImGui::TextDisabled(
-                    "已启用反照率贴图（× Model color）；不再用 Base color 乘 RGB。");
+                ImGui::TextDisabled("已启用反照率贴图（× Model color）；不再用 "
+                                    "Base color 乘 RGB。");
             } else {
                 ImGui::ColorEdit4("Base color (scalar)",
                                   glm::value_ptr(mat.base_color_factor));
@@ -218,8 +224,8 @@ void SceneInspectorPanel::on_imgui_render() {
             if (material_path_non_empty(g_mat_mr_path)) {
                 ImGui::TextDisabled("已启用 MR 贴图：B=金属，G=粗糙（glTF）。");
             } else {
-                ImGui::DragFloat("Metallic (scalar)", &mat.metallic_factor, 0.01f,
-                                 0.0f, 1.0f, "%.2f");
+                ImGui::DragFloat("Metallic (scalar)", &mat.metallic_factor,
+                                 0.01f, 0.0f, 1.0f, "%.2f");
                 ImGui::DragFloat("Roughness (scalar)", &mat.roughness_factor,
                                  0.01f, 0.04f, 1.0f, "%.2f");
             }
@@ -231,8 +237,8 @@ void SceneInspectorPanel::on_imgui_render() {
             if (material_path_non_empty(g_mat_ao_path)) {
                 ImGui::TextDisabled("已启用 AO 贴图（R 通道）。");
             } else {
-                ImGui::DragFloat("AO (scalar)", &mat.ao_factor, 0.01f, 0.0f, 1.0f,
-                                 "%.2f");
+                ImGui::DragFloat("AO (scalar)", &mat.ao_factor, 0.01f, 0.0f,
+                                 1.0f, "%.2f");
             }
 
             ImGui::Separator();
@@ -268,8 +274,7 @@ void SceneInspectorPanel::on_imgui_render() {
         if (imgui_hazel_component_begin("Light", kCmpLight)) {
             auto &light = reg.get<lumen::scene::LightComponent>(e);
             int type_i = static_cast<int>(light.type);
-            if (ImGui::Combo("Type", &type_i,
-                             "Directional\0Point\0Spot\0\0")) {
+            if (ImGui::Combo("Type", &type_i, "Directional\0Point\0Spot\0\0")) {
                 light.type = static_cast<lumen::scene::LightType>(type_i);
             }
             ImGui::ColorEdit3("Color", glm::value_ptr(light.color));
@@ -289,12 +294,12 @@ void SceneInspectorPanel::on_imgui_render() {
             if (light.type == lumen::scene::LightType::Spot) {
                 float inner_deg = light.inner_radians * 57.2957795f;
                 float outer_deg = light.outer_radians * 57.2957795f;
-                if (ImGui::DragFloat("Inner cone (deg)", &inner_deg, 0.25f, 0.1f,
-                                     89.0f, "%.1f")) {
+                if (ImGui::DragFloat("Inner cone (deg)", &inner_deg, 0.25f,
+                                     0.1f, 89.0f, "%.1f")) {
                     light.inner_radians = inner_deg * 0.0174532925f;
                 }
-                if (ImGui::DragFloat("Outer cone (deg)", &outer_deg, 0.25f, 0.2f,
-                                     90.0f, "%.1f")) {
+                if (ImGui::DragFloat("Outer cone (deg)", &outer_deg, 0.25f,
+                                     0.2f, 90.0f, "%.1f")) {
                     light.outer_radians = outer_deg * 0.0174532925f;
                 }
             }

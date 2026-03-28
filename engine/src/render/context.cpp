@@ -17,6 +17,7 @@
 
 #include "render/context.hpp"
 #include "core/logger.hpp"
+#include "platform/window.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -58,6 +59,28 @@ bool check_validation_layer_support(const std::vector<const char *> &layers) {
         }
     }
     return true;
+}
+
+/**
+ * @brief 将 `from` 中的扩展名并入 `into`，忽略已存在的同名项
+ */
+void merge_unique_instance_extensions(std::vector<const char *> &into,
+                                      const std::vector<const char *> &from) {
+    for (const char *e : from) {
+        if (e == nullptr) {
+            continue;
+        }
+        bool dup { false };
+        for (const char *x : into) {
+            if (x != nullptr && std::strcmp(x, e) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            into.push_back(e);
+        }
+    }
 }
 
 } // namespace
@@ -175,6 +198,14 @@ bool Context::init_instance(const ContextConfig &config) {
     LUMEN_LOG_DEBUG("Vulkan instance 创建成功, validation={}",
                     validationEnabled_);
     return true;
+}
+
+bool Context::init_instance(const ContextConfig &config,
+                            const platform::Window &window) {
+    ContextConfig merged { config };
+    merge_unique_instance_extensions(
+        merged.instanceExtensions, window.get_vulkan_instance_extensions());
+    return init_instance(merged);
 }
 
 /**

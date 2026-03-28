@@ -32,6 +32,9 @@
 #include <vulkan/vulkan.h>
 
 namespace lumen {
+namespace platform {
+class Window;
+}
 namespace render {
 
 /**
@@ -125,6 +128,15 @@ public:
      * 并创建 Vulkan 实例。
      */
     bool init_instance(const ContextConfig &config);
+
+    /**
+     * @brief 初始化 Vulkan Instance，并自动并入窗口（SDL）所需的实例扩展
+     *
+     * 在 `config.instanceExtensions` 基础上追加 `window.get_vulkan_instance_extensions()`，
+     * 同名扩展不重复添加。
+     */
+    bool init_instance(const ContextConfig &config,
+                       const platform::Window &window);
 
     /**
      * @brief 初始化 PhysicalDevice、LogicalDevice、Queue

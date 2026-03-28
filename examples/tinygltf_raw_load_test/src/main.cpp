@@ -492,18 +492,14 @@ static int run_tinygltf_raw_viewer() {
         mesh_half_extents = 0.5f * (mx - mn);
     }
 
-    auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctx_cfg;
-    ctx_cfg.instanceExtensions.assign(extensions.begin(), extensions.end());
-
     lumen::render::Context ctx;
-    if (!ctx.init_instance(ctx_cfg)) {
+    if (!ctx.init_instance(ctx_cfg, window)) {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 初始化失败");
         return -1;
     }
 
-    lumen::render::Surface surface(
-        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(ctx, window);
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Surface 创建失败");
         return -1;
@@ -757,19 +753,22 @@ static int run_tinygltf_raw_viewer() {
             LUMEN_APP_LOG_ERROR("场景 DescriptorSet 分配失败");
             return -1;
         }
-        lumen::render::write_descriptor_buffer(
-            ctx.device(), scene_descriptor_sets[i], 0,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, scene_uniform_buffers[i].handle(),
-            0, sizeof(SceneUbo));
-        lumen::render::write_descriptor_image(
-            ctx.device(), scene_descriptor_sets[i], 1, env_cubemap.view(),
-            env_cubemap.sampler());
-        lumen::render::write_descriptor_image(
-            ctx.device(), scene_descriptor_sets[i], 2, brdf_lut_tex.view(),
-            brdf_lut_tex.sampler());
-        lumen::render::write_descriptor_image(
-            ctx.device(), scene_descriptor_sets[i], 3, irradiance_cubemap.view(),
-            irradiance_cubemap.sampler());
+        lumen::render::write_descriptor_set(
+            ctx.device(), scene_descriptor_sets[i],
+            { { .binding = 0,
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .buffer = scene_uniform_buffers[i].handle(),
+                .offset = 0,
+                .range = sizeof(SceneUbo) } },
+            { { .binding = 1,
+                .imageView = env_cubemap.view(),
+                .sampler = env_cubemap.sampler() },
+              { .binding = 2,
+                .imageView = brdf_lut_tex.view(),
+                .sampler = brdf_lut_tex.sampler() },
+              { .binding = 3,
+                .imageView = irradiance_cubemap.view(),
+                .sampler = irradiance_cubemap.sampler() } });
     }
 
     std::vector<VkDescriptorSet> mat_descriptor_sets(n_tex_sets);
@@ -808,26 +807,28 @@ static int run_tinygltf_raw_viewer() {
     }
 
     lumen::render::GraphicsPipelineConfig pipe_cfg;
-    pipe_cfg.stages.push_back(
+    pipe_cfg.shaderStages.push_back(
         { vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    pipe_cfg.stages.push_back(
+    pipe_cfg.shaderStages.push_back(
         { frag_shader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     pipe_cfg.vertexBindings.push_back(
-        { 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(Vertex), lumen::render::VertexInputRate::PerVertex });
     pipe_cfg.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position) });
+        { 0, 0, lumen::render::VertexAttributeKind::F32Vec3,
+          offsetof(Vertex, position) });
     pipe_cfg.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
+        { 1, 0, lumen::render::VertexAttributeKind::F32Vec2,
+          offsetof(Vertex, uv) });
     pipe_cfg.vertexAttributes.push_back(
-        { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) });
+        { 2, 0, lumen::render::VertexAttributeKind::F32Vec3,
+          offsetof(Vertex, normal) });
     pipe_cfg.depthTest = true;
     pipe_cfg.depthWrite = true;
     pipe_cfg.cullMode = VK_CULL_MODE_BACK_BIT;
     pipe_cfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipeline_layout.handle(), render_pass.handle(), 0,
-                         pipe_cfg)) {
+    if (!pipeline.create(ctx, pipeline_layout, render_pass, 0, pipe_cfg)) {
         LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
         return -1;
     }
@@ -902,8 +903,8 @@ static int run_tinygltf_raw_viewer() {
                         ctx, static_cast<uint32_t>(fb_width),
                         static_cast<uint32_t>(fb_height)) &&
                     lumen::render::recreate_swapchain_resources(
-                        ctx, swapchain, framebuffers, frame_sync,
-                        render_pass.handle(), static_cast<uint32_t>(fb_width),
+                        ctx, swapchain, framebuffers, frame_sync, render_pass,
+                        static_cast<uint32_t>(fb_width),
                         static_cast<uint32_t>(fb_height), kMaxFramesInFlight,
                         new_depth.view())) {
                     depth_image = std::move(new_depth);

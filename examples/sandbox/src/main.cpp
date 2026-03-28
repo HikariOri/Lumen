@@ -58,20 +58,16 @@ static int run_sandbox() {
     }
     LUMEN_APP_LOG_INFO("窗口创建成功: {}x{}", window.width(), window.height());
 
-    auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctxConfig;
-    ctxConfig.instanceExtensions.assign(extensions.begin(), extensions.end());
-
     lumen::render::Context ctx;
-    if (!ctx.init_instance(ctxConfig)) {
+    if (!ctx.init_instance(ctxConfig, window)) {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 创建失败");
         return -1;
     }
     LUMEN_APP_LOG_INFO("Sandbox 启动");
     LUMEN_APP_LOG_INFO("Vulkan Instance 创建成功");
 
-    lumen::render::Surface surface(
-        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(ctx, window);
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Vulkan Surface 创建失败");
         return -1;
@@ -243,13 +239,17 @@ static int run_sandbox() {
             LUMEN_APP_LOG_ERROR("DescriptorSet[{}] 分配失败", i);
             return -1;
         }
-        lumen::render::write_descriptor_buffer(
-            ctx.device(), descriptorSets[i], 0,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
-            sizeof(UBO));
-        lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSets[i], 1, texture.view(),
-            texture.sampler(), texture.descriptor_layout());
+        lumen::render::write_descriptor_set(
+            ctx.device(), descriptorSets[i],
+            { { .binding = 0,
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .buffer = uniformBuffers[i].handle(),
+                .offset = 0,
+                .range = sizeof(UBO) } },
+            { { .binding = 1,
+                .imageView = texture.view(),
+                .sampler = texture.sampler(),
+                .imageLayout = texture.descriptor_layout() } });
     }
 
     // PipelineLayout（含 descriptor set layout）
@@ -261,23 +261,24 @@ static int run_sandbox() {
 
     // GraphicsPipeline
     lumen::render::GraphicsPipelineConfig pipeConfig;
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { vertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { fragShader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     pipeConfig.vertexBindings.push_back(
-        { 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(Vertex), lumen::render::VertexInputRate::PerVertex });
     pipeConfig.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, position) });
+        { 0, 0, lumen::render::VertexAttributeKind::F32Vec2,
+          offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
+        { 1, 0, lumen::render::VertexAttributeKind::F32Vec2,
+          offsetof(Vertex, uv) });
     pipeConfig.depthTest = false;
     pipeConfig.depthWrite = false;
     pipeConfig.cullMode = VK_CULL_MODE_NONE;
 
     lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
-                         pipeConfig)) {
+    if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
         LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
         return -1;
     }
@@ -370,7 +371,7 @@ static int run_sandbox() {
         if (needRecreateSwapchain) {
             window.get_framebuffer_size(&fbWidth, &fbHeight);
             lumen::render::recreate_swapchain_resources(
-                ctx, swapchain, framebuffers, frameSync, renderPass.handle(),
+                ctx, swapchain, framebuffers, frameSync, renderPass,
                 static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight),
                 kMaxFramesInFlight, VK_NULL_HANDLE);
             needRecreateSwapchain = false;

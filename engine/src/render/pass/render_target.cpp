@@ -22,6 +22,9 @@
 
 #include "render/pass/render_target.hpp"
 
+#include <array>
+#include <span>
+
 #include "core/logger.hpp"
 #include "render/context.hpp"
 
@@ -49,11 +52,21 @@ namespace lumen::render {
  * - 必须保证旧资源不再被 GPU 使用
  */
 bool OffscreenRenderTarget::create(const Context &ctx,
-                                   const OffscreenRenderTargetConfig &config) {
+                                   const OffscreenRenderTargetConfig &config,
+                                   const RenderPass *shared_render_pass) {
     if (config.width == 0 || config.height == 0) {
         LUMEN_LOG_ERROR("OffscreenRenderTarget: 无效尺寸 {}x{}", config.width,
                         config.height);
         return false;
+    }
+
+    if (shared_render_pass != nullptr) {
+        external_rp_ = shared_render_pass;
+        owns_render_pass_ = false;
+        renderPass_ = RenderPass();
+    } else {
+        external_rp_ = nullptr;
+        owns_render_pass_ = true;
     }
 
     ctx_ = &ctx;
@@ -80,18 +93,34 @@ bool OffscreenRenderTarget::create(const Context &ctx,
  * - resize 必须在 GPU idle 或 frame fence 保护下执行
  * - 否则可能产生 use-after-free GPU crash
  */
-bool OffscreenRenderTarget::resize(const Context &ctx, uint32_t width,
-                                   uint32_t height) {
+bool OffscreenRenderTarget::resize(uint32_t width, uint32_t height) {
+    if (ctx_ == nullptr) {
+        LUMEN_LOG_ERROR("OffscreenRenderTarget::resize: 尚未 create");
+        return false;
+    }
     if (width == 0 || height == 0) {
         return false;
     }
+
+    const uint32_t prev_w = width_;
+    const uint32_t prev_h = height_;
+    const uint32_t prev_cw = config_.width;
+    const uint32_t prev_ch = config_.height;
 
     width_ = width;
     height_ = height;
     config_.width = width;
     config_.height = height;
 
-    return create_internal_(ctx);
+    if (!create_internal_(*ctx_)) {
+        width_ = prev_w;
+        height_ = prev_h;
+        config_.width = prev_cw;
+        config_.height = prev_ch;
+        destroy_();
+        return false;
+    }
+    return true;
 }
 
 /**
@@ -125,24 +154,26 @@ VkFramebuffer OffscreenRenderTarget::framebuffer() const {
  * - final layout transition
  */
 VkRenderPass OffscreenRenderTarget::render_pass() const {
-    return renderPass_.handle();
+    return external_rp_ != nullptr ? external_rp_->handle()
+                                  : renderPass_.handle();
 }
 
 /**
  * @brief 销毁所有 GPU 资源
  *
- * 销毁顺序（必须严格）：
- * --------------------------------------
- * Framebuffer → ImageView → Image → RenderPass
- *
- * @note 注意：
- * RenderPass 在 Vulkan 中可复用，但本实现随 target 生命周期绑定
+ * 顺序：先销毁 Framebuffer（解除对 ImageView 的引用），再通过赋值默认构造的
+ * `Image` / `RenderPass` 释放其内部 VkImageView、VkImage、VkRenderPass（各封装析构
+ * 顺序由类型自身保证）。
  */
 void OffscreenRenderTarget::destroy_() {
     framebuffer_.destroy();
     framebuffer_ = Framebuffer();
 
-    renderPass_ = RenderPass();
+    if (owns_render_pass_) {
+        renderPass_ = RenderPass();
+    }
+    external_rp_ = nullptr;
+    owns_render_pass_ = true;
 
     depthImage_ = Image();
     colorImage_ = Image();
@@ -153,7 +184,7 @@ void OffscreenRenderTarget::destroy_() {
  *
  * 执行顺序：
  * --------------------------------------
- * 1. 若 framebuffer 已存在 → destroy（resize path）
+ * 1. 销毁 Framebuffer 并清空 color/depth（覆盖部分失败后的重试）
  * 2. 创建 / 复用 RenderPass
  * 3. 创建 Color Image
  * 4. 创建 Depth Image（可选）
@@ -164,24 +195,30 @@ void OffscreenRenderTarget::destroy_() {
  * - Image 是实际 GPU memory owner（VMA allocation）
  */
 bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
-    // Resize path：释放旧 framebuffer
-    if (framebuffer_.count() > 0) {
-        framebuffer_.destroy();
-        colorImage_ = Image();
-        depthImage_ = Image();
-    }
+    framebuffer_.destroy();
+    colorImage_ = Image();
+    depthImage_ = Image();
 
-    // RenderPass（只在首次创建）
-    if (!renderPass_.is_valid()) {
-        RenderPassConfig rpConfig {};
-        rpConfig.useDepth = config_.useDepth;
-        rpConfig.colorAttachment.format = config_.format;
-        rpConfig.colorAttachment.finalLayout = config_.colorFinalLayout;
-
-        if (!renderPass_.create(ctx.device(), rpConfig)) {
-            LUMEN_LOG_ERROR("OffscreenRenderTarget: RenderPass 创建失败");
+    VkRenderPass rp_handle = VK_NULL_HANDLE;
+    if (external_rp_ != nullptr) {
+        if (!external_rp_->is_valid()) {
+            LUMEN_LOG_ERROR("OffscreenRenderTarget: 外部 RenderPass 无效");
             return false;
         }
+        rp_handle = external_rp_->handle();
+    } else {
+        if (!renderPass_.is_valid()) {
+            RenderPassConfig rpConfig {};
+            rpConfig.useDepth = config_.useDepth;
+            rpConfig.colorAttachment.format = config_.format;
+            rpConfig.colorAttachment.finalLayout = config_.colorFinalLayout;
+
+            if (!renderPass_.create(ctx.device(), rpConfig)) {
+                LUMEN_LOG_ERROR("OffscreenRenderTarget: RenderPass 创建失败");
+                return false;
+            }
+        }
+        rp_handle = renderPass_.handle();
     }
 
     // Color attachment image（GPU local render target）
@@ -205,14 +242,17 @@ bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
         }
     }
 
-    // Framebuffer assembly（attachment binding）
-    std::vector<VkImageView> attachments { colorImage_.view() };
+    std::array<VkImageView, 2> attachment_views { colorImage_.view(),
+                                                  VK_NULL_HANDLE };
+    const uint32_t attachment_count = config_.useDepth ? 2U : 1U;
     if (config_.useDepth) {
-        attachments.push_back(depthImage_.view());
+        attachment_views[1] = depthImage_.view();
     }
 
-    if (!framebuffer_.create_offscreen(ctx.device(), renderPass_.handle(),
-                                       width_, height_, attachments)) {
+    if (!framebuffer_.create_offscreen(
+            ctx.device(), rp_handle, width_, height_,
+            std::span<const VkImageView>(attachment_views.data(),
+                                         attachment_count))) {
         LUMEN_LOG_ERROR("OffscreenRenderTarget: Framebuffer 创建失败");
         return false;
     }
@@ -235,13 +275,17 @@ OffscreenRenderTarget::~OffscreenRenderTarget() { destroy_(); }
  */
 OffscreenRenderTarget::OffscreenRenderTarget(
     OffscreenRenderTarget &&other) noexcept
-    : ctx_ { other.ctx_ }, config_ { other.config_ }, width_ { other.width_ },
+    : ctx_ { other.ctx_ }, external_rp_ { other.external_rp_ },
+      owns_render_pass_ { other.owns_render_pass_ },
+      config_ { other.config_ }, width_ { other.width_ },
       height_ { other.height_ }, colorImage_ { std::move(other.colorImage_) },
       depthImage_ { std::move(other.depthImage_) },
       renderPass_ { std::move(other.renderPass_) },
       framebuffer_ { std::move(other.framebuffer_) } {
 
     other.ctx_ = nullptr;
+    other.external_rp_ = nullptr;
+    other.owns_render_pass_ = true;
     other.width_ = 0;
     other.height_ = 0;
 }
@@ -257,6 +301,8 @@ OffscreenRenderTarget::operator=(OffscreenRenderTarget &&other) noexcept {
     destroy_();
 
     ctx_ = other.ctx_;
+    external_rp_ = other.external_rp_;
+    owns_render_pass_ = other.owns_render_pass_;
     config_ = other.config_;
     width_ = other.width_;
     height_ = other.height_;
@@ -267,6 +313,8 @@ OffscreenRenderTarget::operator=(OffscreenRenderTarget &&other) noexcept {
     framebuffer_ = std::move(other.framebuffer_);
 
     other.ctx_ = nullptr;
+    other.external_rp_ = nullptr;
+    other.owns_render_pass_ = true;
     other.width_ = 0;
     other.height_ = 0;
 

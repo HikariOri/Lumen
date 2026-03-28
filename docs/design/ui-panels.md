@@ -134,7 +134,7 @@ lumen::ui::imgui_texture_view_panel("Wireframe", wireframeTextureId,
 
 1. **本帧**：`imgui_texture_view_panel` 输出 `nextSceneW` / `nextSceneH`
 2. **帧间**：检查 `sceneTarget.extent()` 与 `nextSceneW/nextSceneH` 是否一致
-3. **若需 resize**：`ctx.wait_idle()` → `sceneTarget.resize(ctx, nextSceneW, nextSceneH)` → `imgui_backend_remove_texture(oldId)` → `imgui_backend_add_texture(...)` 获取新 ID
+3. **若需 resize**：`ctx.wait_idle()` → `sceneTarget.resize(nextSceneW, nextSceneH)` → `imgui_backend_remove_texture(oldId)` → `imgui_backend_add_texture(...)` 获取新 ID
 
 详见 [ImGui 3D 场景渲染到窗口](imgui-integration.md#4-3d-场景渲染到-imgui-窗口)。
 

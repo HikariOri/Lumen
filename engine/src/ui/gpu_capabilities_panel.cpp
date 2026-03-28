@@ -59,7 +59,7 @@ GpuCapabilitiesPanel::GpuCapabilitiesPanel(const render::Context& ctx)
     : ctx_(&ctx) {}
 
 void GpuCapabilitiesPanel::on_imgui_render() {
-    ImGui::SetNextWindowSize(ImVec2(320.0f, 0.0f),
+    ImGui::SetNextWindowSize(ImVec2(320.0F, 0.0F),
                              ImGuiCond_FirstUseEver);
     imgui_gpu_capabilities_panel(*ctx_, "GPU Capabilities", nullptr);
 }

@@ -42,6 +42,7 @@ namespace render {
 class Context;
 class Framebuffer;
 class FrameSync;
+class RenderPass;
 
 /**
  * @struct SwapchainConfig
@@ -287,6 +288,13 @@ private:
 bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
                                   Framebuffer &framebuffers,
                                   FrameSync &frameSync, VkRenderPass renderPass,
+                                  uint32_t width, uint32_t height,
+                                  uint32_t framesInFlight,
+                                  VkImageView depthImageView = VK_NULL_HANDLE);
+
+bool recreate_swapchain_resources(const Context &ctx, Swapchain &swapchain,
+                                  Framebuffer &framebuffers,
+                                  FrameSync &frameSync, const RenderPass &renderPass,
                                   uint32_t width, uint32_t height,
                                   uint32_t framesInFlight,
                                   VkImageView depthImageView = VK_NULL_HANDLE);

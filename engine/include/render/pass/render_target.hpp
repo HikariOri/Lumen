@@ -126,13 +126,17 @@ public:
      * 1. 创建 color image
      * 2. 创建 depth image（可选）
      * 3. 创建 image views
-     * 4. 创建 render pass
+     * 4. 创建或绑定 render pass（见 `shared_render_pass`）
      * 5. 创建 framebuffer
      *
-     * @param ctx Vulkan 上下文（device / allocator）
+     * @param ctx Vulkan 上下文（device / allocator），`resize` 使用本次记录的同一
+     *        `Context`
      * @param config 离屏目标配置
+     * @param shared_render_pass 非空则复用该 `RenderPass`（须与 `config` 中 format /
+     *        useDepth / colorFinalLayout 一致），本对象不销毁它；为空则内部创建并持有
      */
-    bool create(const Context &ctx, const OffscreenRenderTargetConfig &config);
+    bool create(const Context &ctx, const OffscreenRenderTargetConfig &config,
+                const RenderPass *shared_render_pass = nullptr);
 
     /**
      * @brief 动态调整渲染目标尺寸（窗口 resize）
@@ -144,8 +148,12 @@ public:
      *
      * @param width 新宽度
      * @param height 新高度
+     *
+     * @note 须在 `create` 成功后调用。失败时回滚逻辑尺寸并 `destroy_()`（外部分享的
+     *       `RenderPass` 不会被销毁）；若曾使用 `shared_render_pass`，需再次 `create`
+     *       并传入同一指针。
      */
-    bool resize(const Context &ctx, uint32_t width, uint32_t height);
+    bool resize(uint32_t width, uint32_t height);
 
     /**
      * @brief 获取颜色 attachment ImageView
@@ -185,6 +193,13 @@ public:
     [[nodiscard]] VkRenderPass render_pass() const;
 
     /**
+     * @brief 与 `render_pass()` 同一对象，供 `GraphicsPipeline::create` 等需要 `RenderPass&` 的 API
+     */
+    [[nodiscard]] const RenderPass &render_pass_ref() const {
+        return external_rp_ != nullptr ? *external_rp_ : renderPass_;
+    }
+
+    /**
      * @brief 当前渲染分辨率
      */
     [[nodiscard]] VkExtent2D extent() const { return { width_, height_ }; }
@@ -196,13 +211,23 @@ public:
     /**
      * @brief 是否有效（资源已创建）
      */
-    [[nodiscard]] bool is_valid() const { return framebuffer_.count() > 0; }
+    [[nodiscard]] bool is_valid() const {
+        const bool rp_ok = external_rp_ != nullptr
+                               ? external_rp_->is_valid()
+                               : renderPass_.is_valid();
+        return rp_ok && framebuffer_.count() > 0 &&
+               framebuffer_.get(0) != VK_NULL_HANDLE;
+    }
 
 private:
     void destroy_();
     bool create_internal_(const Context &ctx);
 
     const Context *ctx_ { nullptr };
+    /// 非空时不持有 `VkRenderPass`，仅借用；须长于本对象
+    const RenderPass *external_rp_ { nullptr };
+    bool owns_render_pass_ { true };
+
     OffscreenRenderTargetConfig config_ {};
 
     uint32_t width_ { 0 };

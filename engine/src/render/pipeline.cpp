@@ -6,12 +6,321 @@
 #include "render/pipeline.hpp"
 #include "core/logger.hpp"
 #include "render/context.hpp"
-
+#include "render/pass/render_pass.hpp"
 
 #include <fstream>
+#include <vector>
 
 namespace lumen {
 namespace render {
+
+namespace {
+
+[[nodiscard]] VkVertexInputRate
+to_vk_vertex_input_rate(VertexInputRate r) noexcept {
+    switch (r) {
+    case VertexInputRate::PerVertex:
+        return VK_VERTEX_INPUT_RATE_VERTEX;
+    case VertexInputRate::PerInstance:
+        return VK_VERTEX_INPUT_RATE_INSTANCE;
+    }
+    return VK_VERTEX_INPUT_RATE_VERTEX;
+}
+
+void push_attr(std::vector<VkVertexInputAttributeDescription> &out,
+               uint32_t location, uint32_t binding, VkFormat format,
+               uint32_t offset) {
+    out.push_back(
+        VkVertexInputAttributeDescription { location, binding, format, offset });
+}
+
+void push_matrix_cols(std::vector<VkVertexInputAttributeDescription> &out,
+                      uint32_t baseLocation, uint32_t binding,
+                      uint32_t baseOffset, uint32_t columnCount,
+                      uint32_t columnStrideBytes, VkFormat columnFormat) {
+    for (uint32_t c { 0 }; c < columnCount; ++c) {
+        push_attr(out, baseLocation + c, binding, columnFormat,
+                  baseOffset + c * columnStrideBytes);
+    }
+}
+
+void append_vertex_input_attributes(
+    const VertexInputAttribute &a,
+    std::vector<VkVertexInputAttributeDescription> &out) {
+    const uint32_t L { a.location };
+    const uint32_t B { a.binding };
+    const uint32_t O { a.offset };
+    using K = VertexAttributeKind;
+
+    switch (a.kind) {
+    case K::F64:
+        push_attr(out, L, B, VK_FORMAT_R64_SFLOAT, O);
+        return;
+    case K::F64Vec2:
+        push_attr(out, L, B, VK_FORMAT_R64G64_SFLOAT, O);
+        return;
+    case K::F64Vec3:
+        push_attr(out, L, B, VK_FORMAT_R64G64B64_SFLOAT, O);
+        return;
+    case K::F64Vec4:
+        push_attr(out, L, B, VK_FORMAT_R64G64B64A64_SFLOAT, O);
+        return;
+    case K::F64Mat2:
+        push_matrix_cols(out, L, B, O, 2, 16, VK_FORMAT_R64G64_SFLOAT);
+        return;
+    case K::F64Mat3:
+        push_matrix_cols(out, L, B, O, 3, 24, VK_FORMAT_R64G64B64_SFLOAT);
+        return;
+    case K::F64Mat4:
+        push_matrix_cols(out, L, B, O, 4, 32, VK_FORMAT_R64G64B64A64_SFLOAT);
+        return;
+
+    case K::F32:
+        push_attr(out, L, B, VK_FORMAT_R32_SFLOAT, O);
+        return;
+    case K::F32Vec2:
+        push_attr(out, L, B, VK_FORMAT_R32G32_SFLOAT, O);
+        return;
+    case K::F32Vec3:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32_SFLOAT, O);
+        return;
+    case K::F32Vec4:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32A32_SFLOAT, O);
+        return;
+    case K::F32Mat2:
+        push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_SFLOAT);
+        return;
+    case K::F32Mat3:
+        push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_SFLOAT);
+        return;
+    case K::F32Mat4:
+        push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
+        return;
+
+    case K::F16:
+        push_attr(out, L, B, VK_FORMAT_R16_SFLOAT, O);
+        return;
+    case K::F16Vec2:
+        push_attr(out, L, B, VK_FORMAT_R16G16_SFLOAT, O);
+        return;
+    case K::F16Vec3:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16_SFLOAT, O);
+        return;
+    case K::F16Vec4:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SFLOAT, O);
+        return;
+    case K::F16Mat2:
+        push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_SFLOAT);
+        return;
+    case K::F16Mat3:
+        push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_SFLOAT);
+        return;
+    case K::F16Mat4:
+        push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SFLOAT);
+        return;
+
+    case K::I32:
+        push_attr(out, L, B, VK_FORMAT_R32_SINT, O);
+        return;
+    case K::I32Vec2:
+        push_attr(out, L, B, VK_FORMAT_R32G32_SINT, O);
+        return;
+    case K::I32Vec3:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32_SINT, O);
+        return;
+    case K::I32Vec4:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32A32_SINT, O);
+        return;
+    case K::I32Mat2:
+        push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_SINT);
+        return;
+    case K::I32Mat3:
+        push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_SINT);
+        return;
+    case K::I32Mat4:
+        push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SINT);
+        return;
+
+    case K::U32:
+        push_attr(out, L, B, VK_FORMAT_R32_UINT, O);
+        return;
+    case K::U32Vec2:
+        push_attr(out, L, B, VK_FORMAT_R32G32_UINT, O);
+        return;
+    case K::U32Vec3:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32_UINT, O);
+        return;
+    case K::U32Vec4:
+        push_attr(out, L, B, VK_FORMAT_R32G32B32A32_UINT, O);
+        return;
+    case K::U32Mat2:
+        push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_UINT);
+        return;
+    case K::U32Mat3:
+        push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_UINT);
+        return;
+    case K::U32Mat4:
+        push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_UINT);
+        return;
+
+    case K::I16:
+        push_attr(out, L, B, VK_FORMAT_R16_SINT, O);
+        return;
+    case K::I16Vec2:
+        push_attr(out, L, B, VK_FORMAT_R16G16_SINT, O);
+        return;
+    case K::I16Vec3:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16_SINT, O);
+        return;
+    case K::I16Vec4:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SINT, O);
+        return;
+    case K::I16Mat2:
+        push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_SINT);
+        return;
+    case K::I16Mat3:
+        push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_SINT);
+        return;
+    case K::I16Mat4:
+        push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SINT);
+        return;
+
+    case K::U16:
+        push_attr(out, L, B, VK_FORMAT_R16_UINT, O);
+        return;
+    case K::U16Vec2:
+        push_attr(out, L, B, VK_FORMAT_R16G16_UINT, O);
+        return;
+    case K::U16Vec3:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16_UINT, O);
+        return;
+    case K::U16Vec4:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UINT, O);
+        return;
+    case K::U16Mat2:
+        push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_UINT);
+        return;
+    case K::U16Mat3:
+        push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_UINT);
+        return;
+    case K::U16Mat4:
+        push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_UINT);
+        return;
+
+    case K::I8:
+        push_attr(out, L, B, VK_FORMAT_R8_SINT, O);
+        return;
+    case K::I8Vec2:
+        push_attr(out, L, B, VK_FORMAT_R8G8_SINT, O);
+        return;
+    case K::I8Vec3:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8_SINT, O);
+        return;
+    case K::I8Vec4:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SINT, O);
+        return;
+    case K::I8Mat2:
+        push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_SINT);
+        return;
+    case K::I8Mat3:
+        push_matrix_cols(out, L, B, O, 3, 3, VK_FORMAT_R8G8B8_SINT);
+        return;
+    case K::I8Mat4:
+        push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_SINT);
+        return;
+
+    case K::U8:
+        push_attr(out, L, B, VK_FORMAT_R8_UINT, O);
+        return;
+    case K::U8Vec2:
+        push_attr(out, L, B, VK_FORMAT_R8G8_UINT, O);
+        return;
+    case K::U8Vec3:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8_UINT, O);
+        return;
+    case K::U8Vec4:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UINT, O);
+        return;
+    case K::U8Mat2:
+        push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_UINT);
+        return;
+    case K::U8Mat3:
+        push_matrix_cols(out, L, B, O, 3, 3, VK_FORMAT_R8G8B8_UINT);
+        return;
+    case K::U8Mat4:
+        push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_UINT);
+        return;
+
+    case K::Unorm8:
+        push_attr(out, L, B, VK_FORMAT_R8_UNORM, O);
+        return;
+    case K::Unorm8Vec2:
+        push_attr(out, L, B, VK_FORMAT_R8G8_UNORM, O);
+        return;
+    case K::Unorm8Vec3:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8_UNORM, O);
+        return;
+    case K::Unorm8Vec4:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UNORM, O);
+        return;
+
+    case K::Snorm8:
+        push_attr(out, L, B, VK_FORMAT_R8_SNORM, O);
+        return;
+    case K::Snorm8Vec2:
+        push_attr(out, L, B, VK_FORMAT_R8G8_SNORM, O);
+        return;
+    case K::Snorm8Vec3:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8_SNORM, O);
+        return;
+    case K::Snorm8Vec4:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SNORM, O);
+        return;
+
+    case K::Unorm16:
+        push_attr(out, L, B, VK_FORMAT_R16_UNORM, O);
+        return;
+    case K::Unorm16Vec2:
+        push_attr(out, L, B, VK_FORMAT_R16G16_UNORM, O);
+        return;
+    case K::Unorm16Vec3:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16_UNORM, O);
+        return;
+    case K::Unorm16Vec4:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UNORM, O);
+        return;
+
+    case K::Snorm16:
+        push_attr(out, L, B, VK_FORMAT_R16_SNORM, O);
+        return;
+    case K::Snorm16Vec2:
+        push_attr(out, L, B, VK_FORMAT_R16G16_SNORM, O);
+        return;
+    case K::Snorm16Vec3:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16_SNORM, O);
+        return;
+    case K::Snorm16Vec4:
+        push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SNORM, O);
+        return;
+
+    case K::Srgb8:
+        push_attr(out, L, B, VK_FORMAT_R8_SRGB, O);
+        return;
+    case K::Srgb8Vec2:
+        push_attr(out, L, B, VK_FORMAT_R8G8_SRGB, O);
+        return;
+    case K::Srgb8Vec3:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8_SRGB, O);
+        return;
+    case K::Srgb8Vec4:
+        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SRGB, O);
+        return;
+    default:
+        return;
+    }
+}
+
+} // namespace
 
 // --- PipelineLayout ---
 
@@ -154,13 +463,13 @@ bool GraphicsPipeline::create(const Context &ctx,
     device_ = ctx.device();
 
     std::vector<VkPipelineShaderStageCreateInfo> stageInfos(
-        config.stages.size());
-    for (size_t i { 0 }; i < config.stages.size(); ++i) {
+        config.shaderStages.size());
+    for (size_t i { 0 }; i < config.shaderStages.size(); ++i) {
         stageInfos[i].sType =
             VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stageInfos[i].stage = config.stages[i].stage;
-        stageInfos[i].module = config.stages[i].module;
-        stageInfos[i].pName = config.stages[i].entryPoint;
+        stageInfos[i].stage = config.shaderStages[i].stage;
+        stageInfos[i].module = config.shaderStages[i].module;
+        stageInfos[i].pName = config.shaderStages[i].entryPoint;
     }
 
     std::vector<VkVertexInputBindingDescription> bindings(
@@ -168,16 +477,14 @@ bool GraphicsPipeline::create(const Context &ctx,
     for (size_t i { 0 }; i < config.vertexBindings.size(); ++i) {
         bindings[i].binding = config.vertexBindings[i].binding;
         bindings[i].stride = config.vertexBindings[i].stride;
-        bindings[i].inputRate = config.vertexBindings[i].inputRate;
+        bindings[i].inputRate =
+            to_vk_vertex_input_rate(config.vertexBindings[i].inputRate);
     }
 
-    std::vector<VkVertexInputAttributeDescription> attrs(
-        config.vertexAttributes.size());
-    for (size_t i { 0 }; i < config.vertexAttributes.size(); ++i) {
-        attrs[i].location = config.vertexAttributes[i].location;
-        attrs[i].binding = config.vertexAttributes[i].binding;
-        attrs[i].format = config.vertexAttributes[i].format;
-        attrs[i].offset = config.vertexAttributes[i].offset;
+    std::vector<VkVertexInputAttributeDescription> attrs;
+    attrs.reserve(config.vertexAttributes.size() * 4);
+    for (const VertexInputAttribute &va : config.vertexAttributes) {
+        append_vertex_input_attributes(va, attrs);
     }
 
     VkPipelineVertexInputStateCreateInfo vertexInput {
@@ -284,6 +591,15 @@ bool GraphicsPipeline::create(const Context &ctx,
                         static_cast<int>(result));
     }
     return result == VK_SUCCESS;
+}
+
+bool GraphicsPipeline::create(const Context &ctx,
+                              const PipelineLayout &pipelineLayout,
+                              const RenderPass &renderPass, uint32_t subpassIndex,
+                              const GraphicsPipelineConfig &config,
+                              VkPipelineCache cache) {
+    return create(ctx, pipelineLayout.handle(), renderPass.handle(), subpassIndex,
+                  config, cache);
 }
 
 void GraphicsPipeline::destroy_() {

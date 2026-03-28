@@ -362,16 +362,18 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
                                    tex_spot_.view(), tex_spot_.sampler());
 
     render::GraphicsPipelineConfig icon_cfg {};
-    icon_cfg.stages.push_back(
+    icon_cfg.shaderStages.push_back(
         { icon_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    icon_cfg.stages.push_back(
+    icon_cfg.shaderStages.push_back(
         { icon_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     icon_cfg.vertexBindings.push_back(
-        { 0, sizeof(BillboardVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(BillboardVertex), render::VertexInputRate::PerVertex });
     icon_cfg.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, pos) });
+        { 0, 0, render::VertexAttributeKind::F32Vec2,
+          offsetof(BillboardVertex, pos) });
     icon_cfg.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, uv) });
+        { 1, 0, render::VertexAttributeKind::F32Vec2,
+          offsetof(BillboardVertex, uv) });
     icon_cfg.depthTest = true;
     icon_cfg.depthWrite = false;
     icon_cfg.depthCompareOp = VK_COMPARE_OP_LESS;
@@ -396,17 +398,19 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     }
 
     render::GraphicsPipelineConfig dbg_cfg {};
-    dbg_cfg.stages.push_back(
+    dbg_cfg.shaderStages.push_back(
         { dbg_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    dbg_cfg.stages.push_back(
+    dbg_cfg.shaderStages.push_back(
         { dbg_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     dbg_cfg.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     dbg_cfg.vertexBindings.push_back(
-        { 0, sizeof(LineV), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(LineV), render::VertexInputRate::PerVertex });
     dbg_cfg.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineV, position) });
+        { 0, 0, render::VertexAttributeKind::F32Vec3,
+          offsetof(LineV, position) });
     dbg_cfg.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(LineV, color) });
+        { 1, 0, render::VertexAttributeKind::F32Vec4,
+          offsetof(LineV, color) });
     dbg_cfg.depthTest = true;
     dbg_cfg.depthWrite = false;
     dbg_cfg.depthCompareOp = VK_COMPARE_OP_LESS;

@@ -50,8 +50,9 @@ void pack_lights_for_ubo(const ::entt::registry &registry, GPULight *out_lights,
         items.push_back(Item { sort_key, e });
     }
 
-    std::sort(items.begin(), items.end(),
-              [](const Item &a, const Item &b) { return a.sort_key < b.sort_key; });
+    std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
+        return a.sort_key < b.sort_key;
+    });
 
     for (const Item &it : items) {
         if (out_count >= kMaxLightsUbo) {
@@ -81,9 +82,10 @@ void pack_lights_for_ubo(const ::entt::registry &registry, GPULight *out_lights,
         }
         case LightType::Point: {
             g.position = glm::vec4(world_translation(world),
-                                     static_cast<float>(light.type));
+                                   static_cast<float>(light.type));
             g.direction = glm::vec4(0.0f);
-            g.params = glm::vec4(std::max(light.range, 1e-4f), 0.0f, 0.0f, 0.0f);
+            g.params =
+                glm::vec4(std::max(light.range, 1e-4f), 0.0f, 0.0f, 0.0f);
             break;
         }
         case LightType::Spot: {
@@ -98,8 +100,8 @@ void pack_lights_for_ubo(const ::entt::registry &registry, GPULight *out_lights,
             const float a1 = light.outer_radians;
             const float inner_a = std::min(a0, a1);
             const float outer_a = std::max(a0, a1);
-            g.position =
-                glm::vec4(world_translation(world), static_cast<float>(light.type));
+            g.position = glm::vec4(world_translation(world),
+                                   static_cast<float>(light.type));
             g.direction = glm::vec4(waxis, 0.0f);
             g.params = glm::vec4(std::max(light.range, 1e-4f),
                                  std::cos(outer_a), std::cos(inner_a), 0.0f);

@@ -168,7 +168,7 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     {
         const float size = info.cjk_font_size_pixels > 0.0f
                                ? info.cjk_font_size_pixels
-                               : 18.0f;
+                               : 18.0F;
         const bool has_sc = info.cjk_font_ttf_path != nullptr &&
                             info.cjk_font_ttf_path[0] != '\0';
         const bool has_jp_merge =
@@ -230,10 +230,13 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
     vulkanInfo.Device = info.ctx->device();
     vulkanInfo.QueueFamily = info.ctx->graphics_queue_family();
     vulkanInfo.Queue = info.ctx->graphics_queue();
+    // TODO: DescriptorPool 和 DescriptorPoolSize 二选一
+    // 如果提供了 DescriptorPool 则使用你提供的
+    // 如果提供了 DescriptorPoolSize ImGui 会自己创建
     vulkanInfo.DescriptorPool = VK_NULL_HANDLE;
     vulkanInfo.DescriptorPoolSize = 1000;
     vulkanInfo.RenderPass = info.renderPass;
-    vulkanInfo.MinImageCount = 2;
+    vulkanInfo.MinImageCount = info.swapchain->image_count();
     vulkanInfo.ImageCount = info.swapchain->image_count();
     vulkanInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     vulkanInfo.CheckVkResultFn = [](VkResult err) {
@@ -269,9 +272,10 @@ void imgui_backend_shutdown() {
     ImGui::DestroyContext();
 }
 
-void imgui_backend_set_min_image_count(uint32_t /*minImageCount*/) {
+void imgui_backend_set_min_image_count(uint32_t minImageCount) {
     // 不调用 ImGui_ImplVulkan_SetMinImageCount：当 swapchain 从 2 图变为 3 图时
     // 会触发 IM_ASSERT(0)，ImGui 暂不支持此运行时变更，保持初始化时的值即可
+    ImGui_ImplVulkan_SetMinImageCount(minImageCount);
 }
 
 void imgui_backend_new_frame() {
@@ -294,8 +298,9 @@ void *imgui_backend_add_texture(VkSampler sampler, VkImageView imageView,
 }
 
 void imgui_backend_remove_texture(void *textureId) {
-    if (textureId)
+    if (textureId) {
         ImGui_ImplVulkan_RemoveTexture(static_cast<VkDescriptorSet>(textureId));
+    }
 }
 
 } // namespace lumen::ui

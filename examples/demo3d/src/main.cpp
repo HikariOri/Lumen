@@ -15,10 +15,10 @@
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
+#include "render/material_texture_mask.hpp"
 #include "render/pass/render_graph.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
-#include "render/material_texture_mask.hpp"
 #include "render/pbr_material_ubo.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/cubemap_file_loader.hpp"
@@ -125,8 +125,8 @@ bool path_ends_with_ci(std::string_view s, std::string_view ext) {
     for (size_t i = 0; i < ext.size(); ++i) {
         const char a = static_cast<char>(std::tolower(
             static_cast<unsigned char>(s[s.size() - ext.size() + i])));
-        const char b = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(ext[i])));
+        const char b =
+            static_cast<char>(std::tolower(static_cast<unsigned char>(ext[i])));
         if (a != b) {
             return false;
         }
@@ -282,18 +282,14 @@ static int run_demo3d() {
         return -1;
     }
 
-    auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctxConfig;
-    ctxConfig.instanceExtensions.assign(extensions.begin(), extensions.end());
-
     lumen::render::Context ctx;
-    if (!ctx.init_instance(ctxConfig)) {
+    if (!ctx.init_instance(ctxConfig, window)) {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 初始化失败");
         return -1;
     }
 
-    lumen::render::Surface surface(
-        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(ctx, window);
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Surface 创建失败");
         return -1;
@@ -322,6 +318,17 @@ static int run_demo3d() {
         return -1;
     }
 
+    lumen::render::RenderPassConfig offscreenRpCfg;
+    offscreenRpCfg.useDepth = true;
+    offscreenRpCfg.colorAttachment.format = swapchain.image_format();
+    offscreenRpCfg.colorAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    lumen::render::RenderPass offscreenRenderPass;
+    if (!offscreenRenderPass.create(ctx.device(), offscreenRpCfg)) {
+        LUMEN_APP_LOG_ERROR("离屏 RenderPass 创建失败");
+        return -1;
+    }
+
     // 离屏渲染目标：Scene → OffscreenRenderTarget → ImGui 采样
     lumen::render::OffscreenRenderTargetConfig sceneTargetConfig;
     sceneTargetConfig.width = static_cast<uint32_t>(w);
@@ -331,7 +338,7 @@ static int run_demo3d() {
     sceneTargetConfig.colorFinalLayout =
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     lumen::render::OffscreenRenderTarget sceneTarget;
-    if (!sceneTarget.create(ctx, sceneTargetConfig)) {
+    if (!sceneTarget.create(ctx, sceneTargetConfig, &offscreenRenderPass)) {
         LUMEN_APP_LOG_ERROR("场景离屏目标创建失败");
         return -1;
     }
@@ -347,9 +354,9 @@ static int run_demo3d() {
     lumen::render::OffscreenRenderTarget wireframeTarget;
     lumen::render::OffscreenRenderTarget normalTarget;
     lumen::render::OffscreenRenderTarget depthTarget;
-    if (!wireframeTarget.create(ctx, auxConfig) ||
-        !normalTarget.create(ctx, auxConfig) ||
-        !depthTarget.create(ctx, auxConfig)) {
+    if (!wireframeTarget.create(ctx, auxConfig, &offscreenRenderPass) ||
+        !normalTarget.create(ctx, auxConfig, &offscreenRenderPass) ||
+        !depthTarget.create(ctx, auxConfig, &offscreenRenderPass)) {
         LUMEN_APP_LOG_ERROR("辅助视口创建失败");
         return -1;
     }
@@ -424,11 +431,12 @@ static int run_demo3d() {
     const std::string gltfPath = lumen::core::get_resource_path(kGltfPath);
     const std::string objPath = lumen::core::get_resource_path(kObjPath);
     if (lumen::core::load_gltf(gltfPath, mesh, gltf_material, &gltf_submeshes,
-                                &gltf_materials)) {
+                               &gltf_materials)) {
         loaded_from_gltf = true;
     } else if (!lumen::core::load_obj(objPath, mesh)) {
-        LUMEN_APP_LOG_ERROR("模型加载失败（glTF 与 OBJ 均失败） glTF: {} OBJ: {}",
-                            gltfPath, objPath);
+        LUMEN_APP_LOG_ERROR(
+            "模型加载失败（glTF 与 OBJ 均失败） glTF: {} OBJ: {}", gltfPath,
+            objPath);
         return -1;
     }
     if (mesh.vertices.empty() || mesh.indices.empty()) {
@@ -622,21 +630,24 @@ static int run_demo3d() {
                           descriptorSetsScene[i]);
         descPool.allocate(ctx.device(), materialDescLayout.handle(),
                           descriptorSetsMaterial[i]);
-        lumen::render::write_descriptor_buffer(
-            ctx.device(), descriptorSetsScene[i], 0,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
-            sizeof(SceneUbo));
+        lumen::render::write_descriptor_set(
+            ctx.device(), descriptorSetsScene[i],
+            { { .binding = 0,
+                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .buffer = uniformBuffers[i].handle(),
+                .offset = 0,
+                .range = sizeof(SceneUbo) } },
+            { { .binding = 1,
+                .imageView = env_cubemap.view(),
+                .sampler = env_cubemap.sampler() },
+              { .binding = 2,
+                .imageView = brdf_lut_tex.view(),
+                .sampler = brdf_lut_tex.sampler() } });
         lumen::render::write_descriptor_buffer(
             ctx.device(), descriptorSetsMaterial[i], 0,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             materialUniformBuffers[i].handle(), 0,
             sizeof(lumen::render::PbrMaterialUbo));
-        lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSetsScene[i], 1, env_cubemap.view(),
-            env_cubemap.sampler());
-        lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSetsScene[i], 2, brdf_lut_tex.view(),
-            brdf_lut_tex.sampler());
         write_material_descriptor_images(
             ctx.device(), descriptorSetsMaterial[i], placeholder_textures,
             &mat_tex_albedo,
@@ -731,18 +742,21 @@ static int run_demo3d() {
         { pushRange });
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { vertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    pipeConfig.stages.push_back(
+    pipeConfig.shaderStages.push_back(
         { fragShader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     pipeConfig.vertexBindings.push_back(
-        { 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(Vertex), lumen::render::VertexInputRate::PerVertex });
     pipeConfig.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position) });
+        { 0, 0, lumen::render::VertexAttributeKind::F32Vec3,
+          offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
+        { 1, 0, lumen::render::VertexAttributeKind::F32Vec2,
+          offsetof(Vertex, uv) });
     pipeConfig.vertexAttributes.push_back(
-        { 2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal) });
+        { 2, 0, lumen::render::VertexAttributeKind::F32Vec3,
+          offsetof(Vertex, normal) });
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
     pipeConfig.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -750,17 +764,16 @@ static int run_demo3d() {
         VK_FRONT_FACE_COUNTER_CLOCKWISE; // Blender OBJ 外表面为 CCW
 
     lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipelineLayout.handle(),
-                         sceneTarget.render_pass(), 0, pipeConfig)) {
+    if (!pipeline.create(ctx, pipelineLayout, sceneTarget.render_pass_ref(), 0,
+                         pipeConfig)) {
         return -1;
     }
 
     lumen::render::GraphicsPipelineConfig pipe_config_nocull = pipeConfig;
     pipe_config_nocull.cullMode = VK_CULL_MODE_NONE;
     lumen::render::GraphicsPipeline pipeline_nocull;
-    if (!pipeline_nocull.create(ctx, pipelineLayout.handle(),
-                                sceneTarget.render_pass(), 0,
-                                pipe_config_nocull)) {
+    if (!pipeline_nocull.create(ctx, pipelineLayout, sceneTarget.render_pass_ref(),
+                                0, pipe_config_nocull)) {
         return -1;
     }
 
@@ -769,21 +782,20 @@ static int run_demo3d() {
     pipe_config_blend.alphaBlend = true;
     pipe_config_blend.depthWrite = false;
     lumen::render::GraphicsPipeline pipeline_blend;
-    if (!pipeline_blend.create(ctx, pipelineLayout.handle(),
-                               sceneTarget.render_pass(), 0,
-                               pipe_config_blend)) {
+    if (!pipeline_blend.create(ctx, pipelineLayout, sceneTarget.render_pass_ref(),
+                               0, pipe_config_blend)) {
         return -1;
     }
 
     lumen::render::GraphicsPipelineConfig sky_pipe_config {};
-    sky_pipe_config.stages.push_back(
+    sky_pipe_config.shaderStages.push_back(
         { sky_vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    sky_pipe_config.stages.push_back(
+    sky_pipe_config.shaderStages.push_back(
         { sky_frag_shader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     sky_pipe_config.vertexBindings.push_back(
-        { 0, sizeof(glm::vec3), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(glm::vec3), lumen::render::VertexInputRate::PerVertex });
     sky_pipe_config.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 });
+        { 0, 0, lumen::render::VertexAttributeKind::F32Vec3, 0 });
     sky_pipe_config.depthTest = true;
     sky_pipe_config.depthWrite = false;
     sky_pipe_config.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -791,8 +803,8 @@ static int run_demo3d() {
     sky_pipe_config.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     lumen::render::GraphicsPipeline sky_pipeline;
-    if (!sky_pipeline.create(ctx, pipelineLayout.handle(),
-                             sceneTarget.render_pass(), 0, sky_pipe_config)) {
+    if (!sky_pipeline.create(ctx, pipelineLayout, sceneTarget.render_pass_ref(),
+                             0, sky_pipe_config)) {
         LUMEN_APP_LOG_ERROR("天空盒管线创建失败");
         return -1;
     }
@@ -805,17 +817,18 @@ static int run_demo3d() {
     grid_pipeline_layout.create(ctx, {}, { grid_push });
 
     lumen::render::GraphicsPipelineConfig grid_pipe_config {};
-    grid_pipe_config.stages.push_back(
+    grid_pipe_config.shaderStages.push_back(
         { grid_vert_shader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    grid_pipe_config.stages.push_back(
+    grid_pipe_config.shaderStages.push_back(
         { grid_frag_shader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     grid_pipe_config.vertexBindings.push_back(
-        { 0, sizeof(GroundGridVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(GroundGridVertex), lumen::render::VertexInputRate::PerVertex });
     grid_pipe_config.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+        { 0, 0, lumen::render::VertexAttributeKind::F32Vec3,
           offsetof(GroundGridVertex, position) });
     grid_pipe_config.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32_SFLOAT, offsetof(GroundGridVertex, kind) });
+        { 1, 0, lumen::render::VertexAttributeKind::F32,
+          offsetof(GroundGridVertex, kind) });
     grid_pipe_config.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     grid_pipe_config.depthTest = true;
     grid_pipe_config.depthWrite = true;
@@ -824,8 +837,8 @@ static int run_demo3d() {
     grid_pipe_config.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     lumen::render::GraphicsPipeline grid_pipeline;
-    if (!grid_pipeline.create(ctx, grid_pipeline_layout.handle(),
-                              sceneTarget.render_pass(), 0, grid_pipe_config)) {
+    if (!grid_pipeline.create(ctx, grid_pipeline_layout,
+                              sceneTarget.render_pass_ref(), 0, grid_pipe_config)) {
         LUMEN_APP_LOG_ERROR("地面网格管线创建失败");
         return -1;
     }
@@ -834,9 +847,8 @@ static int run_demo3d() {
     wireframeConfig.polygonMode = VK_POLYGON_MODE_LINE;
     wireframeConfig.cullMode = VK_CULL_MODE_NONE;
     lumen::render::GraphicsPipeline wireframePipeline;
-    if (!wireframePipeline.create(ctx, pipelineLayout.handle(),
-                                  sceneTarget.render_pass(), 0,
-                                  wireframeConfig)) {
+    if (!wireframePipeline.create(ctx, pipelineLayout, sceneTarget.render_pass_ref(),
+                                  0, wireframeConfig)) {
         return -1;
     }
 
@@ -1018,8 +1030,8 @@ static int run_demo3d() {
                 const std::string rp = resolve_asset_path(p);
                 if (path_ends_with_ci(rp, ".ktx") ||
                     path_ends_with_ci(rp, ".ktx2")) {
-                    return t.create_from_ktx_file(ctx, rp.c_str(),
-                                                  ctx.graphics_queue(), cmdPool);
+                    return t.create_from_ktx_file(
+                        ctx, rp.c_str(), ctx.graphics_queue(), cmdPool);
                 }
                 return t.create_from_file(ctx, rp.c_str(), ctx.graphics_queue(),
                                           cmdPool);
@@ -1037,12 +1049,11 @@ static int run_demo3d() {
                     bool ok = false;
                     if (path_ends_with_ci(rp, ".ktx") ||
                         path_ends_with_ci(rp, ".ktx2")) {
-                        ok = tex.create_from_ktx_file(ctx, rp.c_str(),
-                                                      ctx.graphics_queue(),
-                                                      cmdPool);
+                        ok = tex.create_from_ktx_file(
+                            ctx, rp.c_str(), ctx.graphics_queue(), cmdPool);
                     } else {
-                        ok = tex.create_from_file(ctx, rp.c_str(),
-                                                  ctx.graphics_queue(), cmdPool);
+                        ok = tex.create_from_file(
+                            ctx, rp.c_str(), ctx.graphics_queue(), cmdPool);
                     }
                     if (ok) {
                         gltf_tex_cache.emplace(rel, std::move(tex));
@@ -1190,9 +1201,9 @@ static int run_demo3d() {
                         }
                     }
                 }
-                VkPipeline activePipeline =
-                    (renderMode == 1u) ? wireframePipeline.handle()
-                                       : mesh_fill_pipeline;
+                VkPipeline activePipeline = (renderMode == 1u)
+                                                ? wireframePipeline.handle()
+                                                : mesh_fill_pipeline;
                 PushConstants pushData {};
                 pushData.mode = renderMode;
                 pushData.modelColor = modelColor;
@@ -1231,19 +1242,17 @@ static int run_demo3d() {
                 vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                                      indexBuffer.vk_index_type());
 
-                auto tex_from_cache =
-                    [&](const std::string &rel)
+                auto tex_from_cache = [&](const std::string &rel)
                     -> const lumen::render::Texture * {
-                        if (rel.empty()) {
-                            return nullptr;
-                        }
-                        auto it = gltf_tex_cache.find(rel);
-                        if (it == gltf_tex_cache.end() ||
-                            !it->second.is_valid()) {
-                            return nullptr;
-                        }
-                        return &it->second;
-                    };
+                    if (rel.empty()) {
+                        return nullptr;
+                    }
+                    auto it = gltf_tex_cache.find(rel);
+                    if (it == gltf_tex_cache.end() || !it->second.is_valid()) {
+                        return nullptr;
+                    }
+                    return &it->second;
+                };
 
                 if (use_gltf_multimat) {
                     for (const auto &sm : gltf_submeshes) {
@@ -1273,10 +1282,9 @@ static int run_demo3d() {
                         sub_mat_ubo.mr_ao_factors = glm::vec4(
                             sm_mc.metallic_factor, sm_mc.roughness_factor,
                             sm_mc.ao_factor, 0.0f);
-                        sub_mat_ubo.emissive_factor =
-                            glm::vec4(sm_mc.emissive_factor.x,
-                                      sm_mc.emissive_factor.y,
-                                      sm_mc.emissive_factor.z, 0.0f);
+                        sub_mat_ubo.emissive_factor = glm::vec4(
+                            sm_mc.emissive_factor.x, sm_mc.emissive_factor.y,
+                            sm_mc.emissive_factor.z, 0.0f);
                         const std::uint32_t sub_tex_mask =
                             lumen::render::material_texture_mask_from_component(
                                 sm_mc);
@@ -1286,11 +1294,11 @@ static int run_demo3d() {
                             sm_mc.alpha_cutoff,
                             lumen::render::uint_bits_to_float(sub_tex_mask),
                             0.0f);
-                        materialUniformBuffers[currentFrame].update(sub_mat_ubo);
+                        materialUniformBuffers[currentFrame].update(
+                            sub_mat_ubo);
 
                         write_material_descriptor_images(
-                            ctx.device(),
-                            descriptorSetsMaterial[currentFrame],
+                            ctx.device(), descriptorSetsMaterial[currentFrame],
                             placeholder_textures,
                             tex_from_cache(sm_mc.albedo_path),
                             tex_from_cache(sm_mc.normal_path),
@@ -1300,24 +1308,26 @@ static int run_demo3d() {
 
                         VkDescriptorSet mesh_sets_multi[2] = {
                             descriptorSetsScene[currentFrame],
-                            descriptorSetsMaterial[currentFrame]};
-                        vkCmdBindDescriptorSets(
-                            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout.handle(), 0, 2, mesh_sets_multi,
-                            0, nullptr);
+                            descriptorSetsMaterial[currentFrame]
+                        };
+                        vkCmdBindDescriptorSets(cmd,
+                                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                pipelineLayout.handle(), 0, 2,
+                                                mesh_sets_multi, 0, nullptr);
 
-                        vkCmdDrawIndexed(cmd, sm.index_count, 1,
-                                         sm.first_index, 0, 0);
+                        vkCmdDrawIndexed(cmd, sm.index_count, 1, sm.first_index,
+                                         0, 0);
                     }
                 } else {
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       activePipeline);
                     VkDescriptorSet mesh_sets[2] = {
                         descriptorSetsScene[currentFrame],
-                        descriptorSetsMaterial[currentFrame]};
+                        descriptorSetsMaterial[currentFrame]
+                    };
                     vkCmdBindDescriptorSets(
-                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout.handle(),
-                        0, 2, mesh_sets, 0, nullptr);
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        pipelineLayout.handle(), 0, 2, mesh_sets, 0, nullptr);
                     vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
                 }
 
@@ -1380,19 +1390,18 @@ static int run_demo3d() {
                     vkCmdBindIndexBuffer(cmd, indexBuffer.handle(), 0,
                                          indexBuffer.vk_index_type());
 
-                    auto tex_from_cache_aux =
-                        [&](const std::string &rel)
+                    auto tex_from_cache_aux = [&](const std::string &rel)
                         -> const lumen::render::Texture * {
-                            if (rel.empty()) {
-                                return nullptr;
-                            }
-                            auto it = gltf_tex_cache.find(rel);
-                            if (it == gltf_tex_cache.end() ||
-                                !it->second.is_valid()) {
-                                return nullptr;
-                            }
-                            return &it->second;
-                        };
+                        if (rel.empty()) {
+                            return nullptr;
+                        }
+                        auto it = gltf_tex_cache.find(rel);
+                        if (it == gltf_tex_cache.end() ||
+                            !it->second.is_valid()) {
+                            return nullptr;
+                        }
+                        return &it->second;
+                    };
 
                     if (use_gltf_multimat) {
                         for (const auto &sm : gltf_submeshes) {
@@ -1410,16 +1419,15 @@ static int run_demo3d() {
                             sub_mat_ubo.mr_ao_factors = glm::vec4(
                                 sm_mc.metallic_factor, sm_mc.roughness_factor,
                                 sm_mc.ao_factor, 0.0f);
-                            sub_mat_ubo.emissive_factor = glm::vec4(
-                                sm_mc.emissive_factor.x,
-                                sm_mc.emissive_factor.y,
-                                sm_mc.emissive_factor.z, 0.0f);
-                            const std::uint32_t sub_tex_mask =
-                                lumen::render::material_texture_mask_from_component(
-                                    sm_mc);
+                            sub_mat_ubo.emissive_factor =
+                                glm::vec4(sm_mc.emissive_factor.x,
+                                          sm_mc.emissive_factor.y,
+                                          sm_mc.emissive_factor.z, 0.0f);
+                            const std::uint32_t sub_tex_mask = lumen::render::
+                                material_texture_mask_from_component(sm_mc);
                             sub_mat_ubo.shader_params = glm::vec4(
-                                static_cast<float>(static_cast<unsigned>(
-                                    sm_mc.alpha_mode)),
+                                static_cast<float>(
+                                    static_cast<unsigned>(sm_mc.alpha_mode)),
                                 sm_mc.alpha_cutoff,
                                 lumen::render::uint_bits_to_float(sub_tex_mask),
                                 0.0f);
@@ -1439,11 +1447,12 @@ static int run_demo3d() {
 
                             VkDescriptorSet aux_sets_loop[2] = {
                                 descriptorSetsScene[currentFrame],
-                                descriptorSetsMaterial[currentFrame]};
+                                descriptorSetsMaterial[currentFrame]
+                            };
                             vkCmdBindDescriptorSets(
                                 cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout.handle(), 0, 2,
-                                aux_sets_loop, 0, nullptr);
+                                pipelineLayout.handle(), 0, 2, aux_sets_loop, 0,
+                                nullptr);
 
                             vkCmdDrawIndexed(cmd, sm.index_count, 1,
                                              sm.first_index, 0, 0);
@@ -1451,11 +1460,12 @@ static int run_demo3d() {
                     } else {
                         VkDescriptorSet aux_sets[2] = {
                             descriptorSetsScene[currentFrame],
-                            descriptorSetsMaterial[currentFrame]};
-                        vkCmdBindDescriptorSets(
-                            cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineLayout.handle(), 0, 2, aux_sets, 0,
-                            nullptr);
+                            descriptorSetsMaterial[currentFrame]
+                        };
+                        vkCmdBindDescriptorSets(cmd,
+                                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                pipelineLayout.handle(), 0, 2,
+                                                aux_sets, 0, nullptr);
                         vkCmdDrawIndexed(cmd, indexCount, 1, 0, 0, 0);
                     }
                     vkCmdEndRenderPass(cmd);
@@ -1695,6 +1705,7 @@ static int run_demo3d() {
         fbWidth = r.width;
         fbHeight = r.height;
         needRecreateSwapchain = true;
+        lumen::ui::imgui_backend_set_min_image_count(3);
     });
     pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
         const auto sceneHover = lumen::ui::viewport_mouse_state(
@@ -1725,8 +1736,8 @@ static int run_demo3d() {
                 // view 仍被 framebuffer 引用时被销毁会触发
                 // VUID-vkDestroyImageView-01026
                 lumen::render::recreate_swapchain_resources(
-                    ctx, swapchain, framebuffers, frameSync,
-                    renderPass.handle(), static_cast<uint32_t>(fbWidth),
+                    ctx, swapchain, framebuffers, frameSync, renderPass,
+                    static_cast<uint32_t>(fbWidth),
                     static_cast<uint32_t>(fbHeight), kMaxFramesInFlight,
                     newDepth.view());
                 depthImage = std::move(newDepth);
@@ -1734,7 +1745,7 @@ static int run_demo3d() {
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(sceneTextureId));
 
-                sceneTarget.resize(ctx, static_cast<uint32_t>(fbWidth),
+                sceneTarget.resize(static_cast<uint32_t>(fbWidth),
                                    static_cast<uint32_t>(fbHeight));
                 sceneTextureId = reinterpret_cast<ImTextureID>(
                     lumen::ui::imgui_backend_add_texture(
@@ -1831,7 +1842,7 @@ static int run_demo3d() {
             needDepthResize) {
             ctx.wait_idle();
             if (needSceneResize) {
-                sceneTarget.resize(ctx, nextSceneW, nextSceneH);
+                sceneTarget.resize(nextSceneW, nextSceneH);
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(sceneTextureId));
                 sceneTextureId = reinterpret_cast<ImTextureID>(
@@ -1844,7 +1855,7 @@ static int run_demo3d() {
                     sceneTarget.depth_image(), true);
             }
             if (needWireframeResize) {
-                wireframeTarget.resize(ctx, nextWireframeW, nextWireframeH);
+                wireframeTarget.resize(nextWireframeW, nextWireframeH);
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(wireframeTextureId));
                 wireframeTextureId = reinterpret_cast<ImTextureID>(
@@ -1857,7 +1868,7 @@ static int run_demo3d() {
                     wireframeTarget.depth_image(), true);
             }
             if (needNormalResize) {
-                normalTarget.resize(ctx, nextNormalW, nextNormalH);
+                normalTarget.resize(nextNormalW, nextNormalH);
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(normalTextureId));
                 normalTextureId = reinterpret_cast<ImTextureID>(
@@ -1870,7 +1881,7 @@ static int run_demo3d() {
                     normalTarget.depth_image(), true);
             }
             if (needDepthResize) {
-                depthTarget.resize(ctx, nextDepthW, nextDepthH);
+                depthTarget.resize(nextDepthW, nextDepthH);
                 lumen::ui::imgui_backend_remove_texture(
                     reinterpret_cast<void *>(depthTextureId));
                 depthTextureId = reinterpret_cast<ImTextureID>(
@@ -1974,20 +1985,18 @@ static int run_demo3d() {
                     ecs_scene.registry().get<lumen::scene::MaterialComponent>(
                         drawable);
                 matUbo.base_color_factor = mc.base_color_factor;
-                matUbo.mr_ao_factors = glm::vec4(
-                    mc.metallic_factor, mc.roughness_factor, mc.ao_factor,
-                    0.0f);
+                matUbo.mr_ao_factors =
+                    glm::vec4(mc.metallic_factor, mc.roughness_factor,
+                              mc.ao_factor, 0.0f);
                 matUbo.emissive_factor =
                     glm::vec4(mc.emissive_factor.x, mc.emissive_factor.y,
                               mc.emissive_factor.z, 0.0f);
                 const std::uint32_t tex_mask =
                     lumen::render::material_texture_mask_from_component(mc);
-                matUbo.shader_params =
-                    glm::vec4(static_cast<float>(static_cast<unsigned>(
-                                  mc.alpha_mode)),
-                              mc.alpha_cutoff,
-                              lumen::render::uint_bits_to_float(tex_mask),
-                              0.0f);
+                matUbo.shader_params = glm::vec4(
+                    static_cast<float>(static_cast<unsigned>(mc.alpha_mode)),
+                    mc.alpha_cutoff,
+                    lumen::render::uint_bits_to_float(tex_mask), 0.0f);
             } else {
                 matUbo.base_color_factor = glm::vec4(1.0f);
                 matUbo.mr_ao_factors = glm::vec4(0.0f, 0.42f, 1.0f, 0.0f);

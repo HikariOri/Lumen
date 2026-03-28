@@ -16,17 +16,33 @@
 namespace lumen {
 namespace scene {
 
+struct IDComponent {
+    uint64_t uuid = 0;
+};
+
+struct TagComponent {
+    std::string Tag;
+};
+
+struct RelationshipComponent {
+    uint64_t parent = 0;
+    std::vector<uint64_t> children;
+};
+
 /**
- * @brief 场景对象 ID：与 `entt::entity` 无关，供编辑器、序列化、**GPU Picking** 共用
+ * @brief 场景对象 ID：与 `entt::entity` 无关，供编辑器、序列化、**GPU Picking**
+ * 共用
  *
  * **约定（为后续 Pick 预留）**
- * - `id` 为 **`std::uint32_t`**，可直接写入 **R32_UINT** 离屏目标、`uint` push constant、
- *   或打包进 MRT（需注意编码与清除值）。
- * - **`kInvalid == 0`**：表示「无对象 / Pick 未命中 / 清除色」，**不得**分配给实体。
- * - 合法 ID 由 `Scene::create_entity` 从 **1** 起单调分配；销毁实体时从查找表中移除，**数值不回收**
- *   （避免与已记录的 Pick 结果或历史混淆）；若将来需要复用 ID，应单独改策略并更新本文档。
- * - 渲染/拾取 Pass 中：将本组件的 `id` 输出；读回像素后调用 `Scene::entity_from_object_id(id)`
- *   解析为 `entt::entity`。
+ * - `id` 为 **`std::uint32_t`**，可直接写入 **R32_UINT** 离屏目标、`uint` push
+ * constant、 或打包进 MRT（需注意编码与清除值）。
+ * - **`kInvalid == 0`**：表示「无对象 / Pick 未命中 /
+ * 清除色」，**不得**分配给实体。
+ * - 合法 ID 由 `Scene::create_entity` 从 **1**
+ * 起单调分配；销毁实体时从查找表中移除，**数值不回收** （避免与已记录的 Pick
+ * 结果或历史混淆）；若将来需要复用 ID，应单独改策略并更新本文档。
+ * - 渲染/拾取 Pass 中：将本组件的 `id` 输出；读回像素后调用
+ * `Scene::entity_from_object_id(id)` 解析为 `entt::entity`。
  */
 struct ObjectId {
     static constexpr std::uint32_t kInvalid { 0 };
@@ -106,9 +122,12 @@ enum class LightType : std::uint8_t {
  * @brief 统一光源组件（对应设计文档中的 `LightComponent` + 各子类型字段）
  *
  * 按 `type` 解释字段：
- * - **方向光**：`local_direction`（局部空间，**表面 → 光源**）、`color`、`intensity`；`Transform` 仅旋转影响方向。
- * - **点光**：`Transform` 平移为世界位置，`range` 为影响距离；`color`、`intensity`。
- * - **聚光**：`Transform` 为世界位置，`local_direction` 为锥轴（光发射方向，局部空间），`range`、`inner_radians` /
+ * - **方向光**：`local_direction`（局部空间，**表面 →
+ * 光源**）、`color`、`intensity`；`Transform` 仅旋转影响方向。
+ * - **点光**：`Transform` 平移为世界位置，`range`
+ * 为影响距离；`color`、`intensity`。
+ * - **聚光**：`Transform` 为世界位置，`local_direction`
+ * 为锥轴（光发射方向，局部空间），`range`、`inner_radians` /
  *   `outer_radians`（相对锥轴的半角，弧度，内 ≤ 外）；`color`、`intensity`。
  *
  * 点光衰减系数暂由 shader 固定；若需 per-light 衰减，可后续扩展本结构。
