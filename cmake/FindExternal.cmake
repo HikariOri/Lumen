@@ -30,9 +30,16 @@ find_package(uvw CONFIG REQUIRED)
 find_package(libuv CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
-find_package(spirv_cross_core CONFIG REQUIRED)
-find_package(spirv_cross_reflect CONFIG REQUIRED)
-find_package(spirv_cross_util CONFIG REQUIRED)
-find_package(spirv_cross_glsl CONFIG REQUIRED)
-find_package(spirv_cross_cpp CONFIG REQUIRED)
+
+if (EXISTS "${CMAKE_SOURCE_DIR}/third_party/spirv-cross/CMakeLists.txt")
+    message(STATUS "Using spirv-cross git submodule from ${CMAKE_SOURCE_DIR}/third_party/spirv-cross")
+else()
+    find_package(spirv_cross_core CONFIG REQUIRED)
+    find_package(spirv_cross_reflect CONFIG REQUIRED)
+    find_package(spirv_cross_util CONFIG REQUIRED)
+    find_package(spirv_cross_glsl CONFIG REQUIRED)
+    find_package(spirv_cross_cpp CONFIG REQUIRED)
+endif()
+
+
 

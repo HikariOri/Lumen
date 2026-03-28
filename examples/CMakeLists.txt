@@ -1,7 +1,4 @@
-add_subdirectory(demo3d)
-add_subdirectory(tinygltf_raw_load_test)
 add_subdirectory(shader_test)
-add_subdirectory(gltf_pbr)
 add_subdirectory(triangle)
 add_subdirectory(rectangle)
 add_subdirectory(rectangle_indexed)

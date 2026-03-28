@@ -4,3 +4,6 @@
 [submodule "third_party/ktx"]
 	path = third_party/ktx
 	url = https://github.com/KhronosGroup/KTX-Software.git
+[submodule "third_party/spirv-cross"]
+	path = third_party/spirv-cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross.git

@@ -194,10 +194,6 @@
         "on-demand",
         "verbose"
       ]
-    },
-    {
-      "name": "spirv-cross",
-      "version>=": "1.4.341.0"
     }
   ]
 }

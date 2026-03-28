@@ -8,8 +8,8 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <spirv_cross/spirv_reflect.hpp>
 #include <spirv_glsl.hpp>
+#include <spirv_reflect.hpp>
 
 std::vector<uint32_t> load_spirv_file(const std::string &path) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
