@@ -19,10 +19,8 @@ namespace {
 [[nodiscard]] VkVertexInputRate
 to_vk_vertex_input_rate(VertexInputRate r) noexcept {
     switch (r) {
-    case VertexInputRate::PerVertex:
-        return VK_VERTEX_INPUT_RATE_VERTEX;
-    case VertexInputRate::PerInstance:
-        return VK_VERTEX_INPUT_RATE_INSTANCE;
+    case VertexInputRate::PerVertex: return VK_VERTEX_INPUT_RATE_VERTEX;
+    case VertexInputRate::PerInstance: return VK_VERTEX_INPUT_RATE_INSTANCE;
     }
     return VK_VERTEX_INPUT_RATE_VERTEX;
 }
@@ -30,8 +28,8 @@ to_vk_vertex_input_rate(VertexInputRate r) noexcept {
 void push_attr(std::vector<VkVertexInputAttributeDescription> &out,
                uint32_t location, uint32_t binding, VkFormat format,
                uint32_t offset) {
-    out.push_back(
-        VkVertexInputAttributeDescription { location, binding, format, offset });
+    out.push_back(VkVertexInputAttributeDescription { location, binding, format,
+                                                      offset });
 }
 
 void push_matrix_cols(std::vector<VkVertexInputAttributeDescription> &out,
@@ -53,12 +51,8 @@ void append_vertex_input_attributes(
     using K = VertexAttributeKind;
 
     switch (a.kind) {
-    case K::F64:
-        push_attr(out, L, B, VK_FORMAT_R64_SFLOAT, O);
-        return;
-    case K::F64Vec2:
-        push_attr(out, L, B, VK_FORMAT_R64G64_SFLOAT, O);
-        return;
+    case K::F64: push_attr(out, L, B, VK_FORMAT_R64_SFLOAT, O); return;
+    case K::F64Vec2: push_attr(out, L, B, VK_FORMAT_R64G64_SFLOAT, O); return;
     case K::F64Vec3:
         push_attr(out, L, B, VK_FORMAT_R64G64B64_SFLOAT, O);
         return;
@@ -75,12 +69,8 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 32, VK_FORMAT_R64G64B64A64_SFLOAT);
         return;
 
-    case K::F32:
-        push_attr(out, L, B, VK_FORMAT_R32_SFLOAT, O);
-        return;
-    case K::F32Vec2:
-        push_attr(out, L, B, VK_FORMAT_R32G32_SFLOAT, O);
-        return;
+    case K::F32: push_attr(out, L, B, VK_FORMAT_R32_SFLOAT, O); return;
+    case K::F32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SFLOAT, O); return;
     case K::F32Vec3:
         push_attr(out, L, B, VK_FORMAT_R32G32B32_SFLOAT, O);
         return;
@@ -97,12 +87,8 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
         return;
 
-    case K::F16:
-        push_attr(out, L, B, VK_FORMAT_R16_SFLOAT, O);
-        return;
-    case K::F16Vec2:
-        push_attr(out, L, B, VK_FORMAT_R16G16_SFLOAT, O);
-        return;
+    case K::F16: push_attr(out, L, B, VK_FORMAT_R16_SFLOAT, O); return;
+    case K::F16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SFLOAT, O); return;
     case K::F16Vec3:
         push_attr(out, L, B, VK_FORMAT_R16G16B16_SFLOAT, O);
         return;
@@ -119,15 +105,9 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SFLOAT);
         return;
 
-    case K::I32:
-        push_attr(out, L, B, VK_FORMAT_R32_SINT, O);
-        return;
-    case K::I32Vec2:
-        push_attr(out, L, B, VK_FORMAT_R32G32_SINT, O);
-        return;
-    case K::I32Vec3:
-        push_attr(out, L, B, VK_FORMAT_R32G32B32_SINT, O);
-        return;
+    case K::I32: push_attr(out, L, B, VK_FORMAT_R32_SINT, O); return;
+    case K::I32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SINT, O); return;
+    case K::I32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_SINT, O); return;
     case K::I32Vec4:
         push_attr(out, L, B, VK_FORMAT_R32G32B32A32_SINT, O);
         return;
@@ -141,15 +121,9 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SINT);
         return;
 
-    case K::U32:
-        push_attr(out, L, B, VK_FORMAT_R32_UINT, O);
-        return;
-    case K::U32Vec2:
-        push_attr(out, L, B, VK_FORMAT_R32G32_UINT, O);
-        return;
-    case K::U32Vec3:
-        push_attr(out, L, B, VK_FORMAT_R32G32B32_UINT, O);
-        return;
+    case K::U32: push_attr(out, L, B, VK_FORMAT_R32_UINT, O); return;
+    case K::U32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_UINT, O); return;
+    case K::U32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_UINT, O); return;
     case K::U32Vec4:
         push_attr(out, L, B, VK_FORMAT_R32G32B32A32_UINT, O);
         return;
@@ -163,15 +137,9 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_UINT);
         return;
 
-    case K::I16:
-        push_attr(out, L, B, VK_FORMAT_R16_SINT, O);
-        return;
-    case K::I16Vec2:
-        push_attr(out, L, B, VK_FORMAT_R16G16_SINT, O);
-        return;
-    case K::I16Vec3:
-        push_attr(out, L, B, VK_FORMAT_R16G16B16_SINT, O);
-        return;
+    case K::I16: push_attr(out, L, B, VK_FORMAT_R16_SINT, O); return;
+    case K::I16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SINT, O); return;
+    case K::I16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_SINT, O); return;
     case K::I16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SINT, O);
         return;
@@ -185,15 +153,9 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SINT);
         return;
 
-    case K::U16:
-        push_attr(out, L, B, VK_FORMAT_R16_UINT, O);
-        return;
-    case K::U16Vec2:
-        push_attr(out, L, B, VK_FORMAT_R16G16_UINT, O);
-        return;
-    case K::U16Vec3:
-        push_attr(out, L, B, VK_FORMAT_R16G16B16_UINT, O);
-        return;
+    case K::U16: push_attr(out, L, B, VK_FORMAT_R16_UINT, O); return;
+    case K::U16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_UINT, O); return;
+    case K::U16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_UINT, O); return;
     case K::U16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UINT, O);
         return;
@@ -207,18 +169,10 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_UINT);
         return;
 
-    case K::I8:
-        push_attr(out, L, B, VK_FORMAT_R8_SINT, O);
-        return;
-    case K::I8Vec2:
-        push_attr(out, L, B, VK_FORMAT_R8G8_SINT, O);
-        return;
-    case K::I8Vec3:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8_SINT, O);
-        return;
-    case K::I8Vec4:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SINT, O);
-        return;
+    case K::I8: push_attr(out, L, B, VK_FORMAT_R8_SINT, O); return;
+    case K::I8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SINT, O); return;
+    case K::I8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SINT, O); return;
+    case K::I8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SINT, O); return;
     case K::I8Mat2:
         push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_SINT);
         return;
@@ -229,18 +183,10 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_SINT);
         return;
 
-    case K::U8:
-        push_attr(out, L, B, VK_FORMAT_R8_UINT, O);
-        return;
-    case K::U8Vec2:
-        push_attr(out, L, B, VK_FORMAT_R8G8_UINT, O);
-        return;
-    case K::U8Vec3:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8_UINT, O);
-        return;
-    case K::U8Vec4:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UINT, O);
-        return;
+    case K::U8: push_attr(out, L, B, VK_FORMAT_R8_UINT, O); return;
+    case K::U8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UINT, O); return;
+    case K::U8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UINT, O); return;
+    case K::U8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UINT, O); return;
     case K::U8Mat2:
         push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_UINT);
         return;
@@ -251,35 +197,21 @@ void append_vertex_input_attributes(
         push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_UINT);
         return;
 
-    case K::Unorm8:
-        push_attr(out, L, B, VK_FORMAT_R8_UNORM, O);
-        return;
-    case K::Unorm8Vec2:
-        push_attr(out, L, B, VK_FORMAT_R8G8_UNORM, O);
-        return;
-    case K::Unorm8Vec3:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8_UNORM, O);
-        return;
+    case K::Unorm8: push_attr(out, L, B, VK_FORMAT_R8_UNORM, O); return;
+    case K::Unorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UNORM, O); return;
+    case K::Unorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UNORM, O); return;
     case K::Unorm8Vec4:
         push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UNORM, O);
         return;
 
-    case K::Snorm8:
-        push_attr(out, L, B, VK_FORMAT_R8_SNORM, O);
-        return;
-    case K::Snorm8Vec2:
-        push_attr(out, L, B, VK_FORMAT_R8G8_SNORM, O);
-        return;
-    case K::Snorm8Vec3:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8_SNORM, O);
-        return;
+    case K::Snorm8: push_attr(out, L, B, VK_FORMAT_R8_SNORM, O); return;
+    case K::Snorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SNORM, O); return;
+    case K::Snorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SNORM, O); return;
     case K::Snorm8Vec4:
         push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SNORM, O);
         return;
 
-    case K::Unorm16:
-        push_attr(out, L, B, VK_FORMAT_R16_UNORM, O);
-        return;
+    case K::Unorm16: push_attr(out, L, B, VK_FORMAT_R16_UNORM, O); return;
     case K::Unorm16Vec2:
         push_attr(out, L, B, VK_FORMAT_R16G16_UNORM, O);
         return;
@@ -290,9 +222,7 @@ void append_vertex_input_attributes(
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UNORM, O);
         return;
 
-    case K::Snorm16:
-        push_attr(out, L, B, VK_FORMAT_R16_SNORM, O);
-        return;
+    case K::Snorm16: push_attr(out, L, B, VK_FORMAT_R16_SNORM, O); return;
     case K::Snorm16Vec2:
         push_attr(out, L, B, VK_FORMAT_R16G16_SNORM, O);
         return;
@@ -303,20 +233,11 @@ void append_vertex_input_attributes(
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SNORM, O);
         return;
 
-    case K::Srgb8:
-        push_attr(out, L, B, VK_FORMAT_R8_SRGB, O);
-        return;
-    case K::Srgb8Vec2:
-        push_attr(out, L, B, VK_FORMAT_R8G8_SRGB, O);
-        return;
-    case K::Srgb8Vec3:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8_SRGB, O);
-        return;
-    case K::Srgb8Vec4:
-        push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SRGB, O);
-        return;
-    default:
-        return;
+    case K::Srgb8: push_attr(out, L, B, VK_FORMAT_R8_SRGB, O); return;
+    case K::Srgb8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SRGB, O); return;
+    case K::Srgb8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SRGB, O); return;
+    case K::Srgb8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SRGB, O); return;
+    default: return;
     }
 }
 
@@ -518,7 +439,7 @@ bool GraphicsPipeline::create(const Context &ctx,
     rasterizer.polygonMode = config.polygonMode;
     rasterizer.cullMode = config.cullMode;
     rasterizer.frontFace = config.frontFace;
-    rasterizer.lineWidth = 1.0f;
+    rasterizer.lineWidth = 1.0F;
 
     VkPipelineMultisampleStateCreateInfo multisample {
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
@@ -595,11 +516,12 @@ bool GraphicsPipeline::create(const Context &ctx,
 
 bool GraphicsPipeline::create(const Context &ctx,
                               const PipelineLayout &pipelineLayout,
-                              const RenderPass &renderPass, uint32_t subpassIndex,
+                              const RenderPass &renderPass,
+                              uint32_t subpassIndex,
                               const GraphicsPipelineConfig &config,
                               VkPipelineCache cache) {
-    return create(ctx, pipelineLayout.handle(), renderPass.handle(), subpassIndex,
-                  config, cache);
+    return create(ctx, pipelineLayout.handle(), renderPass.handle(),
+                  subpassIndex, config, cache);
 }
 
 void GraphicsPipeline::destroy_() {

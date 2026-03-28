@@ -34,10 +34,6 @@ std::vector<uint32_t> load_spirv_file(const std::string &path) {
     return buffer;
 }
 
-#include <iostream>
-#include <spirv_glsl.hpp>
-#include <vector>
-
 // ===================== 递归打印 SPIR-V Type =====================
 void dump_type_recursive(spirv_cross::CompilerGLSL &glsl, uint32_t type_id,
                          int indent) {

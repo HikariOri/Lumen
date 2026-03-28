@@ -167,7 +167,8 @@ public:
                 VkPipelineCache cache = VK_NULL_HANDLE);
 
     /**
-     * @brief 同 `create`（`VkPipelineLayout` / `VkRenderPass`），传入封装对象即可
+     * @brief 同 `create`（`VkPipelineLayout` /
+     * `VkRenderPass`），传入封装对象即可
      */
     bool create(const Context &ctx, const PipelineLayout &pipelineLayout,
                 const RenderPass &renderPass, uint32_t subpassIndex,
