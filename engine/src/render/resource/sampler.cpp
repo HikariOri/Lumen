@@ -181,14 +181,9 @@ bool Sampler::create(const Context &ctx, const SamplerConfig &config) {
      * Border Color（边界颜色）
      * ============================
      *
-     * 当 addressMode = CLAMP_TO_BORDER 时使用
-     *
-     * 这里设为 opaque black：
-     *   - 常用于 shadow map
-     *   - 避免 undefined border sampling
+     * 当 addressMode = CLAMP_TO_BORDER 时使用（见 SamplerConfig::borderColor）
      */
-    // TODO: 让用户传进来
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    samplerInfo.borderColor = config.borderColor;
 
     /**
      * ============================
