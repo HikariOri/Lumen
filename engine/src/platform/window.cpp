@@ -160,6 +160,16 @@ void Window::set_fullscreen(bool fullscreen) {
     }
 }
 
+void Window::set_relative_mouse_mode(bool relative) {
+    if (!window_) {
+        return;
+    }
+    if (!SDL_SetWindowRelativeMouseMode(window_, relative)) {
+        LUMEN_LOG_WARN("SDL_SetWindowRelativeMouseMode({}) 失败: {}", relative,
+                       SDL_GetError());
+    }
+}
+
 void Window::destroy_() {
     if (window_) {
         LUMEN_LOG_DEBUG("销毁窗口");

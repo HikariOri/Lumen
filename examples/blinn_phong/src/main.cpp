@@ -1,7 +1,7 @@
 /**
  * @file main.cpp
- * @brief 带纹理的单位立方体 + 多光源 Blinn-Phong（定向 / 点 / 聚光）；场景轨道相机；
- * 离屏渲染后经 ImGui 视口显示
+ * @brief 带纹理的单位立方体 + 多光源 Blinn-Phong（定向 / 点 /
+ * 聚光）；场景轨道相机； 离屏渲染后经 ImGui 视口显示
  */
 
 #include "engine.hpp"
@@ -22,10 +22,10 @@
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
-#include "scene/scene_camera_controller.hpp"
-#include "scene/scene_orbit_camera.hpp"
+#include "scene/scene_camera.hpp"
+#include "scene/scene_orbit_controller.hpp"
 #include "ui/imgui_backend.hpp"
-#include "ui/input_bridge.hpp"
+#include "ui/imgui_layer.hpp"
 #include "ui/texture_view_panel.hpp"
 
 #define GLM_FORCE_RADIANS
@@ -62,7 +62,7 @@ struct GpuLight {
     glm::vec4 spot_cos_inner_outer {};
 };
 
-/// 与 `cube3d_lighting.vert` / `.frag` 中 `SceneUBO` 一致（std140）
+/// 与 `blinn_phong.vert` / `.frag` 中 `SceneUBO` 一致（std140）
 struct SceneUbo {
     glm::mat4 model { 1.0F };
     glm::mat4 view { 1.0F };
@@ -96,8 +96,7 @@ struct EditLight {
 void pack_gpu_light(GpuLight &g, const EditLight &e) {
     const glm::vec3 rgb = e.color * e.intensity;
     g.color_intensity = glm::vec4(rgb, e.intensity);
-    const float inv_r =
-        (e.range > 1.0e-4F) ? 1.0F / e.range : 0.0F;
+    const float inv_r = (e.range > 1.0e-4F) ? 1.0F / e.range : 0.0F;
     float half_outer_deg = e.spot_outer_deg * 0.5F;
     float half_inner_deg = e.spot_inner_deg * 0.5F;
     if (e.type == 2) {
@@ -120,8 +119,7 @@ void pack_gpu_light(GpuLight &g, const EditLight &e) {
         g.spot_axis_inv_range = glm::vec4(0.0F);
     } else if (e.type == 1) {
         g.param0 = glm::vec4(e.position, 1.0F);
-        g.spot_axis_inv_range =
-            glm::vec4(0.0F, 0.0F, 0.0F, inv_r);
+        g.spot_axis_inv_range = glm::vec4(0.0F, 0.0F, 0.0F, inv_r);
     } else {
         glm::vec3 axis = e.direction;
         const float alen = glm::length(axis);
@@ -144,7 +142,7 @@ constexpr float kSceneScrollZoomSpeed { 0.25F };
 
 } // namespace
 
-static int run_cube3d_lighting() {
+static int run_blinn_phong() {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
     winConfig.title = "Lumen — 3D Cube + Blinn-Phong";
@@ -233,9 +231,9 @@ static int run_cube3d_lighting() {
     }
 
     const std::string vertPath =
-        lumen::core::get_resource_path("shaders/cube3d_lighting.vert.spv");
+        lumen::core::get_resource_path("shaders/blinn_phong.vert.spv");
     const std::string fragPath =
-        lumen::core::get_resource_path("shaders/cube3d_lighting.frag.spv");
+        lumen::core::get_resource_path("shaders/blinn_phong.frag.spv");
 
     lumen::render::ShaderModule vertShader;
     lumen::render::ShaderModule fragShader;
@@ -475,44 +473,58 @@ static int run_cube3d_lighting() {
     bool needRecreateSwapchain { false };
 
     lumen::ui::TextureViewRect scene_viewport_rect {};
-    lumen::scene::SceneOrbitCamera scene_cam;
-    scene_cam.set_pivot(glm::vec3(0.0F));
-    scene_cam.set_fov_y_degrees(55.0F);
-    scene_cam.sync_orbit_from_view(glm::lookAt(glm::vec3(1.35F, 1.0F, 1.35F),
-                                               glm::vec3(0.0F),
-                                               glm::vec3(0.0F, 1.0F, 0.0F)));
-    lumen::scene::SceneCameraController scene_cam_ctrl;
+    lumen::scene::SceneCamera scene_cam;
+    scene_cam.set_projection_perspective(55.0F, 0.1F, 100.0F);
+    lumen::scene::SceneOrbitController scene_orbit;
+    scene_orbit.set_pivot(glm::vec3(0.0F));
+    scene_orbit.sync_from_view(glm::lookAt(glm::vec3(1.35F, 1.0F, 1.35F),
+                                           glm::vec3(0.0F),
+                                           glm::vec3(0.0F, 1.0F, 0.0F)));
+    scene_orbit.apply_to(scene_cam);
 
-    const auto disable_relative_mouse = [&window] {
-        SDL_SetWindowRelativeMouseMode(window.sdl_window(), false);
-    };
+    lumen::ui::ImGuiLayer imgui_layer;
+    imgui_layer.attach(pump);
 
-    pump.on_quit([&] {
-        running = false;
-        disable_relative_mouse();
-    });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        if (e.key == lumen::platform::Key::Escape) {
-            running = false;
-            disable_relative_mouse();
-        }
-    });
-    pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel &e) {
-        const auto hover = lumen::ui::viewport_mouse_state(
-            scene_viewport_rect, pump.input().mouse_x(),
-            pump.input().mouse_y());
-        if (lumen::ui::imgui_wants_mouse() && !hover.inViewport) {
-            return;
-        }
-        scene_cam.apply_scroll_zoom(e.deltaY, kSceneScrollZoomSpeed);
-    });
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
-        fbWidth = r.width;
-        fbHeight = r.height;
-        needRecreateSwapchain = true;
-    });
+    pump.set_on_application_event(
+        [&](lumen::platform::DispatchableEvent &de) {
+            lumen::platform::EventDispatcher d(de);
+            d.dispatch<lumen::platform::EventQuit>(
+                [&](lumen::platform::EventQuit &) {
+                    running = false;
+                    window.set_relative_mouse_mode(false);
+                    return true;
+                });
+            d.dispatch<lumen::platform::EventKeyDown>(
+                [&](lumen::platform::EventKeyDown &e) {
+                    if (e.key == lumen::platform::Key::Escape) {
+                        running = false;
+                        window.set_relative_mouse_mode(false);
+                    }
+                    return false;
+                });
+            d.dispatch<lumen::platform::EventWindowResize>(
+                [&](lumen::platform::EventWindowResize &r) {
+                    fbWidth = r.width;
+                    fbHeight = r.height;
+                    needRecreateSwapchain = true;
+                    return false;
+                });
+        });
 
-    lumen::ui::imgui_setup_event_pump(pump);
+    pump.push_layer([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventMouseWheel>(
+            [&](lumen::platform::EventMouseWheel &e) {
+                const auto hover = lumen::ui::viewport_mouse_state(
+                    scene_viewport_rect, pump.input().mouse_x(),
+                    pump.input().mouse_y());
+                if (lumen::ui::imgui_wants_mouse() && !hover.inViewport) {
+                    return false;
+                }
+                scene_orbit.apply_scroll_zoom(e.deltaY, kSceneScrollZoomSpeed);
+                return false;
+            });
+    });
 
     float spin_rad_per_sec { kSpinRadPerSecond };
 
@@ -619,79 +631,24 @@ static int run_cube3d_lighting() {
             continue;
         }
 
-        lumen::ui::imgui_backend_new_frame();
+        imgui_layer.begin_frame();
 
-        const float dt = static_cast<float>(frame_dt.tick_seconds());
+        const auto dt = static_cast<float>(frame_dt.tick_seconds());
 
         const auto &inp = pump.input();
         const auto scene_nav_mouse = lumen::ui::viewport_mouse_state(
             scene_viewport_rect, inp.mouse_x(), inp.mouse_y());
         const bool cam_nav_ok = scene_nav_mouse.inViewport;
-        const bool scene_fly =
-            cam_nav_ok &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Right) &&
-            !inp.has_alt();
-
-        static bool scene_relative_mouse { false };
-        if (scene_fly != scene_relative_mouse) {
-            SDL_SetWindowRelativeMouseMode(window.sdl_window(), scene_fly);
-            scene_relative_mouse = scene_fly;
-        }
-
         const bool imgui_blocks_mouse =
             lumen::ui::imgui_wants_mouse() && !scene_nav_mouse.inViewport;
-        const float mdx = inp.mouse_delta_x();
-        const float mdy = inp.mouse_delta_y();
 
-        if (cam_nav_ok && inp.has_alt() &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Left)) {
-            scene_cam_ctrl.apply_alt_orbit(scene_cam, mdx, mdy);
+        static bool scene_relative_mouse { false };
+        const bool want_rel = scene_orbit.apply_per_frame_editor_navigation(
+            inp, cam_nav_ok, imgui_blocks_mouse, dt);
+        if (want_rel != scene_relative_mouse) {
+            window.set_relative_mouse_mode(want_rel);
+            scene_relative_mouse = want_rel;
         }
-        if (cam_nav_ok && inp.has_alt() &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Middle)) {
-            scene_cam_ctrl.apply_alt_pan(scene_cam, mdx, mdy);
-        }
-        if (cam_nav_ok && inp.has_alt() &&
-            inp.is_mouse_button_down(lumen::platform::MouseButton::Right)) {
-            scene_cam_ctrl.apply_alt_zoom_drag(scene_cam, mdy);
-        }
-        if (!imgui_blocks_mouse && scene_fly) {
-            scene_cam_ctrl.apply_rmb_look(scene_cam, mdx, mdy);
-            lumen::scene::SceneCameraFlyInput fly {};
-            fly.move_forward = inp.is_key_down(lumen::platform::Key::W);
-            fly.move_back = inp.is_key_down(lumen::platform::Key::S);
-            fly.move_left = inp.is_key_down(lumen::platform::Key::A);
-            fly.move_right = inp.is_key_down(lumen::platform::Key::D);
-            fly.move_up = inp.is_key_down(lumen::platform::Key::E);
-            fly.move_down = inp.is_key_down(lumen::platform::Key::Q);
-            fly.fast_modifier = inp.has_shift();
-            fly.delta_seconds = dt;
-            scene_cam_ctrl.apply_fly_pan(scene_cam, fly);
-        }
-
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-
-        // 全屏 DockSpace（与 demo3d / Hazel 类似）
-        const ImGuiViewport *main_vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(main_vp->WorkPos);
-        ImGui::SetNextWindowSize(main_vp->WorkSize);
-        ImGui::SetNextWindowViewport(main_vp->ID);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
-        constexpr ImGuiWindowFlags k_dock_host_flags =
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoBringToFrontOnFocus |
-            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
-        ImGui::Begin("##Cube3dDockHost", nullptr, k_dock_host_flags);
-        ImGui::PopStyleVar(3);
-
-        const ImGuiID dockspace_id = ImGui::GetID("CubeLightingMainDock");
-        ImGui::DockSpace(dockspace_id, ImVec2(0.0F, 0.0F),
-                         ImGuiDockNodeFlags_PassthruCentralNode);
-        ImGui::End();
 
         if (ImGui::Begin("视口")) {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -722,8 +679,7 @@ static int run_cube3d_lighting() {
                                3.0F, "%.2f");
             ImGui::Separator();
             ImGui::Text("光源（最多 %d 盏，仅「启用」的参与累加）", kMaxLights);
-            static const char *kLightTypeItems =
-                "定向光\0点光源\0聚光灯\0\0";
+            static const char *kLightTypeItems = "定向光\0点光源\0聚光灯\0\0";
             for (int li = 0; li < kMaxLights; ++li) {
                 EditLight &L = edit_lights[static_cast<size_t>(li)];
                 ImGui::PushID(li);
@@ -782,6 +738,7 @@ static int run_cube3d_lighting() {
         glm::mat4 model =
             glm::rotate(glm::mat4(1.0F), seconds * spin_rad_per_sec,
                         glm::vec3(0.0F, 1.0F, 0.0F));
+        scene_orbit.apply_to(scene_cam);
         const glm::mat4 view = scene_cam.view_matrix();
         const glm::mat4 proj = scene_cam.projection_matrix(aspect);
         const glm::vec3 camera_world = scene_cam.eye_position();
@@ -897,7 +854,7 @@ static int run_cube3d_lighting() {
         scissor.extent = swapchain.extent();
         vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
 
-        lumen::ui::imgui_backend_render(cmdBuffers[currentFrame]);
+        imgui_layer.end_frame(cmdBuffers[currentFrame]);
 
         vkCmdEndRenderPass(cmdBuffers[currentFrame]);
 
@@ -939,7 +896,7 @@ static int run_cube3d_lighting() {
         currentFrame = (currentFrame + 1) % kMaxFramesInFlight;
     }
 
-    disable_relative_mouse();
+    window.set_relative_mouse_mode(false);
     ctx.wait_idle();
     if (scene_tex_id != static_cast<ImTextureID>(0)) {
         lumen::ui::imgui_backend_remove_texture(
@@ -953,7 +910,7 @@ int main() {
     if (!lumen::core::Logger::init()) {
         return -1;
     }
-    const int result = run_cube3d_lighting();
+    const int result = run_blinn_phong();
     lumen::core::Logger::shutdown();
     return result;
 }

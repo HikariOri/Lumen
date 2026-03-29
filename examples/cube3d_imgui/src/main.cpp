@@ -21,7 +21,7 @@
 #include "render/shader.hpp"
 #include "render/swapchain.hpp"
 #include "ui/imgui_backend.hpp"
-#include "ui/input_bridge.hpp"
+#include "ui/imgui_layer.hpp"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -375,19 +375,31 @@ static int run_cube3d_imgui() {
     int fbHeight { window_height };
     bool needRecreateSwapchain { false };
 
-    pump.on_quit([&] { running = false; });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        if (e.key == lumen::platform::Key::Escape) {
-            running = false;
-        }
-    });
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
-        fbWidth = r.width;
-        fbHeight = r.height;
-        needRecreateSwapchain = true;
-    });
-
-    lumen::ui::imgui_setup_event_pump(pump);
+    lumen::ui::ImGuiLayer imgui_layer;
+    imgui_layer.attach(pump);
+    pump.set_on_application_event(
+        [&](lumen::platform::DispatchableEvent &de) {
+            lumen::platform::EventDispatcher d(de);
+            d.dispatch<lumen::platform::EventQuit>(
+                [&](lumen::platform::EventQuit &) {
+                    running = false;
+                    return true;
+                });
+            d.dispatch<lumen::platform::EventKeyDown>(
+                [&](lumen::platform::EventKeyDown &e) {
+                    if (e.key == lumen::platform::Key::Escape) {
+                        running = false;
+                    }
+                    return false;
+                });
+            d.dispatch<lumen::platform::EventWindowResize>(
+                [&](lumen::platform::EventWindowResize &r) {
+                    fbWidth = r.width;
+                    fbHeight = r.height;
+                    needRecreateSwapchain = true;
+                    return false;
+                });
+        });
 
     float spin_rad_per_sec { kSpinRadPerSecond };
 
@@ -458,31 +470,7 @@ static int run_cube3d_imgui() {
             continue;
         }
 
-        lumen::ui::imgui_backend_new_frame();
-
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-
-        // 全屏 DockSpace（与 demo3d / Hazel 类似）
-        const ImGuiViewport *main_vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(main_vp->WorkPos);
-        ImGui::SetNextWindowSize(main_vp->WorkSize);
-        ImGui::SetNextWindowViewport(main_vp->ID);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
-        constexpr ImGuiWindowFlags k_dock_host_flags =
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoBringToFrontOnFocus |
-            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
-        ImGui::Begin("##Cube3dDockHost", nullptr, k_dock_host_flags);
-        ImGui::PopStyleVar(3);
-
-        const ImGuiID dockspace_id = ImGui::GetID("Cube3dMainDock");
-        ImGui::DockSpace(dockspace_id, ImVec2(0.0F, 0.0F),
-                         ImGuiDockNodeFlags_PassthruCentralNode);
-        ImGui::End();
+        imgui_layer.begin_frame();
 
         if (ImGui::Begin("视口")) {
             const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -608,7 +596,7 @@ static int run_cube3d_imgui() {
         scissor.extent = swapchain.extent();
         vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
 
-        lumen::ui::imgui_backend_render(cmdBuffers[currentFrame]);
+        imgui_layer.end_frame(cmdBuffers[currentFrame]);
 
         vkCmdEndRenderPass(cmdBuffers[currentFrame]);
 

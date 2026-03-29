@@ -11,7 +11,7 @@
 ## 2. 帧序与 ImGuizmo 约定
 
 1. **`ImGuizmo::BeginFrame()`**  
-   在 `ImGui::NewFrame()` 之后调用一次。已由 `lumen::ui::imgui_backend_new_frame()` 统一调用，应用无需重复。
+   在 `ImGui::NewFrame()` 之后调用一次。已由 `lumen::ui::ImGuiLayer::begin_frame()`（内部 `imgui_backend_new_frame`）统一调用，应用无需重复。
 
 2. **`SetRect` + `Manipulate`**  
    Gizmo 的命中与绘制基于 **屏幕像素矩形**，须与 Scene `ImGui::Image` 所占区域一致，使用上一帧或本帧 `imgui_texture_view_panel` 写出的 `TextureViewRect`（`minX/minY` 为左上、`maxX/maxY` 为右下）。
@@ -34,9 +34,9 @@
 
 **缩放下限**：每次 `Manipulate` 之后用 `glm::decompose` 读取各轴缩放，将绝对值钳制到不小于 `1e-2`，避免缩放过小导致矩阵奇异、缩放手柄无法再次拾取从而「缩到最小后放不大」。
 
-**输入互斥**：相机旋转、模型拖拽等应在 `!imguizmo_is_using()`（或对上一帧状态的缓存）时处理，避免与 Gizmo 抢鼠标。与 ImGui 的 `WantCapture` 组合方式见 [imgui-integration.md](imgui-integration.md) 第 3 节与第 6 节。Demo3D 中与 Unity Scene 一致用 **Q/W/E/R** 切换视图（无 Gizmo）/移动/旋转/缩放；快捷键应在 **`imgui_backend_new_frame()` 之后** 用 `ImGui::IsKeyPressed(ImGuiKey_*)` 处理——若在 `EventPump::on_key_down` 里用 `imgui_wants_keyboard()` 过滤，Dock 获得焦点时 `WantCaptureKeyboard` 常为 true，会导致按键永远不生效。不绘制 Gizmo 的帧须调用 `imguizmo_reset_interaction_state()`；相机俯仰用 **↑/↓** 以免与 **W** 冲突。
+**输入互斥**：相机旋转、模型拖拽等应在 `!imguizmo_is_using()`（或对上一帧状态的缓存）时处理，避免与 Gizmo 抢鼠标。与 ImGui 的 `WantCapture` 组合方式见 [imgui-integration.md](imgui-integration.md) 第 4.3 节与第 6 节。Demo3D 中与 Unity Scene 一致用 **Q/W/E/R** 切换视图（无 Gizmo）/移动/旋转/缩放；快捷键应在 **`ImGuiLayer::begin_frame()` 之后** 用 `ImGui::IsKeyPressed(ImGuiKey_*)` 处理——若在 `push_layer` 内对 `EventKeyDown` 一律用 `imgui_wants_keyboard()` 过滤，Dock 获得焦点时 `WantCaptureKeyboard` 常为 true，会导致按键永远不生效。不绘制 Gizmo 的帧须调用 `imguizmo_reset_interaction_state()`；相机俯仰用 **↑/↓** 以免与 **W** 冲突。
 
-**方向立方体**：`imguizmo_view_manipulate` 用前景 DrawList；Demo3D 将位置锚在 **Scene 面板 `TextureViewRect` 右上角内侧**，并预留 `RightBleed`（绘制会略宽于传入矩形），避免贴 Dock 右缘时「出界」；Scene 区域过小时回退到主 `Work` 视口并同样钳位。与离屏 Scene 共用 `view` / `orbit` 半径；滞后一帧与 Gizmo 相同。操作后请调用 `lumen::scene::SceneOrbitCamera::sync_orbit_from_view` 同步轨道参数（见 [scene-camera.md](scene-camera.md)）。ViewManipulate 涉及 Autodesk 专利说明，商用请注意合规。
+**方向立方体**：`imguizmo_view_manipulate` 用前景 DrawList；Demo3D 将位置锚在 **Scene 面板 `TextureViewRect` 右上角内侧**，并预留 `RightBleed`（绘制会略宽于传入矩形），避免贴 Dock 右缘时「出界」；Scene 区域过小时回退到主 `Work` 视口并同样钳位。与离屏 Scene 共用 `view` / `orbit` 半径；滞后一帧与 Gizmo 相同。操作后请调用 `lumen::scene::SceneOrbitController::sync_from_view` 同步轨道参数，并 `apply_to(SceneCamera)`（见 [scene-camera.md](scene-camera.md)）。ViewManipulate 涉及 Autodesk 专利说明，商用请注意合规。
 
 **矩阵**：`view` 与离屏 Scene 渲染一致。`projection` 传入与渲染相同的矩阵（含 Vulkan 常用的 `proj[1][1] *= -1`）；`imguizmo_manipulate` 内部会再抵消该 Y 翻转以匹配 ImGuizmo 的 OpenGL 风格 NDC（见 [glm-vulkan.md](../reference/glm-vulkan.md)、[ImGuizmo#154](https://github.com/CedricGuillemet/ImGuizmo/issues/154)）。另默认调用 `AllowAxisFlip(false)`，避免轴为可读性自动翻面导致「轴向不对」的主观感受。
 
@@ -46,7 +46,7 @@
 
 ## 5. 参考
 
-- [scene-camera.md](scene-camera.md) — `SceneOrbitCamera`、ViewManipulate 后同步  
+- [scene-camera.md](scene-camera.md) — `SceneOrbitController::sync_from_view`、ViewManipulate 后同步  
 - [imgui-integration.md](imgui-integration.md) — ImGui 后端与视口矩形  
 - [ui-panels.md](ui-panels.md) — `TextureViewRect`、`viewport_mouse_state`  
 - [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo)

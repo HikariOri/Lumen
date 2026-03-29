@@ -29,10 +29,11 @@
  * 初始化：
  *   imgui_backend_init()
  *
- * 每帧：
- *   imgui_backend_new_frame()
- *   → 用户构建 UI
- *   imgui_backend_render()
+ * 每帧（与 Hazel `ImGuiLayer::Begin`/`End` 对齐时，请经 `ImGuiLayer::begin_frame` /
+ * `end_frame`，其内部调用本模块）：
+ *   `imgui_backend_new_frame()`（SDL/Vulkan NewFrame、Dock、ImGuizmo::BeginFrame）
+ *   → 用户在各「逻辑层」中构建 UI（`ImGui::Begin` / `End`）
+ *   `imgui_backend_render(cmd)`（须在 swapchain RenderPass 内）
  *
  * 关闭：
  *   imgui_backend_shutdown()
@@ -56,6 +57,8 @@
  */
 
 #pragma once
+
+#include <cstdint>
 
 #include <vulkan/vulkan.h>
 
@@ -133,6 +136,12 @@ struct ImGuiBackendInitInfo {
      * - 实际显示大小受 DPI scaling 影响
      */
     float cjk_font_size_pixels { 18.0F };
+
+    /**
+     * @brief 是否启用 ImGui Docking，并在 `imgui_backend_new_frame()` 内绘制全屏
+     * Dock 宿主窗口
+     */
+    bool enable_docking { true };
 };
 
 /**
@@ -195,9 +204,23 @@ void imgui_backend_set_min_image_count(uint32_t minImageCount);
  * 3. ImGui::NewFrame()
  *
  * @note
- * 必须在所有 ImGui::Begin() 之前调用
+ * 必须在所有 ImGui::Begin() 之前调用（Dock 宿主由本函数在 `NewFrame` 之后插入，
+ * 应用侧其它窗口应在本函数返回之后再 `Begin`）
  */
 void imgui_backend_new_frame();
+
+/**
+ * @brief 初始化时是否启用了 Docking（与 `ImGuiBackendInitInfo::enable_docking` 一致）
+ */
+[[nodiscard]] bool imgui_backend_docking_enabled() noexcept;
+
+/**
+ * @brief 主 Dock 空间 ID（与 `imgui_backend_new_frame` 内 `DockSpace` 一致）
+ *
+ * @return 未启用 Docking 时尚未建立时为 0；否则为当前帧的 `ImGuiID`（可传给
+ * `PanelManager::set_default_dock_id` 等）
+ */
+[[nodiscard]] std::uint32_t imgui_backend_main_dockspace_id() noexcept;
 
 /**
  * @brief 渲染 ImGui（提交 draw calls）

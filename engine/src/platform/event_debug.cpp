@@ -8,7 +8,7 @@
 #include "platform/event_pump.hpp"
 
 #include "core/logger.hpp"
-#include "ui/input_bridge.hpp"
+#include "ui/imgui_layer.hpp"
 
 #include <imgui.h>
 

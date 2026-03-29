@@ -10,7 +10,7 @@
  * - 鼠标事件
  * - 窗口大小变化等
  *
- * 应用层通过 EventPump 获取当前帧事件列表（EventList）。
+ * 应用层通过 EventPump::poll 驱动层链，在 `push_layer` 内用 `EventDispatcher` 处理负载。
  */
 
 #pragma once
@@ -262,7 +262,7 @@ using Event =
 /**
  * @brief 事件列表
  *
- * 应由 EventPump 每帧填充，并供上层查询。
+ * 由 EventPump 在 `poll()` 内收集并分发给 Overlay / Layer。
  */
 using EventList = std::vector<Event>;
 

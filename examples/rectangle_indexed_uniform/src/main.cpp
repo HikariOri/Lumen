@@ -292,16 +292,26 @@ static int run_rectangle_textured() {
     int fbHeight { window_height };
     bool needRecreateSwapchain { false };
 
-    pump.on_quit([&] { running = false; });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        if (e.key == lumen::platform::Key::Escape) {
+    pump.push_layer([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventQuit>([&](lumen::platform::EventQuit &) {
             running = false;
-        }
-    });
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
-        fbWidth = r.width;
-        fbHeight = r.height;
-        needRecreateSwapchain = true;
+            return false;
+        });
+        d.dispatch<lumen::platform::EventKeyDown>(
+            [&](lumen::platform::EventKeyDown &e) {
+                if (e.key == lumen::platform::Key::Escape) {
+                    running = false;
+                }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &r) {
+                fbWidth = r.width;
+                fbHeight = r.height;
+                needRecreateSwapchain = true;
+                return false;
+            });
     });
 
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;

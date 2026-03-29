@@ -13,6 +13,10 @@
 #include <imgui_impl_vulkan.h>
 
 namespace lumen::ui {
+
+static bool g_imgui_docking_enabled { false };
+static ImGuiID g_imgui_main_dockspace_id { 0 };
+
 namespace {
 
 /**
@@ -163,7 +167,10 @@ bool imgui_backend_init(const ImGuiBackendInitInfo &info) {
 
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    g_imgui_docking_enabled = info.enable_docking;
+    if (g_imgui_docking_enabled) {
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    }
 
     {
         const float size = info.cjk_font_size_pixels > 0.0f
@@ -283,6 +290,37 @@ void imgui_backend_new_frame() {
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();
+
+    g_imgui_main_dockspace_id = 0;
+    if (g_imgui_docking_enabled) {
+        const ImGuiViewport *main_vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(main_vp->WorkPos);
+        ImGui::SetNextWindowSize(main_vp->WorkSize);
+        ImGui::SetNextWindowViewport(main_vp->ID);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+        constexpr ImGuiWindowFlags k_dock_host_flags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
+        ImGui::Begin("##LumenDockHost", nullptr, k_dock_host_flags);
+        ImGui::PopStyleVar(3);
+        const ImGuiID dockspace_id = ImGui::GetID("LumenMainDock");
+        g_imgui_main_dockspace_id = dockspace_id;
+        ImGui::DockSpace(dockspace_id, ImVec2(0.0F, 0.0F),
+                         ImGuiDockNodeFlags_PassthruCentralNode);
+        ImGui::End();
+    }
+}
+
+bool imgui_backend_docking_enabled() noexcept {
+    return g_imgui_docking_enabled;
+}
+
+std::uint32_t imgui_backend_main_dockspace_id() noexcept {
+    return static_cast<std::uint32_t>(g_imgui_main_dockspace_id);
 }
 
 void imgui_backend_render(VkCommandBuffer cmd) {

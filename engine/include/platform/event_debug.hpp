@@ -11,7 +11,7 @@
  *
  * 注意事项：
  * - 使用 LUMEN_LOG_DEBUG 输出，Release 构建下默认无日志
- * - 依赖 ImGui 事件状态，必须在 imgui_setup_event_pump 之后调用
+ * - 依赖 ImGui 事件状态，必须在 `ImGuiLayer::attach` 之后调用
  */
 
 #pragma once

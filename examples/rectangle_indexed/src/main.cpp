@@ -202,24 +202,34 @@ static int run_triangle() {
     int fbHeight { window_height };
     bool needRecreateSwapchain { false };
 
-    pump.on_quit([&] {
-        LUMEN_APP_LOG_INFO("退出");
-        running = false;
-    });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        LUMEN_APP_LOG_INFO("按键按下: {}", lumen::platform::key_name(e.key));
-        if (e.key == lumen::platform::Key::Escape) {
+    pump.push_layer([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventQuit>([&](lumen::platform::EventQuit &) {
+            LUMEN_APP_LOG_INFO("退出");
             running = false;
-        }
-    });
-    pump.on_mouse_move([&](const lumen::platform::EventMouseMove &e) {
-        LUMEN_APP_LOG_INFO("鼠标移动: ({:.0f}, {:.0f})", e.x, e.y);
-    });
-
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
-        fbWidth = r.width;
-        fbHeight = r.height;
-        needRecreateSwapchain = true;
+            return false;
+        });
+        d.dispatch<lumen::platform::EventKeyDown>(
+            [&](lumen::platform::EventKeyDown &e) {
+                LUMEN_APP_LOG_INFO("按键按下: {}",
+                                   lumen::platform::key_name(e.key));
+                if (e.key == lumen::platform::Key::Escape) {
+                    running = false;
+                }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventMouseMove>(
+            [&](lumen::platform::EventMouseMove &e) {
+                LUMEN_APP_LOG_INFO("鼠标移动: ({:.0f}, {:.0f})", e.x, e.y);
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &r) {
+                fbWidth = r.width;
+                fbHeight = r.height;
+                needRecreateSwapchain = true;
+                return false;
+            });
     });
 
     constexpr uint64_t kAcquireTimeoutNs = 100'000'000;

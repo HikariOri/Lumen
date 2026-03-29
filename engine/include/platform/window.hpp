@@ -210,6 +210,15 @@ public:
     void set_fullscreen(bool fullscreen);
 
     /**
+     * @brief 相对鼠标模式（锁定光标、用位移驱动视角等）
+     *
+     * 封装 `SDL_SetWindowRelativeMouseMode`；退出或失焦前应置为 `false`。
+     *
+     * @param relative 是否启用相对模式
+     */
+    void set_relative_mouse_mode(bool relative);
+
+    /**
      * @brief 获取 SDL 原始窗口句柄
      *
      * 可用于 ImGui、原生 SDL 操作等。
