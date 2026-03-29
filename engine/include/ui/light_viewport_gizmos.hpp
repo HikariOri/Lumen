@@ -77,7 +77,7 @@ public:
     [[nodiscard]] bool debug_ready() const { return debug_ready_; }
 
     /**
-     * @param selected_for_debug 带 `LightComponent` 的选中实体才生成范围/方向线
+     * @param selected_for_debug 预留；当前无 ECS 光源时不生成调试线
      */
     void prepare_frame(const ::entt::registry &registry,
                        ::entt::entity selected_for_debug,

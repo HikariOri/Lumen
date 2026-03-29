@@ -48,7 +48,7 @@
 #include "core/logger.hpp"
 #include "core/path.hpp"
 
-#include "scene/components.hpp"
+#include "core/gltf_material.hpp"
 
 #include <ghc/filesystem.hpp>
 #include <stb_image.h>
@@ -508,7 +508,7 @@ void set_texture_path(const fs::path &gltf_dir, const tinygltf::Model &model,
  */
 void apply_material_factors_from_parameter(const std::string &key,
                                            const tinygltf::Parameter &param,
-                                           scene::MaterialComponent &out) {
+                                           GltfMaterialData &out) {
     if (key == "baseColorFactor") {
         const auto c = param.ColorFactor();
         out.base_color_factor =
@@ -539,7 +539,7 @@ void apply_material_texture_from_key(const std::string &key,
                                      const tinygltf::Parameter &param,
                                      const fs::path &gltf_dir,
                                      const tinygltf::Model &model,
-                                     scene::MaterialComponent &out,
+                                     GltfMaterialData &out,
                                      bool skip_base_color_texture_from_maps) {
     if (key.find("Texture") == std::string::npos) {
         return;
@@ -574,7 +574,7 @@ void apply_material_texture_from_key(const std::string &key,
  */
 void merge_parameter_maps_into_material(
     const tinygltf::Material &m, const fs::path &gltf_dir,
-    const tinygltf::Model &model, scene::MaterialComponent &out,
+    const tinygltf::Model &model, GltfMaterialData &out,
     bool skip_base_color_texture_from_maps) {
     for (const auto &kv : m.values) {
         apply_material_factors_from_parameter(kv.first, kv.second, out);
@@ -589,7 +589,7 @@ void merge_parameter_maps_into_material(
 }
 
 /**
- * @brief 填充 MaterialComponent（核心）
+ * @brief 填充 GltfMaterialData（核心）
  *
  * @details
  * 支持：
@@ -608,7 +608,7 @@ void merge_parameter_maps_into_material(
  *   roughness = 1 - glossiness
  */
 void fill_material(const tinygltf::Model &model, int material_index,
-                   const fs::path &gltf_dir, scene::MaterialComponent &out) {
+                   const fs::path &gltf_dir, GltfMaterialData &out) {
     if (material_index < 0 ||
         material_index >= static_cast<int>(model.materials.size())) {
         return;
@@ -616,11 +616,11 @@ void fill_material(const tinygltf::Model &model, int material_index,
     const tinygltf::Material &m = model.materials[material_index];
 
     if (m.alphaMode == "MASK") {
-        out.alpha_mode = scene::MaterialAlphaMode::Mask;
+        out.alpha_mode = GltfMaterialAlphaMode::Mask;
     } else if (m.alphaMode == "BLEND") {
-        out.alpha_mode = scene::MaterialAlphaMode::Blend;
+        out.alpha_mode = GltfMaterialAlphaMode::Blend;
     } else {
-        out.alpha_mode = scene::MaterialAlphaMode::Opaque;
+        out.alpha_mode = GltfMaterialAlphaMode::Opaque;
     }
     out.alpha_cutoff = static_cast<float>(m.alphaCutoff);
     out.double_sided = m.doubleSided;
@@ -809,9 +809,9 @@ int find_first_material_index(const tinygltf::Model &model, int node_idx) {
  * - world transform 已 baked 进顶点
  */
 bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
-               scene::MaterialComponent &outMaterial,
+               GltfMaterialData &outMaterial,
                std::vector<GltfSubmeshRange> *outSubmeshes,
-               std::vector<scene::MaterialComponent> *outAllMaterials) {
+               std::vector<GltfMaterialData> *outAllMaterials) {
     outMesh.vertices.clear();
     outMesh.indices.clear();
     if (outSubmeshes != nullptr) {
@@ -878,7 +878,7 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
         return false;
     }
 
-    outMaterial = scene::MaterialComponent {};
+    outMaterial = GltfMaterialData {};
     if (outSubmeshes != nullptr && outAllMaterials != nullptr) {
         outAllMaterials->clear();
         outAllMaterials->resize(model.materials.size());

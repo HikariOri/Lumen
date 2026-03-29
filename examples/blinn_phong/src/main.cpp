@@ -485,31 +485,30 @@ static int run_blinn_phong() {
     lumen::ui::ImGuiLayer imgui_layer;
     imgui_layer.attach(pump);
 
-    pump.set_on_application_event(
-        [&](lumen::platform::DispatchableEvent &de) {
-            lumen::platform::EventDispatcher d(de);
-            d.dispatch<lumen::platform::EventQuit>(
-                [&](lumen::platform::EventQuit &) {
+    pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventQuit>(
+            [&](lumen::platform::EventQuit &) {
+                running = false;
+                window.set_relative_mouse_mode(false);
+                return true;
+            });
+        d.dispatch<lumen::platform::EventKeyDown>(
+            [&](lumen::platform::EventKeyDown &e) {
+                if (e.key == lumen::platform::Key::Escape) {
                     running = false;
                     window.set_relative_mouse_mode(false);
-                    return true;
-                });
-            d.dispatch<lumen::platform::EventKeyDown>(
-                [&](lumen::platform::EventKeyDown &e) {
-                    if (e.key == lumen::platform::Key::Escape) {
-                        running = false;
-                        window.set_relative_mouse_mode(false);
-                    }
-                    return false;
-                });
-            d.dispatch<lumen::platform::EventWindowResize>(
-                [&](lumen::platform::EventWindowResize &r) {
-                    fbWidth = r.width;
-                    fbHeight = r.height;
-                    needRecreateSwapchain = true;
-                    return false;
-                });
-        });
+                }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &r) {
+                fbWidth = r.width;
+                fbHeight = r.height;
+                needRecreateSwapchain = true;
+                return false;
+            });
+    });
 
     pump.push_layer([&](lumen::platform::DispatchableEvent &de) {
         lumen::platform::EventDispatcher d(de);

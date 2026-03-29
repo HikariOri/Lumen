@@ -1,6 +1,6 @@
 /**
  * @file light.hpp
- * @brief 将 `LightComponent` 打包为与 `demo3d` UBO 对齐的 `GPULight` 数组
+ * @brief 将场景光源打包为与 `demo3d` UBO 对齐的 `GPULight` 数组
  */
 
 #pragma once
@@ -39,7 +39,8 @@ struct GPULight {
 /**
  * @brief 收集至多 `kMaxLightsUbo` 盏灯；`out_count` 为实际数量
  *
- * 按 `ObjectId::id` 升序选取，与原先定向光打包策略一致。
+ * 含 `DirectionalLightComponent` / `PointLightComponent` / `SpotLightComponent`
+ * 的实体均参与；按 `entt::to_integral(entity)` 升序稳定排序。
  */
 void pack_lights_for_ubo(const ::entt::registry &registry, GPULight *out_lights,
                          std::uint32_t &out_count);

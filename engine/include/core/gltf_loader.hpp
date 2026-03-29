@@ -32,12 +32,10 @@
 #include <string_view>
 #include <vector>
 
+#include "core/gltf_material.hpp"
 #include "core/obj_loader.hpp"
 
 namespace lumen {
-namespace scene {
-struct MaterialComponent;
-}
 namespace core {
 
 /**
@@ -145,16 +143,16 @@ struct GltfSubmeshRange {
  * 单材质（简单场景）：
  * @code
  * ObjMesh mesh;
- * MaterialComponent mat;
+ * GltfMaterialData mat;
  * load_gltf("model.glb", mesh, mat);
  * @endcode
  *
  * 多材质（推荐）：
  * @code
  * ObjMesh mesh;
- * MaterialComponent mainMat;
+ * GltfMaterialData mainMat;
  * std::vector<GltfSubmeshRange> submeshes;
- * std::vector<MaterialComponent> materials;
+ * std::vector<GltfMaterialData> materials;
  *
  * load_gltf("model.glb", mesh, mainMat, &submeshes, &materials);
  *
@@ -190,9 +188,9 @@ struct GltfSubmeshRange {
  */
 bool load_gltf(
     std::string_view filePath, ObjMesh &outMesh,
-    scene::MaterialComponent &outMaterial,
+    GltfMaterialData &outMaterial,
     std::vector<GltfSubmeshRange> *outSubmeshes = nullptr,
-    std::vector<scene::MaterialComponent> *outAllMaterials = nullptr);
+    std::vector<GltfMaterialData> *outAllMaterials = nullptr);
 
 } // namespace core
 } // namespace lumen

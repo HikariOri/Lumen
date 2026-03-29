@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "scene/components.hpp"
+#include "core/gltf_material.hpp"
 
 namespace lumen {
 namespace render {
@@ -23,7 +23,7 @@ constexpr std::uint32_t kMatTexBitMrIsSpecularGlossinessMap = 1u << 5;
 
 /// 路径非空则视为使用该槽位贴图；否则片元用标量因子（设计文档「标量/贴图二选一」）
 inline std::uint32_t
-material_texture_mask_from_component(const lumen::scene::MaterialComponent &m) {
+material_texture_mask_from_gltf(const lumen::core::GltfMaterialData &m) {
     std::uint32_t mask = 0;
     if (!m.albedo_path.empty()) {
         mask |= kMatTexBitAlbedo;
