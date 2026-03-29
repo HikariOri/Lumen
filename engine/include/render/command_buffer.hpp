@@ -1,6 +1,6 @@
 /**
  * @file command_buffer.hpp
- * @brief CommandPool 与 CommandBuffer、帧同步对象
+ * @brief CommandPool、命令缓冲类型别名与帧同步聚合入口
  *
  * Vulkan 中所有 GPU 操作都需通过命令缓冲(CommandBuffer)提交，
  * 这些缓冲记录渲染、计算、内存拷贝等操作。在执行这些命令之前，
@@ -21,22 +21,66 @@
  * 每个 frame 拥有独立的 command buffer、semaphore 和 fence。
  * CPU 在下一帧开始之前，等待对应的 fence 结束。
  *
- * @todo [架构] 封装 CommandBuffer，将代码中的 vkCommandBuffer 适当替换为
- * CommandBuffer
- * @todo [架构] 拆分 CommandBuffer 和 FrameSync 到不同的文件
+ * @note `FrameSync` 定义见 `frame_sync.hpp`，此处包含以便沿用
+ * `#include "render/command_buffer.hpp"` 即可拿到帧同步类型。
  */
 
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan.h>
+
+#include "render/frame_sync.hpp"
 
 namespace lumen {
 namespace render {
 
 class Context;
+class CommandPool;
+
+/**
+ * @brief 命令缓冲句柄（非 RAII：不 `vkFree`；须 `CommandPool::free` 或池 `reset`）
+ *
+ * 有效 `VkCommandBuffer` **仅**能由 `CommandPool::allocate` 产生；无公开构造函数从
+ * `VkCommandBuffer` 包装。默认构造 / 移动后为空句柄。
+ */
+class CommandBuffer {
+public:
+    CommandBuffer() noexcept = default;
+    CommandBuffer(const CommandBuffer &) = delete;
+    CommandBuffer &operator=(const CommandBuffer &) = delete;
+    CommandBuffer(CommandBuffer &&other) noexcept;
+    CommandBuffer &operator=(CommandBuffer &&other) noexcept;
+    ~CommandBuffer() = default;
+
+    [[nodiscard]] VkCommandBuffer handle() const noexcept { return vk_; }
+    [[nodiscard]] bool is_valid() const noexcept {
+        return vk_ != VK_NULL_HANDLE;
+    }
+
+    /// 传入 Vulkan C API（与 `handle()` 相同）
+    [[nodiscard]] operator VkCommandBuffer() const noexcept { return vk_; }
+
+private:
+    friend class CommandPool;
+    explicit CommandBuffer(VkCommandBuffer vk) noexcept : vk_(vk) {}
+
+    VkCommandBuffer vk_ { VK_NULL_HANDLE };
+};
+
+/**
+ * @brief 与 `VkCommandBufferLevel` 对应的引擎侧枚举
+ */
+enum class CommandBufferLevel {
+    Primary,
+    Secondary,
+};
+
+[[nodiscard]] VkCommandBufferLevel
+command_buffer_level_to_vk(CommandBufferLevel level);
 
 /**
  * @class CommandPool
@@ -56,8 +100,6 @@ class Context;
  * - vkResetCommandPool 可以重置所有分配的 buffer
  * - CommandPool 必须在释放所有 buffer 之后销毁
  * - CommandPool 对线程访问不是线程安全的
- *
- * @todo 添加 one-shot command buffer 支持
  */
 class CommandPool {
 public:
@@ -82,23 +124,20 @@ public:
      * @brief 分配 CommandBuffer
      * @param count 数量
      * @param level 主/次级 CommandBuffer
-     * @return 成功返回 VkCommandBuffer 列表
+     * @return 成功返回句柄列表
      *
-     * VK_COMMAND_BUFFER_LEVEL_PRIMARY 可直接 vkQueueSubmit；
-     * VK_COMMAND_BUFFER_LEVEL_SECONDARY 只能被 primary 调用。
-     *
-     * @todo level 应该封装为 CommandBufferLevel
+     * Primary 可直接 vkQueueSubmit；Secondary 只能被 primary 调用。
      */
-    std::vector<VkCommandBuffer>
+    std::vector<CommandBuffer>
     allocate(uint32_t count,
-             VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+             CommandBufferLevel level = CommandBufferLevel::Primary);
 
     /**
      * @brief 释放 CommandBuffer
      *
      * 释放由此命令池分配的 command buffer。注意可以批量释放。
      */
-    void free(const std::vector<VkCommandBuffer> &buffers);
+    void free(const std::vector<CommandBuffer> &buffers);
 
     /**
      * @brief 重置命令池中所有分配（等价于 vkResetCommandPool）
@@ -107,105 +146,30 @@ public:
      */
     void reset();
 
+    /**
+     * @brief 单次提交：分配 1 个 primary buffer，`ONE_TIME_SUBMIT_BIT` 录制、提交并等待完成
+     *
+     * 适用于纹理上传、一次性 blit 等与帧循环无关的命令。调用方须保证
+     * `queue` 与创建本池时使用的队列族一致。
+     *
+     * @param queue 提交目标队列（通常为 `Context::graphics_queue()`）
+     * @param record 录制闭包（在 `vkBeginCommandBuffer` 与 `vkEndCommandBuffer` 之间调用）
+     * @return 任一步失败返回 false（buffer 仍会释放）
+     */
+    bool submit_one_shot(
+        VkQueue queue,
+        const std::function<void(const CommandBuffer &cmd)> &record);
+
     [[nodiscard]] VkCommandPool handle() const { return pool_; }
     [[nodiscard]] bool is_valid() const { return pool_ != VK_NULL_HANDLE; }
 
 private:
     void destroy_();
+    /// 释放单个 buffer（`std::initializer_list` 会拷贝，故不用 `free({cb})`）
+    void free_moved(CommandBuffer &&cb);
 
     VkDevice device_ { VK_NULL_HANDLE };
     VkCommandPool pool_ { VK_NULL_HANDLE };
-};
-
-/**
- * @class FrameSync
- * @brief per‑frame 同步对象：Semaphore + Fence
- *
- * 同步的核心目的是：
- * - Semaphore：用于 GPU 到 GPU（比如等待 imageAvailable
- *   再执行 draw，再 signal renderFinished 给 presentation）。
- * - Fence：用于 GPU 到 CPU（CPU 等待 GPU 完成一帧执行）。
- *
- * 多帧并发：
- * Vulkan 应用通常在一帧 GPU 执行时就开始 CPU 录制下一帧，
- * 所以需要有多个 fence & semaphore
- * 组合来轮转。:contentReference[oaicite:2]{index=2}
- */
-class FrameSync {
-public:
-    FrameSync() = default;
-    FrameSync(const FrameSync &) = delete;
-    FrameSync(FrameSync &&other) noexcept;
-    FrameSync &operator=(const FrameSync &) = delete;
-    FrameSync &operator=(FrameSync &&other) noexcept;
-    ~FrameSync();
-
-    /**
-     * @brief 创建 per‑frame 的同步对象
-     * @param device Vulkan device
-     * @param framesInFlight 并发帧数（如 2 或 3）
-     * @return true 表示成功
-     *
-     * 本版本为每帧创建一个 fence 和两个 semaphore
-     * - imageAvailable：等待下一帧图像可渲染
-     * - renderFinished：完成渲染后 signal 给 present
-     */
-    bool create(VkDevice device, uint32_t framesInFlight);
-
-    /**
-     * @brief 创建 per‑image 的 semaphore + per‑frame fence
-     * @param device Vulkan device
-     * @param swapchainImageCount swapchain 图像个数
-     * @param framesInFlight 并发帧数
-     *
-     * Swapchain 特殊调用，用 image 数量产生对应的
-     * imageAvailable Semaphore（避免复用冲突）。
-     */
-    bool create(VkDevice device, uint32_t swapchainImageCount,
-                uint32_t framesInFlight);
-
-    /**
-     * @brief 等待 fence 并重置
-     * @param frameIndex 当前帧索引
-     * @param timeoutNs 超时，UINT64_MAX 表示无限等待
-     * @return true 表示 fence 已 signal 并重置成功
-     *
-     * CPU 端等待 GPU 完成该帧，避免覆盖 GPU 正在使用的资源。
-     */
-    bool wait_fence(uint32_t frameIndex, uint64_t timeoutNs = UINT64_MAX);
-
-    /**
-     * @brief 获取按 imageIndex 的 imageAvailable Semaphore
-     */
-    [[nodiscard]] VkSemaphore image_available(uint32_t imageIndex) const;
-
-    /**
-     * @brief 获取按 imageIndex 的 renderFinished Semaphore
-     */
-    [[nodiscard]] VkSemaphore render_finished(uint32_t imageIndex) const;
-
-    /**
-     * @brief 获取当前帧的 fence
-     */
-    [[nodiscard]] VkFence in_flight_fence(uint32_t frameIndex) const;
-
-    [[nodiscard]] uint32_t frame_count() const {
-        return static_cast<uint32_t>(inFlightFences_.size());
-    }
-
-private:
-    void destroy_();
-
-    VkDevice device_ { VK_NULL_HANDLE };
-
-    /// Semaphore for image acquire (swapchain)
-    std::vector<VkSemaphore> imageAvailable_;
-
-    /// Semaphore for signaling render finish
-    std::vector<VkSemaphore> renderFinished_;
-
-    /// Per‑frame fence for CPU sync
-    std::vector<VkFence> inFlightFences_;
 };
 
 } // namespace render

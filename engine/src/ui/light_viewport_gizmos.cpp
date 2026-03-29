@@ -176,10 +176,10 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     icon_cfg.vertexBindings.push_back(
         { 0, sizeof(BillboardVertex), render::VertexInputRate::PerVertex });
     icon_cfg.vertexAttributes.push_back(
-        { 0, 0, render::VertexAttributeKind::F32Vec2,
+        { 0, 0, render::VertexAttributeFormat::F32Vec2,
           offsetof(BillboardVertex, pos) });
     icon_cfg.vertexAttributes.push_back(
-        { 1, 0, render::VertexAttributeKind::F32Vec2,
+        { 1, 0, render::VertexAttributeFormat::F32Vec2,
           offsetof(BillboardVertex, uv) });
     icon_cfg.depthTest = true;
     icon_cfg.depthWrite = false;
@@ -213,10 +213,10 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     dbg_cfg.vertexBindings.push_back(
         { 0, sizeof(LineV), render::VertexInputRate::PerVertex });
     dbg_cfg.vertexAttributes.push_back(
-        { 0, 0, render::VertexAttributeKind::F32Vec3,
+        { 0, 0, render::VertexAttributeFormat::F32Vec3,
           offsetof(LineV, position) });
     dbg_cfg.vertexAttributes.push_back(
-        { 1, 0, render::VertexAttributeKind::F32Vec4,
+        { 1, 0, render::VertexAttributeFormat::F32Vec4,
           offsetof(LineV, color) });
     dbg_cfg.depthTest = true;
     dbg_cfg.depthWrite = false;

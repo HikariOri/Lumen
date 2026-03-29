@@ -1,6 +1,6 @@
 /**
- * @file vertex_attribute_kind.hpp
- * @brief 顶点输入属性种类：标量、向量、矩阵合一枚举
+ * @file vertex_attribute_format.hpp
+ * @brief 顶点输入属性格式：标量、向量、矩阵合一枚举
  *
  * - 标量 / 向量：对应单个 `VkVertexInputAttributeDescription`。
  * - 矩阵：按列主序拆成多列，占用连续 `location`（`mat4` = 4 个 `vec4` 属性），
@@ -15,7 +15,7 @@
 namespace lumen {
 namespace render {
 
-enum class VertexAttributeKind : std::uint16_t {
+enum class VertexAttributeFormat : std::uint16_t {
     // --- 64-bit float ---
     F64,
     F64Vec2,
@@ -120,37 +120,37 @@ enum class VertexAttributeKind : std::uint16_t {
  * @brief 该属性在管线中占用的连续 location 数量（矩阵为多列）
  */
 [[nodiscard]] constexpr std::uint32_t
-vertex_attribute_location_count(VertexAttributeKind k) noexcept {
-    switch (k) {
-    case VertexAttributeKind::F64Mat2:
-    case VertexAttributeKind::F32Mat2:
-    case VertexAttributeKind::F16Mat2:
-    case VertexAttributeKind::I32Mat2:
-    case VertexAttributeKind::U32Mat2:
-    case VertexAttributeKind::I16Mat2:
-    case VertexAttributeKind::U16Mat2:
-    case VertexAttributeKind::I8Mat2:
-    case VertexAttributeKind::U8Mat2:
+vertex_attribute_format_location_count(VertexAttributeFormat fmt) noexcept {
+    switch (fmt) {
+    case VertexAttributeFormat::F64Mat2:
+    case VertexAttributeFormat::F32Mat2:
+    case VertexAttributeFormat::F16Mat2:
+    case VertexAttributeFormat::I32Mat2:
+    case VertexAttributeFormat::U32Mat2:
+    case VertexAttributeFormat::I16Mat2:
+    case VertexAttributeFormat::U16Mat2:
+    case VertexAttributeFormat::I8Mat2:
+    case VertexAttributeFormat::U8Mat2:
         return 2;
-    case VertexAttributeKind::F64Mat3:
-    case VertexAttributeKind::F32Mat3:
-    case VertexAttributeKind::F16Mat3:
-    case VertexAttributeKind::I32Mat3:
-    case VertexAttributeKind::U32Mat3:
-    case VertexAttributeKind::I16Mat3:
-    case VertexAttributeKind::U16Mat3:
-    case VertexAttributeKind::I8Mat3:
-    case VertexAttributeKind::U8Mat3:
+    case VertexAttributeFormat::F64Mat3:
+    case VertexAttributeFormat::F32Mat3:
+    case VertexAttributeFormat::F16Mat3:
+    case VertexAttributeFormat::I32Mat3:
+    case VertexAttributeFormat::U32Mat3:
+    case VertexAttributeFormat::I16Mat3:
+    case VertexAttributeFormat::U16Mat3:
+    case VertexAttributeFormat::I8Mat3:
+    case VertexAttributeFormat::U8Mat3:
         return 3;
-    case VertexAttributeKind::F64Mat4:
-    case VertexAttributeKind::F32Mat4:
-    case VertexAttributeKind::F16Mat4:
-    case VertexAttributeKind::I32Mat4:
-    case VertexAttributeKind::U32Mat4:
-    case VertexAttributeKind::I16Mat4:
-    case VertexAttributeKind::U16Mat4:
-    case VertexAttributeKind::I8Mat4:
-    case VertexAttributeKind::U8Mat4:
+    case VertexAttributeFormat::F64Mat4:
+    case VertexAttributeFormat::F32Mat4:
+    case VertexAttributeFormat::F16Mat4:
+    case VertexAttributeFormat::I32Mat4:
+    case VertexAttributeFormat::U32Mat4:
+    case VertexAttributeFormat::I16Mat4:
+    case VertexAttributeFormat::U16Mat4:
+    case VertexAttributeFormat::I8Mat4:
+    case VertexAttributeFormat::U8Mat4:
         return 4;
     default:
         return 1;

@@ -48,195 +48,195 @@ void append_vertex_input_attributes(
     const uint32_t L { a.location };
     const uint32_t B { a.binding };
     const uint32_t O { a.offset };
-    using K = VertexAttributeKind;
+    using F = VertexAttributeFormat;
 
-    switch (a.kind) {
-    case K::F64: push_attr(out, L, B, VK_FORMAT_R64_SFLOAT, O); return;
-    case K::F64Vec2: push_attr(out, L, B, VK_FORMAT_R64G64_SFLOAT, O); return;
-    case K::F64Vec3:
+    switch (a.format) {
+    case F::F64: push_attr(out, L, B, VK_FORMAT_R64_SFLOAT, O); return;
+    case F::F64Vec2: push_attr(out, L, B, VK_FORMAT_R64G64_SFLOAT, O); return;
+    case F::F64Vec3:
         push_attr(out, L, B, VK_FORMAT_R64G64B64_SFLOAT, O);
         return;
-    case K::F64Vec4:
+    case F::F64Vec4:
         push_attr(out, L, B, VK_FORMAT_R64G64B64A64_SFLOAT, O);
         return;
-    case K::F64Mat2:
+    case F::F64Mat2:
         push_matrix_cols(out, L, B, O, 2, 16, VK_FORMAT_R64G64_SFLOAT);
         return;
-    case K::F64Mat3:
+    case F::F64Mat3:
         push_matrix_cols(out, L, B, O, 3, 24, VK_FORMAT_R64G64B64_SFLOAT);
         return;
-    case K::F64Mat4:
+    case F::F64Mat4:
         push_matrix_cols(out, L, B, O, 4, 32, VK_FORMAT_R64G64B64A64_SFLOAT);
         return;
 
-    case K::F32: push_attr(out, L, B, VK_FORMAT_R32_SFLOAT, O); return;
-    case K::F32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SFLOAT, O); return;
-    case K::F32Vec3:
+    case F::F32: push_attr(out, L, B, VK_FORMAT_R32_SFLOAT, O); return;
+    case F::F32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SFLOAT, O); return;
+    case F::F32Vec3:
         push_attr(out, L, B, VK_FORMAT_R32G32B32_SFLOAT, O);
         return;
-    case K::F32Vec4:
+    case F::F32Vec4:
         push_attr(out, L, B, VK_FORMAT_R32G32B32A32_SFLOAT, O);
         return;
-    case K::F32Mat2:
+    case F::F32Mat2:
         push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_SFLOAT);
         return;
-    case K::F32Mat3:
+    case F::F32Mat3:
         push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_SFLOAT);
         return;
-    case K::F32Mat4:
+    case F::F32Mat4:
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
         return;
 
-    case K::F16: push_attr(out, L, B, VK_FORMAT_R16_SFLOAT, O); return;
-    case K::F16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SFLOAT, O); return;
-    case K::F16Vec3:
+    case F::F16: push_attr(out, L, B, VK_FORMAT_R16_SFLOAT, O); return;
+    case F::F16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SFLOAT, O); return;
+    case F::F16Vec3:
         push_attr(out, L, B, VK_FORMAT_R16G16B16_SFLOAT, O);
         return;
-    case K::F16Vec4:
+    case F::F16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SFLOAT, O);
         return;
-    case K::F16Mat2:
+    case F::F16Mat2:
         push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_SFLOAT);
         return;
-    case K::F16Mat3:
+    case F::F16Mat3:
         push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_SFLOAT);
         return;
-    case K::F16Mat4:
+    case F::F16Mat4:
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SFLOAT);
         return;
 
-    case K::I32: push_attr(out, L, B, VK_FORMAT_R32_SINT, O); return;
-    case K::I32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SINT, O); return;
-    case K::I32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_SINT, O); return;
-    case K::I32Vec4:
+    case F::I32: push_attr(out, L, B, VK_FORMAT_R32_SINT, O); return;
+    case F::I32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_SINT, O); return;
+    case F::I32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_SINT, O); return;
+    case F::I32Vec4:
         push_attr(out, L, B, VK_FORMAT_R32G32B32A32_SINT, O);
         return;
-    case K::I32Mat2:
+    case F::I32Mat2:
         push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_SINT);
         return;
-    case K::I32Mat3:
+    case F::I32Mat3:
         push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_SINT);
         return;
-    case K::I32Mat4:
+    case F::I32Mat4:
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_SINT);
         return;
 
-    case K::U32: push_attr(out, L, B, VK_FORMAT_R32_UINT, O); return;
-    case K::U32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_UINT, O); return;
-    case K::U32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_UINT, O); return;
-    case K::U32Vec4:
+    case F::U32: push_attr(out, L, B, VK_FORMAT_R32_UINT, O); return;
+    case F::U32Vec2: push_attr(out, L, B, VK_FORMAT_R32G32_UINT, O); return;
+    case F::U32Vec3: push_attr(out, L, B, VK_FORMAT_R32G32B32_UINT, O); return;
+    case F::U32Vec4:
         push_attr(out, L, B, VK_FORMAT_R32G32B32A32_UINT, O);
         return;
-    case K::U32Mat2:
+    case F::U32Mat2:
         push_matrix_cols(out, L, B, O, 2, 8, VK_FORMAT_R32G32_UINT);
         return;
-    case K::U32Mat3:
+    case F::U32Mat3:
         push_matrix_cols(out, L, B, O, 3, 12, VK_FORMAT_R32G32B32_UINT);
         return;
-    case K::U32Mat4:
+    case F::U32Mat4:
         push_matrix_cols(out, L, B, O, 4, 16, VK_FORMAT_R32G32B32A32_UINT);
         return;
 
-    case K::I16: push_attr(out, L, B, VK_FORMAT_R16_SINT, O); return;
-    case K::I16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SINT, O); return;
-    case K::I16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_SINT, O); return;
-    case K::I16Vec4:
+    case F::I16: push_attr(out, L, B, VK_FORMAT_R16_SINT, O); return;
+    case F::I16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_SINT, O); return;
+    case F::I16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_SINT, O); return;
+    case F::I16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SINT, O);
         return;
-    case K::I16Mat2:
+    case F::I16Mat2:
         push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_SINT);
         return;
-    case K::I16Mat3:
+    case F::I16Mat3:
         push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_SINT);
         return;
-    case K::I16Mat4:
+    case F::I16Mat4:
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_SINT);
         return;
 
-    case K::U16: push_attr(out, L, B, VK_FORMAT_R16_UINT, O); return;
-    case K::U16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_UINT, O); return;
-    case K::U16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_UINT, O); return;
-    case K::U16Vec4:
+    case F::U16: push_attr(out, L, B, VK_FORMAT_R16_UINT, O); return;
+    case F::U16Vec2: push_attr(out, L, B, VK_FORMAT_R16G16_UINT, O); return;
+    case F::U16Vec3: push_attr(out, L, B, VK_FORMAT_R16G16B16_UINT, O); return;
+    case F::U16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UINT, O);
         return;
-    case K::U16Mat2:
+    case F::U16Mat2:
         push_matrix_cols(out, L, B, O, 2, 4, VK_FORMAT_R16G16_UINT);
         return;
-    case K::U16Mat3:
+    case F::U16Mat3:
         push_matrix_cols(out, L, B, O, 3, 6, VK_FORMAT_R16G16B16_UINT);
         return;
-    case K::U16Mat4:
+    case F::U16Mat4:
         push_matrix_cols(out, L, B, O, 4, 8, VK_FORMAT_R16G16B16A16_UINT);
         return;
 
-    case K::I8: push_attr(out, L, B, VK_FORMAT_R8_SINT, O); return;
-    case K::I8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SINT, O); return;
-    case K::I8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SINT, O); return;
-    case K::I8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SINT, O); return;
-    case K::I8Mat2:
+    case F::I8: push_attr(out, L, B, VK_FORMAT_R8_SINT, O); return;
+    case F::I8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SINT, O); return;
+    case F::I8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SINT, O); return;
+    case F::I8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SINT, O); return;
+    case F::I8Mat2:
         push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_SINT);
         return;
-    case K::I8Mat3:
+    case F::I8Mat3:
         push_matrix_cols(out, L, B, O, 3, 3, VK_FORMAT_R8G8B8_SINT);
         return;
-    case K::I8Mat4:
+    case F::I8Mat4:
         push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_SINT);
         return;
 
-    case K::U8: push_attr(out, L, B, VK_FORMAT_R8_UINT, O); return;
-    case K::U8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UINT, O); return;
-    case K::U8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UINT, O); return;
-    case K::U8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UINT, O); return;
-    case K::U8Mat2:
+    case F::U8: push_attr(out, L, B, VK_FORMAT_R8_UINT, O); return;
+    case F::U8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UINT, O); return;
+    case F::U8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UINT, O); return;
+    case F::U8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UINT, O); return;
+    case F::U8Mat2:
         push_matrix_cols(out, L, B, O, 2, 2, VK_FORMAT_R8G8_UINT);
         return;
-    case K::U8Mat3:
+    case F::U8Mat3:
         push_matrix_cols(out, L, B, O, 3, 3, VK_FORMAT_R8G8B8_UINT);
         return;
-    case K::U8Mat4:
+    case F::U8Mat4:
         push_matrix_cols(out, L, B, O, 4, 4, VK_FORMAT_R8G8B8A8_UINT);
         return;
 
-    case K::Unorm8: push_attr(out, L, B, VK_FORMAT_R8_UNORM, O); return;
-    case K::Unorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UNORM, O); return;
-    case K::Unorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UNORM, O); return;
-    case K::Unorm8Vec4:
+    case F::Unorm8: push_attr(out, L, B, VK_FORMAT_R8_UNORM, O); return;
+    case F::Unorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_UNORM, O); return;
+    case F::Unorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_UNORM, O); return;
+    case F::Unorm8Vec4:
         push_attr(out, L, B, VK_FORMAT_R8G8B8A8_UNORM, O);
         return;
 
-    case K::Snorm8: push_attr(out, L, B, VK_FORMAT_R8_SNORM, O); return;
-    case K::Snorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SNORM, O); return;
-    case K::Snorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SNORM, O); return;
-    case K::Snorm8Vec4:
+    case F::Snorm8: push_attr(out, L, B, VK_FORMAT_R8_SNORM, O); return;
+    case F::Snorm8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SNORM, O); return;
+    case F::Snorm8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SNORM, O); return;
+    case F::Snorm8Vec4:
         push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SNORM, O);
         return;
 
-    case K::Unorm16: push_attr(out, L, B, VK_FORMAT_R16_UNORM, O); return;
-    case K::Unorm16Vec2:
+    case F::Unorm16: push_attr(out, L, B, VK_FORMAT_R16_UNORM, O); return;
+    case F::Unorm16Vec2:
         push_attr(out, L, B, VK_FORMAT_R16G16_UNORM, O);
         return;
-    case K::Unorm16Vec3:
+    case F::Unorm16Vec3:
         push_attr(out, L, B, VK_FORMAT_R16G16B16_UNORM, O);
         return;
-    case K::Unorm16Vec4:
+    case F::Unorm16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_UNORM, O);
         return;
 
-    case K::Snorm16: push_attr(out, L, B, VK_FORMAT_R16_SNORM, O); return;
-    case K::Snorm16Vec2:
+    case F::Snorm16: push_attr(out, L, B, VK_FORMAT_R16_SNORM, O); return;
+    case F::Snorm16Vec2:
         push_attr(out, L, B, VK_FORMAT_R16G16_SNORM, O);
         return;
-    case K::Snorm16Vec3:
+    case F::Snorm16Vec3:
         push_attr(out, L, B, VK_FORMAT_R16G16B16_SNORM, O);
         return;
-    case K::Snorm16Vec4:
+    case F::Snorm16Vec4:
         push_attr(out, L, B, VK_FORMAT_R16G16B16A16_SNORM, O);
         return;
 
-    case K::Srgb8: push_attr(out, L, B, VK_FORMAT_R8_SRGB, O); return;
-    case K::Srgb8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SRGB, O); return;
-    case K::Srgb8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SRGB, O); return;
-    case K::Srgb8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SRGB, O); return;
+    case F::Srgb8: push_attr(out, L, B, VK_FORMAT_R8_SRGB, O); return;
+    case F::Srgb8Vec2: push_attr(out, L, B, VK_FORMAT_R8G8_SRGB, O); return;
+    case F::Srgb8Vec3: push_attr(out, L, B, VK_FORMAT_R8G8B8_SRGB, O); return;
+    case F::Srgb8Vec4: push_attr(out, L, B, VK_FORMAT_R8G8B8A8_SRGB, O); return;
     default: return;
     }
 }

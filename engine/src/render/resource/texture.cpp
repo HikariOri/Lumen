@@ -475,7 +475,7 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
     }
 
     // One-shot command buffer: copy + mipmaps
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    auto buffers = cmdPool.allocate(1, CommandBufferLevel::Primary);
     if (buffers.empty()) {
         destroy_();
         return false;
@@ -695,7 +695,7 @@ bool Texture::create_cubemap_from_rgba8_faces(
     }
 
     // 3. Copy buffer to image
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    auto buffers = cmdPool.allocate(1, CommandBufferLevel::Primary);
     if (buffers.empty()) {
         destroy_();
         return false;
@@ -877,7 +877,7 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
     }
 
     // Copy buffer to image
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    auto buffers = cmdPool.allocate(1, CommandBufferLevel::Primary);
     if (buffers.empty()) {
         destroy_();
         return false;
@@ -1027,7 +1027,7 @@ bool Texture::create_cubemap_from_rgba32f_faces(
         return false;
     }
 
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    auto buffers = cmdPool.allocate(1, CommandBufferLevel::Primary);
     if (buffers.empty()) {
         destroy_();
         return false;

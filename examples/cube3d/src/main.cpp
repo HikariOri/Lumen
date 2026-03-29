@@ -278,12 +278,12 @@ static int run_cube3d() {
     pipeConfig.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec3,
+          .format = lumen::render::VertexAttributeFormat::F32Vec3,
           .offset = offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { .location = 1,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec2,
+          .format = lumen::render::VertexAttributeFormat::F32Vec2,
           .offset = offsetof(Vertex, uv) });
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
@@ -389,7 +389,8 @@ static int run_cube3d() {
             continue;
         }
 
-        vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
+        VkCommandBuffer cmdBuf = cmdBuffers[currentFrame];
+        vkResetCommandBuffer(cmdBuf, 0);
 
         const float seconds = static_cast<float>(SDL_GetTicks()) * 0.001F;
         const float aspect =
@@ -411,7 +412,7 @@ static int run_cube3d() {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
+        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
             VK_SUCCESS) {
             continue;
         }
@@ -430,7 +431,7 @@ static int run_cube3d() {
         rpBegin.clearValueCount = 2;
         rpBegin.pClearValues = clearValues;
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &rpBegin,
+        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
                              VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
@@ -440,31 +441,31 @@ static int run_cube3d() {
         viewport.height = static_cast<float>(swapchain.extent().height);
         viewport.minDepth = 0.0F;
         viewport.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &viewport);
+        vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 
         VkRect2D scissor {};
         scissor.offset = { .x = 0, .y = 0 };
         scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
+        vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 
-        vkCmdBindPipeline(cmdBuffers[currentFrame],
+        vkCmdBindPipeline(cmdBuf,
                           VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuffers[currentFrame],
+        vkCmdBindDescriptorSets(cmdBuf,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout.handle(), 0, 1,
                                 &descriptorSets[currentFrame], 0, nullptr);
 
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmdBuffers[currentFrame], indexBuffer.handle(), 0,
+        vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
+        vkCmdBindIndexBuffer(cmdBuf, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuffers[currentFrame],
+        vkCmdDrawIndexed(cmdBuf,
                          static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
+        vkCmdEndRenderPass(cmdBuf);
 
-        if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
+        if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS) {
             continue;
         }
 
@@ -478,7 +479,7 @@ static int run_cube3d() {
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffers[currentFrame];
+        submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 

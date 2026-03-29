@@ -13,7 +13,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "vertex_attribute_kind.hpp"
+#include "vertex_attribute_format.hpp"
 
 namespace lumen {
 namespace render {
@@ -44,11 +44,11 @@ struct VertexInputBinding {
     VertexInputRate inputRate { VertexInputRate::PerVertex };
 };
 
-/// 顶点属性（`kind` 决定 VkFormat；矩阵类会占用连续多个 location）
+/// 顶点属性（`format` 决定 VkFormat；矩阵类会占用连续多个 location）
 struct VertexInputAttribute {
     uint32_t location { 0 };
     uint32_t binding { 0 };
-    VertexAttributeKind kind { VertexAttributeKind::F32Vec3 };
+    VertexAttributeFormat format { VertexAttributeFormat::F32Vec3 };
     uint32_t offset { 0 };
 };
 

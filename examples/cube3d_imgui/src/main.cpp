@@ -302,12 +302,12 @@ static int run_cube3d_imgui() {
     pipeConfig.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec3,
+          .format = lumen::render::VertexAttributeFormat::F32Vec3,
           .offset = offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { .location = 1,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec2,
+          .format = lumen::render::VertexAttributeFormat::F32Vec2,
           .offset = offsetof(Vertex, uv) });
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
@@ -490,7 +490,8 @@ static int run_cube3d_imgui() {
         }
         ImGui::End();
 
-        vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
+        VkCommandBuffer cmdBuf = cmdBuffers[currentFrame];
+        vkResetCommandBuffer(cmdBuf, 0);
 
         const float seconds = static_cast<float>(SDL_GetTicks()) * 0.001F;
         const float aspect = static_cast<float>(scene_w) /
@@ -511,7 +512,7 @@ static int run_cube3d_imgui() {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
+        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
             VK_SUCCESS) {
             continue;
         }
@@ -531,7 +532,7 @@ static int run_cube3d_imgui() {
         scene_rp.clearValueCount = 2;
         scene_rp.pClearValues = scene_clears;
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &scene_rp,
+        vkCmdBeginRenderPass(cmdBuf, &scene_rp,
                              VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport scene_vp {};
@@ -541,29 +542,29 @@ static int run_cube3d_imgui() {
         scene_vp.height = static_cast<float>(sceneTarget.extent().height);
         scene_vp.minDepth = 0.0F;
         scene_vp.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &scene_vp);
+        vkCmdSetViewport(cmdBuf, 0, 1, &scene_vp);
 
         VkRect2D scene_sc {};
         scene_sc.offset = { .x = 0, .y = 0 };
         scene_sc.extent = sceneTarget.extent();
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scene_sc);
+        vkCmdSetScissor(cmdBuf, 0, 1, &scene_sc);
 
-        vkCmdBindPipeline(cmdBuffers[currentFrame],
+        vkCmdBindPipeline(cmdBuf,
                           VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuffers[currentFrame],
+        vkCmdBindDescriptorSets(cmdBuf,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout.handle(), 0, 1,
                                 &descriptorSets[currentFrame], 0, nullptr);
 
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmdBuffers[currentFrame], indexBuffer.handle(), 0,
+        vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
+        vkCmdBindIndexBuffer(cmdBuf, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuffers[currentFrame],
+        vkCmdDrawIndexed(cmdBuf,
                          static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
+        vkCmdEndRenderPass(cmdBuf);
 
         // 2) 交换链：仅 ImGui
         VkClearValue swap_clear {};
@@ -579,7 +580,7 @@ static int run_cube3d_imgui() {
         rpBegin.clearValueCount = 1;
         rpBegin.pClearValues = &swap_clear;
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &rpBegin,
+        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
                              VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
@@ -589,18 +590,18 @@ static int run_cube3d_imgui() {
         viewport.height = static_cast<float>(swapchain.extent().height);
         viewport.minDepth = 0.0F;
         viewport.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &viewport);
+        vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 
         VkRect2D scissor {};
         scissor.offset = { .x = 0, .y = 0 };
         scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
+        vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 
-        imgui_layer.end_frame(cmdBuffers[currentFrame]);
+        imgui_layer.end_frame(cmdBuf);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
+        vkCmdEndRenderPass(cmdBuf);
 
-        if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
+        if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS) {
             continue;
         }
 
@@ -614,7 +615,7 @@ static int run_cube3d_imgui() {
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffers[currentFrame];
+        submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 

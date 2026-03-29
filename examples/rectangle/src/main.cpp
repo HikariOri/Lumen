@@ -150,12 +150,12 @@ static int run_triangle() {
     pipeConfig.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec2,
+          .format = lumen::render::VertexAttributeFormat::F32Vec2,
           .offset = offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { .location = 1,
           .binding = 0,
-          .kind = lumen::render::VertexAttributeKind::F32Vec4,
+          .format = lumen::render::VertexAttributeFormat::F32Vec4,
           .offset = offsetof(Vertex, color) });
     pipeConfig.depthTest = false;
     pipeConfig.depthWrite = false;
@@ -262,13 +262,14 @@ static int run_triangle() {
             continue;
         }
 
-        vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
+        VkCommandBuffer cmdBuf = cmdBuffers[currentFrame];
+        vkResetCommandBuffer(cmdBuf, 0);
 
         VkCommandBufferBeginInfo beginInfo {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
+        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
             VK_SUCCESS) {
             continue;
         }
@@ -285,7 +286,7 @@ static int run_triangle() {
         rpBegin.clearValueCount = 1;
         rpBegin.pClearValues = &clearColor;
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &rpBegin,
+        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
                              VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
@@ -295,24 +296,24 @@ static int run_triangle() {
         viewport.height = static_cast<float>(swapchain.extent().height);
         viewport.minDepth = 0.0F;
         viewport.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &viewport);
+        vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
 
         VkRect2D scissor {};
         scissor.offset = { .x = 0, .y = 0 };
         scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
+        vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
 
-        vkCmdBindPipeline(cmdBuffers[currentFrame],
+        vkCmdBindPipeline(cmdBuf,
                           VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
 
         VkBuffer vb = vertexBuffer.handle();
         VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdDraw(cmdBuffers[currentFrame], 6, 1, 0, 0);
+        vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
+        vkCmdDraw(cmdBuf, 6, 1, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
+        vkCmdEndRenderPass(cmdBuf);
 
-        if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
+        if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS) {
             continue;
         }
 
@@ -326,7 +327,7 @@ static int run_triangle() {
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffers[currentFrame];
+        submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 
