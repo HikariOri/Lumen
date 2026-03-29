@@ -121,20 +121,32 @@ static int run_triangle() {
 
     const std::array<uint16_t, 6> indices { { 0, 1, 2, 0, 2, 3 } };
 
+    lumen::render::CommandPool cmdPool;
+    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
+        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
+        return -1;
+    }
+    auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
+    if (cmdBuffers.size() != kMaxFramesInFlight) {
+        LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
+        return -1;
+    }
+
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
+            sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
     lumen::render::IndexBuffer indexBuffer;
-
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    if (!indexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, indices.data(),
+            sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
     lumen::render::PipelineLayout pipelineLayout;
     if (!pipelineLayout.create(ctx, {})) {
@@ -170,19 +182,6 @@ static int run_triangle() {
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
         LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
-        return -1;
-    }
-
-    lumen::render::CommandPool cmdPool;
-    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
-        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
-        return -1;
-    }
-
-    // 分配和 kMaxFramesInFlight 一样多的 command buffers
-    auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
-    if (cmdBuffers.size() != kMaxFramesInFlight) {
-        LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
         return -1;
     }
 

@@ -211,19 +211,21 @@ static int run_cube3d_imgui() {
     } };
 
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(ctx, ctx.graphics_queue(),
+                                                     cmdPool, vertices.data(),
+                                                     sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
     lumen::render::IndexBuffer indexBuffer;
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    if (!indexBuffer.create_device_local_and_upload(ctx, ctx.graphics_queue(),
+                                                    cmdPool, indices.data(),
+                                                    sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
     lumen::render::DescriptorSetLayout descLayout;
     const std::vector<lumen::render::DescriptorBinding> descBindings = {
@@ -256,7 +258,7 @@ static int run_cube3d_imgui() {
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight>
         uniformBuffers {};
     for (auto &ub : uniformBuffers) {
-        if (!ub.create(ctx, kUboSize)) {
+        if (!ub.create_persistent(ctx, kUboSize)) {
             LUMEN_APP_LOG_ERROR("UniformBuffer 创建失败");
             return -1;
         }
@@ -343,10 +345,10 @@ static int run_cube3d_imgui() {
     static std::string imgui_font_sc_path;
     static std::string imgui_font_jp_path;
     imgui_font_sc_path = lumen::core::get_resource_path(
-        "assets/font/SourceHanSansSC/OTF/SimplifiedChinese/"
+        "assets/fonts/SourceHanSansSC/OTF/SimplifiedChinese/"
         "SourceHanSansSC-Bold.otf");
     imgui_font_jp_path = lumen::core::get_resource_path(
-        "assets/font/SourceHanSansSC/OTF/Japanese/SourceHanSans-Bold.otf");
+        "assets/fonts/SourceHanSansSC/OTF/Japanese/SourceHanSans-Bold.otf");
     imguiInfo.cjk_font_ttf_path = imgui_font_sc_path.c_str();
     imguiInfo.cjk_font_japanese_merge_path = imgui_font_jp_path.c_str();
     if (!lumen::ui::imgui_backend_init(imguiInfo)) {
@@ -377,29 +379,28 @@ static int run_cube3d_imgui() {
 
     lumen::ui::ImGuiLayer imgui_layer;
     imgui_layer.attach(pump);
-    pump.set_on_application_event(
-        [&](lumen::platform::DispatchableEvent &de) {
-            lumen::platform::EventDispatcher d(de);
-            d.dispatch<lumen::platform::EventQuit>(
-                [&](lumen::platform::EventQuit &) {
+    pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventQuit>(
+            [&](lumen::platform::EventQuit &) {
+                running = false;
+                return true;
+            });
+        d.dispatch<lumen::platform::EventKeyDown>(
+            [&](lumen::platform::EventKeyDown &e) {
+                if (e.key == lumen::platform::Key::Escape) {
                     running = false;
-                    return true;
-                });
-            d.dispatch<lumen::platform::EventKeyDown>(
-                [&](lumen::platform::EventKeyDown &e) {
-                    if (e.key == lumen::platform::Key::Escape) {
-                        running = false;
-                    }
-                    return false;
-                });
-            d.dispatch<lumen::platform::EventWindowResize>(
-                [&](lumen::platform::EventWindowResize &r) {
-                    fbWidth = r.width;
-                    fbHeight = r.height;
-                    needRecreateSwapchain = true;
-                    return false;
-                });
-        });
+                }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &r) {
+                fbWidth = r.width;
+                fbHeight = r.height;
+                needRecreateSwapchain = true;
+                return false;
+            });
+    });
 
     float spin_rad_per_sec { kSpinRadPerSecond };
 
@@ -512,8 +513,7 @@ static int run_cube3d_imgui() {
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
         };
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
-            VK_SUCCESS) {
+        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) != VK_SUCCESS) {
             continue;
         }
 
@@ -532,8 +532,7 @@ static int run_cube3d_imgui() {
         scene_rp.clearValueCount = 2;
         scene_rp.pClearValues = scene_clears;
 
-        vkCmdBeginRenderPass(cmdBuf, &scene_rp,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuf, &scene_rp, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport scene_vp {};
         scene_vp.x = 0.0F;
@@ -549,10 +548,9 @@ static int run_cube3d_imgui() {
         scene_sc.extent = sceneTarget.extent();
         vkCmdSetScissor(cmdBuf, 0, 1, &scene_sc);
 
-        vkCmdBindPipeline(cmdBuf,
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuf,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+        vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          pipeline.handle());
+        vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout.handle(), 0, 1,
                                 &descriptorSets[currentFrame], 0, nullptr);
 
@@ -561,8 +559,8 @@ static int run_cube3d_imgui() {
         vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
         vkCmdBindIndexBuffer(cmdBuf, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuf,
-                         static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmdBuf, static_cast<uint32_t>(indices.size()), 1, 0, 0,
+                         0);
 
         vkCmdEndRenderPass(cmdBuf);
 
@@ -580,8 +578,7 @@ static int run_cube3d_imgui() {
         rpBegin.clearValueCount = 1;
         rpBegin.pClearValues = &swap_clear;
 
-        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuf, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
         viewport.x = 0.0F;

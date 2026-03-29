@@ -155,19 +155,21 @@ static int run_rectangle_textured() {
     LUMEN_APP_LOG_INFO("纹理: {}", texPath);
 
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
+            sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
     lumen::render::IndexBuffer indexBuffer;
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    if (!indexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, indices.data(),
+            sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
     // Create descriptor set layout
     lumen::render::DescriptorSetLayout descLayout;

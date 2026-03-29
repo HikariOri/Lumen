@@ -301,19 +301,21 @@ static int run_blinn_phong() {
     } };
 
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
+            sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
     lumen::render::IndexBuffer indexBuffer;
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    if (!indexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, indices.data(),
+            sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
     lumen::render::DescriptorSetLayout descLayout;
     const std::vector<lumen::render::DescriptorBinding> descBindings = {
@@ -346,7 +348,7 @@ static int run_blinn_phong() {
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight>
         uniformBuffers {};
     for (auto &ub : uniformBuffers) {
-        if (!ub.create(ctx, kUboSize)) {
+        if (!ub.create_persistent(ctx, kUboSize)) {
             LUMEN_APP_LOG_ERROR("UniformBuffer 创建失败");
             return -1;
         }
@@ -438,10 +440,10 @@ static int run_blinn_phong() {
     static std::string imgui_font_sc_path;
     static std::string imgui_font_jp_path;
     imgui_font_sc_path = lumen::core::get_resource_path(
-        "assets/font/SourceHanSansSC/OTF/SimplifiedChinese/"
+        "assets/fonts/SourceHanSansSC/OTF/SimplifiedChinese/"
         "SourceHanSansSC-Bold.otf");
     imgui_font_jp_path = lumen::core::get_resource_path(
-        "assets/font/SourceHanSansSC/OTF/Japanese/SourceHanSans-Bold.otf");
+        "assets/fonts/SourceHanSansSC/OTF/Japanese/SourceHanSans-Bold.otf");
     imguiInfo.cjk_font_ttf_path = imgui_font_sc_path.c_str();
     imguiInfo.cjk_font_japanese_merge_path = imgui_font_jp_path.c_str();
     if (!lumen::ui::imgui_backend_init(imguiInfo)) {

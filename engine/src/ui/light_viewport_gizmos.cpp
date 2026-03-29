@@ -124,14 +124,15 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
         { { -1.0f, 1.0f }, { 0.0f, 0.0f } },
     };
     const uint32_t k_quad_idx[] = { 0u, 1u, 2u, 0u, 2u, 3u };
-    if (!icon_vertex_buffer_.create(ctx, sizeof(k_quad)) ||
-        !icon_index_buffer_.create(ctx, sizeof(k_quad_idx))) {
+    if (!icon_vertex_buffer_.create_device_local_and_upload(
+            ctx, info.graphics_queue, *info.cmd_pool, k_quad, sizeof(k_quad)) ||
+        !icon_index_buffer_.create_device_local_and_upload(
+            ctx, info.graphics_queue, *info.cmd_pool, k_quad_idx,
+            sizeof(k_quad_idx))) {
         destroy();
         return false;
     }
-    icon_vertex_buffer_.upload(k_quad, sizeof(k_quad));
     icon_index_buffer_.set_index_type(render::IndexBuffer::IndexType::Uint32);
-    icon_index_buffer_.upload(k_quad_idx, sizeof(k_quad_idx));
 
     if (!icon_desc_layout_.create(
             ctx, { { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,

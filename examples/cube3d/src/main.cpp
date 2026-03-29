@@ -187,19 +187,21 @@ static int run_cube3d() {
     } };
 
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
+            sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
     lumen::render::IndexBuffer indexBuffer;
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
+    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
+    if (!indexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, indices.data(),
+            sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
     lumen::render::DescriptorSetLayout descLayout;
     const std::vector<lumen::render::DescriptorBinding> descBindings = {
@@ -232,7 +234,7 @@ static int run_cube3d() {
     std::array<lumen::render::UniformBuffer, kMaxFramesInFlight>
         uniformBuffers {};
     for (auto &ub : uniformBuffers) {
-        if (!ub.create(ctx, kUboSize)) {
+        if (!ub.create_persistent(ctx, kUboSize)) {
             LUMEN_APP_LOG_ERROR("UniformBuffer 创建失败");
             return -1;
         }

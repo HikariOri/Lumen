@@ -119,12 +119,24 @@ static int run_triangle() {
         { .position = { 0.5F, 0.5F }, .color = { 0.55F, 1.0F, 0.45F, 1.0F } },
     } };
 
+    lumen::render::CommandPool cmdPool;
+    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
+        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
+        return -1;
+    }
+    auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
+    if (cmdBuffers.size() != kMaxFramesInFlight) {
+        LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
+        return -1;
+    }
+
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
+            sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
     lumen::render::PipelineLayout pipelineLayout;
     if (!pipelineLayout.create(ctx, {})) {
@@ -160,19 +172,6 @@ static int run_triangle() {
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
         LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
-        return -1;
-    }
-
-    lumen::render::CommandPool cmdPool;
-    if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
-        LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
-        return -1;
-    }
-
-    // 分配和 kMaxFramesInFlight 一样多的 command buffers
-    auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
-    if (cmdBuffers.size() != kMaxFramesInFlight) {
-        LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
         return -1;
     }
 
