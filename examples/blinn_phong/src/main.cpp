@@ -301,18 +301,18 @@ static int run_blinn_phong() {
     } };
 
     lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create_device_local_and_upload(
-            ctx, ctx.graphics_queue(), cmdPool, vertices.data(),
-            sizeof(vertices))) {
+    if (!vertexBuffer.create_device_local_and_upload(ctx, ctx.graphics_queue(),
+                                                     cmdPool, vertices.data(),
+                                                     sizeof(vertices))) {
         LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
         return -1;
     }
 
     lumen::render::IndexBuffer indexBuffer;
     indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    if (!indexBuffer.create_device_local_and_upload(
-            ctx, ctx.graphics_queue(), cmdPool, indices.data(),
-            sizeof(indices))) {
+    if (!indexBuffer.create_device_local_and_upload(ctx, ctx.graphics_queue(),
+                                                    cmdPool, indices.data(),
+                                                    sizeof(indices))) {
         LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
         return -1;
     }
@@ -731,8 +731,10 @@ static int run_blinn_phong() {
         }
         ImGui::End();
 
-        VkCommandBuffer cmdBuf = cmdBuffers[currentFrame];
-        vkResetCommandBuffer(cmdBuf, 0);
+        auto &cmdBuf = cmdBuffers[currentFrame];
+        if (!cmdBuf.reset()) {
+            continue;
+        }
 
         const float seconds = static_cast<float>(SDL_GetTicks()) * 0.001F;
         const float aspect = static_cast<float>(scene_w) /
@@ -767,12 +769,7 @@ static int run_blinn_phong() {
         ubo.lightCount_ = glm::ivec4(active_lights, 0, 0, 0);
         uniformBuffers[currentFrame].update(ubo);
 
-        VkCommandBufferBeginInfo beginInfo {
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-        };
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
-            VK_SUCCESS) {
+        if (!cmdBuf.begin()) {
             continue;
         }
 
@@ -782,7 +779,7 @@ static int run_blinn_phong() {
         scene_clears[1].depthStencil = { 1.0F, 0 };
 
         VkRenderPassBeginInfo scene_rp {
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
         };
         scene_rp.renderPass = sceneTarget.render_pass();
         scene_rp.framebuffer = sceneTarget.framebuffer();
@@ -791,8 +788,7 @@ static int run_blinn_phong() {
         scene_rp.clearValueCount = 2;
         scene_rp.pClearValues = scene_clears;
 
-        vkCmdBeginRenderPass(cmdBuf, &scene_rp,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuf, &scene_rp, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport scene_vp {};
         scene_vp.x = 0.0F;
@@ -808,10 +804,9 @@ static int run_blinn_phong() {
         scene_sc.extent = sceneTarget.extent();
         vkCmdSetScissor(cmdBuf, 0, 1, &scene_sc);
 
-        vkCmdBindPipeline(cmdBuf,
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuf,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+        vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          pipeline.handle());
+        vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipelineLayout.handle(), 0, 1,
                                 &descriptorSets[currentFrame], 0, nullptr);
 
@@ -820,8 +815,8 @@ static int run_blinn_phong() {
         vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
         vkCmdBindIndexBuffer(cmdBuf, indexBuffer.handle(), 0,
                              indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuf,
-                         static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmdBuf, static_cast<uint32_t>(indices.size()), 1, 0, 0,
+                         0);
 
         vkCmdEndRenderPass(cmdBuf);
 
@@ -839,8 +834,7 @@ static int run_blinn_phong() {
         rpBegin.clearValueCount = 1;
         rpBegin.pClearValues = &swap_clear;
 
-        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(cmdBuf, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport {};
         viewport.x = 0.0F;
@@ -860,21 +854,22 @@ static int run_blinn_phong() {
 
         vkCmdEndRenderPass(cmdBuf);
 
-        if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS) {
+        if (!cmdBuf.end()) {
             continue;
         }
 
         VkSemaphore waitSem = frameSync.image_available(currentFrame);
         VkSemaphore signalSem = frameSync.render_finished(imageIndex);
 
-        VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        VkCommandBuffer submit_buf = cmdBuf.handle();
+        VkSubmitInfo submitInfo { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
         VkPipelineStageFlags waitStage =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuf;
+        submitInfo.pCommandBuffers = &submit_buf;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 

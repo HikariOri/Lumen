@@ -7,13 +7,12 @@
 
 #include "core/logger.hpp"
 
-#include <utility>
 #include "render/context.hpp"
+#include <utility>
 
 namespace lumen::render {
 
-CommandBuffer::CommandBuffer(CommandBuffer &&other) noexcept
-    : vk_(other.vk_) {
+CommandBuffer::CommandBuffer(CommandBuffer &&other) noexcept : vk_(other.vk_) {
     other.vk_ = VK_NULL_HANDLE;
 }
 
@@ -23,6 +22,69 @@ CommandBuffer &CommandBuffer::operator=(CommandBuffer &&other) noexcept {
         other.vk_ = VK_NULL_HANDLE;
     }
     return *this;
+}
+
+bool CommandBuffer::begin(CommandBufferUsage usage) {
+    if (!is_valid()) {
+        LUMEN_LOG_ERROR("CommandBuffer::begin: 无效句柄");
+        return false;
+    }
+    const VkCommandBufferBeginInfo begin_info {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = command_buffer_usage_to_vk(usage),
+    };
+    const VkResult result = vkBeginCommandBuffer(vk_, &begin_info);
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR(
+            "CommandBuffer::begin: vkBeginCommandBuffer 失败 result={}",
+            static_cast<int>(result));
+        return false;
+    }
+    return true;
+}
+
+bool CommandBuffer::begin(const VkCommandBufferBeginInfo &info) {
+    if (!is_valid()) {
+        LUMEN_LOG_ERROR("CommandBuffer::begin: 无效句柄");
+        return false;
+    }
+    const VkResult result = vkBeginCommandBuffer(vk_, &info);
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR(
+            "CommandBuffer::begin(info): vkBeginCommandBuffer 失败 result={}",
+            static_cast<int>(result));
+        return false;
+    }
+    return true;
+}
+
+bool CommandBuffer::end() {
+    if (!is_valid()) {
+        LUMEN_LOG_ERROR("CommandBuffer::end: 无效句柄");
+        return false;
+    }
+    const VkResult result = vkEndCommandBuffer(vk_);
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("CommandBuffer::end: vkEndCommandBuffer 失败 result={}",
+                        static_cast<int>(result));
+        return false;
+    }
+    return true;
+}
+
+bool CommandBuffer::reset(VkCommandBufferResetFlags flags) {
+    if (!is_valid()) {
+        LUMEN_LOG_ERROR("CommandBuffer::reset: 无效句柄");
+        return false;
+    }
+    const VkResult result = vkResetCommandBuffer(vk_, flags);
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR(
+            "CommandBuffer::reset: vkResetCommandBuffer 失败 result={}",
+            static_cast<int>(result));
+        return false;
+    }
+    return true;
 }
 
 VkCommandBufferLevel command_buffer_level_to_vk(CommandBufferLevel level) {
@@ -35,7 +97,7 @@ bool CommandPool::create(const Context &ctx, uint32_t queueFamilyIndex) {
     device_ = ctx.device();
 
     VkCommandPoolCreateInfo createInfo {
-        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
     };
     createInfo.queueFamilyIndex = queueFamilyIndex;
     createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -59,7 +121,7 @@ std::vector<CommandBuffer> CommandPool::allocate(uint32_t count,
     std::vector<VkCommandBuffer> raw(count);
 
     VkCommandBufferAllocateInfo allocInfo {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
     };
     allocInfo.commandPool = pool_;
     allocInfo.level = command_buffer_level_to_vk(level);
@@ -116,33 +178,29 @@ bool CommandPool::submit_one_shot(
         return false;
     }
 
-    std::vector<CommandBuffer> buffers = allocate(1, CommandBufferLevel::Primary);
+    std::vector<CommandBuffer> buffers =
+        allocate(1, CommandBufferLevel::Primary);
     if (buffers.empty() || !buffers[0].is_valid()) {
         return false;
     }
 
     CommandBuffer cmd = std::move(buffers[0]);
 
-    // ONE_TIME_SUBMIT：本 buffer 仅提交一次后即 free，驱动可据此优化；与帧内复用 buffer 的用法区分
-    const VkCommandBufferBeginInfo beginInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-
-    VkCommandBuffer vkCmd = cmd.handle();
-    if (vkBeginCommandBuffer(vkCmd, &beginInfo) != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("submit_one_shot: vkBeginCommandBuffer 失败");
+    // OneTimeSubmit：本 buffer 仅提交一次后即 free，驱动可据此优化；与帧内复用
+    // buffer 的用法区分
+    if (!cmd.begin()) {
         free_moved(std::move(cmd));
         return false;
     }
 
     record(cmd);
 
-    if (vkEndCommandBuffer(vkCmd) != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("submit_one_shot: vkEndCommandBuffer 失败");
+    if (!cmd.end()) {
         free_moved(std::move(cmd));
         return false;
     }
+
+    VkCommandBuffer vkCmd = cmd.handle();
 
     VkFence fence = VK_NULL_HANDLE;
     VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -156,8 +214,7 @@ bool CommandPool::submit_one_shot(
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &vkCmd;
 
-    const VkResult submitResult =
-        vkQueueSubmit(queue, 1, &submitInfo, fence);
+    const VkResult submitResult = vkQueueSubmit(queue, 1, &submitInfo, fence);
     if (submitResult != VK_SUCCESS) {
         LUMEN_LOG_ERROR("submit_one_shot: vkQueueSubmit 失败 result={}",
                         static_cast<int>(submitResult));

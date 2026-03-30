@@ -261,15 +261,12 @@ static int run_triangle() {
             continue;
         }
 
-        VkCommandBuffer cmdBuf = cmdBuffers[currentFrame];
-        vkResetCommandBuffer(cmdBuf, 0);
+        auto &cmdBuf = cmdBuffers[currentFrame];
+        if (!cmdBuf.reset()) {
+            continue;
+        }
 
-        VkCommandBufferBeginInfo beginInfo {
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-        };
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuf, &beginInfo) !=
-            VK_SUCCESS) {
+        if (!cmdBuf.begin()) {
             continue;
         }
 
@@ -312,13 +309,14 @@ static int run_triangle() {
 
         vkCmdEndRenderPass(cmdBuf);
 
-        if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS) {
+        if (!cmdBuf.end()) {
             continue;
         }
 
         VkSemaphore waitSem = frameSync.image_available(currentFrame);
         VkSemaphore signalSem = frameSync.render_finished(imageIndex);
 
+        VkCommandBuffer submit_buf = cmdBuf.handle();
         VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
         VkPipelineStageFlags waitStage =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -326,7 +324,7 @@ static int run_triangle() {
         submitInfo.pWaitSemaphores = &waitSem;
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuf;
+        submitInfo.pCommandBuffers = &submit_buf;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 
