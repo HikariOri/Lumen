@@ -328,6 +328,10 @@ static int run_triangle() {
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &signalSem;
 
+        if (!frameSync.reset_fence(currentFrame)) {
+            LUMEN_LOG_ERROR("vkResetFences 失败 currentFrame={}", currentFrame);
+            continue;
+        }
         if (vkQueueSubmit(ctx.graphics_queue(), 1, &submitInfo,
                           frameSync.in_flight_fence(currentFrame)) !=
             VK_SUCCESS) {

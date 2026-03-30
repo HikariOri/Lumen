@@ -27,10 +27,14 @@
 namespace lumen::render {
 namespace {
 
-#pragma once
-#include <algorithm>
-#include <cmath>
-#include <numbers>
+/// 等距图经度是否再做半圈平移（绕 Y 旋转 180°），修正全景朝向与场景 −Z
+/// 朝前不一致的问题。
+constexpr bool kEquirectPanoramaHalfTurn { true };
+/// false：天顶 +Y
+/// 采图像上方行（θ/π）；true：对纬度镜像（1−θ/π），适合「图顶实际是地」或仍觉天地对调的资产。
+constexpr bool kEquirectMirrorLatitude { true };
+/// true：上传时对调 Vulkan 层 +Y 与 −Y（层 2、3）。仅修正「天顶与脚底两整块对调、侧面赤道仍对」。
+constexpr bool kCubemapSwapYAxisFaces { true };
 
 /**
  * ============================================================
@@ -114,17 +118,21 @@ inline void face_uv_to_dir(int face, float u, float v, float dir[3]) {
  * @param u,v 输出 [0,1]
  */
 inline void dir_to_latlong_uv(const float dir[3], float *u, float *v) {
-    // 经度 φ（绕Y轴）
-    float phi = std::atan2(dir[2], dir[0]);
-
-    // 纬度 θ（从上往下）
-    float theta = std::acos(std::clamp(dir[1], -1.f, 1.f));
-
     constexpr float PI = std::numbers::pi_v<float>;
     constexpr float TWO_PI = 2.f * PI;
 
-    *u = phi / TWO_PI + 0.5f;
-    *v = 1.f - theta / PI;
+    const float phi = std::atan2(dir[2], dir[0]);
+    const float theta =
+        std::acos(std::clamp(dir[1], -1.f, 1.f)); // [0,π]，+Y 天顶为 0
+
+    float u_lon = phi / TWO_PI + 0.5f;
+    if (kEquirectPanoramaHalfTurn) {
+        u_lon += 0.5f;
+    }
+    *u = u_lon - std::floor(u_lon);
+
+    const float v_linear = theta / PI;
+    *v = kEquirectMirrorLatitude ? (1.f - v_linear) : v_linear;
 }
 
 /**
@@ -403,8 +411,16 @@ bool load_cubemap_from_hdr_equirectangular_file(
         }
     }
 
-    const void *ptrs[6] { faces[0].data(), faces[1].data(), faces[2].data(),
-                          faces[3].data(), faces[4].data(), faces[5].data() };
+    const float *face_py = faces[2].data();
+    const float *face_ny = faces[3].data();
+    const void *ptrs[6] {
+        faces[0].data(),
+        faces[1].data(),
+        kCubemapSwapYAxisFaces ? face_ny : face_py,
+        kCubemapSwapYAxisFaces ? face_py : face_ny,
+        faces[4].data(),
+        faces[5].data(),
+    };
 
     return out_tex.create_cubemap_from_rgba32f_faces(
         ctx, ptrs, face_size, transfer_queue, cmd_pool, sampler_cfg);
