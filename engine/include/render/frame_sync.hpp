@@ -60,14 +60,21 @@ public:
                 uint32_t framesInFlight);
 
     /**
-     * @brief 等待 fence 并重置
-     * @param frameIndex 当前帧索引
+     * @brief 等待 fence 变为已信号（上一轮 GPU 已结束占用本 slot）
      * @param timeoutNs 超时，UINT64_MAX 表示无限等待
-     * @return true 表示 fence 已 signal 并重置成功
+     * @return true 表示已等到 signal
      *
-     * CPU 端等待 GPU 完成该帧，避免覆盖 GPU 正在使用的资源。
+     * @note 不在此处 vkResetFences。若在随后路径中未执行 vkQueueSubmit（例如最小化后
+     * swapchain 不可呈现），围栏应保持已信号，否则下一帧同 frameIndex 会永久等超时。
+     * 仅在即将提交队列前调用 reset_fence()。
      */
     bool wait_fence(uint32_t frameIndex, uint64_t timeoutNs = UINT64_MAX);
+
+    /**
+     * @brief 将 fence 复位为未信号，供下一次 vkQueueSubmit 使用
+     * @details 须在 wait_fence 成功之后、且本条路径会调用 vkQueueSubmit 时再调用。
+     */
+    bool reset_fence(uint32_t frameIndex);
 
     /**
      * @brief 获取按 imageIndex 的 imageAvailable Semaphore

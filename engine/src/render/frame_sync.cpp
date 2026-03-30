@@ -74,11 +74,15 @@ bool FrameSync::wait_fence(uint32_t frameIndex, uint64_t timeoutNs) {
         return false;
     }
 
-    if (result == VK_SUCCESS) {
-        vkResetFences(device_, 1, &inFlightFences_[frameIndex]);
-    }
-
     return result == VK_SUCCESS;
+}
+
+bool FrameSync::reset_fence(uint32_t frameIndex) {
+    if (frameIndex >= inFlightFences_.size()) {
+        return false;
+    }
+    return vkResetFences(device_, 1, &inFlightFences_[frameIndex]) ==
+           VK_SUCCESS;
 }
 
 VkSemaphore FrameSync::image_available(uint32_t imageIndex) const {
