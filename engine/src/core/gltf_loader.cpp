@@ -413,6 +413,13 @@ void append_primitive(const tinygltf::Model &model,
         glm::vec2 uv { 0.F };
         if (uv_acc >= 0) {
             (void)read_float2(model, uv_acc, i, uv);
+            /**
+             * glTF：`TEXCOORD_0` 原点为贴图左上角，+v 向下（glTF 2.0 规范）。
+             * `Texture::create_from_file` 使用 stbi 垂直翻转以适配引擎/Vulkan
+             * 行序；OBJ 路径下 `vt` 已与之对齐，但 glTF 原始 v 需翻转，否则会
+             * 上下颠倒或与法线贴图轴向不一致。
+             */
+            uv.y = 1.0F - uv.y;
         }
 
         out.vertices.push_back(ObjVertex { wp, n, uv });

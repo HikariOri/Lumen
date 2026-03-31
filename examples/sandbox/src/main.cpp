@@ -1,13 +1,13 @@
 /**
  * @file main.cpp
- * @brief PBR — IBL 烘焙、HDR 天空盒、DamagedHelmet（OBJ + 贴图）与 ImGui
- * 预览
+ * @brief PBR — IBL 烘焙、HDR 天空盒、Sponza（glTF 多 primitive / 多材质）
  */
 
 #include "ibl_bake.hpp"
 
+#include "core/gltf_loader.hpp"
+#include "core/gltf_material.hpp"
 #include "core/logger.hpp"
-#include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
 #include "platform/event_pump.hpp"
@@ -15,18 +15,19 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/frame_sync.hpp"
+#include "render/material/pbr_material_bind.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/buffer.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
-#include "render/material/pbr_material_bind.hpp"
 #include "render/resource/pbr_placeholder_textures.hpp"
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
+#include "scene/mesh.hpp"
 #include "scene/pbr_material.hpp"
 #include "scene/scene_camera.hpp"
 #include "scene/scene_orbit_controller.hpp"
@@ -51,6 +52,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -63,28 +65,12 @@
 
 namespace {
 
-constexpr const char *kHdrRelPath { "assets/environment_maps/meadow_2_2k.hdr" };
+constexpr const char *kHdrRelPath { "assets/environment_maps/HDR_111_Parking_Lot_2_Ref.hdr" };
 
-constexpr const char *kHelmetObjRel {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet.obj"
-};
-constexpr const char *kHelmetBaseColor {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_baseColorTexture.jpg"
-};
-constexpr const char *kHelmetEmissive {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_emissiveTexture.jpg"
-};
-constexpr const char *kHelmetMetallic {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_metallicTexture.jpg"
-};
-constexpr const char *kHelmetNormal {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_normalTexture.jpg"
-};
-constexpr const char *kHelmetOcclusion {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_occlusionTexture.jpg"
-};
-constexpr const char *kHelmetRoughness {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_roughnessTexture.jpg"
+constexpr const char *kSponzaGltfRel {
+    // "assets/models/Sponza/glTF/Sponza.gltf"
+    // "assets/models/rex_master/scene.gltf"
+    "assets/models/chisa_wuthering_waves/scene.gltf"
 };
 
 // 单位立方体（与 ibl_bake 天空捕获一致）
@@ -231,6 +217,23 @@ void compute_mesh_tangents(std::vector<HelmVertex> &verts,
                                                                        : 1.0F;
         verts[i].tangent = glm::vec4(t, w);
     }
+}
+
+[[nodiscard]] VkDescriptorSet vk_descriptor_for_pbr_material(
+    const lumen::scene::PBRMaterial *material,
+    const std::vector<lumen::scene::PBRMaterial> &materials_storage,
+    const std::vector<VkDescriptorSet> &material_sets) {
+    if (material_sets.empty()) {
+        return VK_NULL_HANDLE;
+    }
+    if (material == nullptr || materials_storage.empty()) {
+        return material_sets[0];
+    }
+    const ptrdiff_t off = material - materials_storage.data();
+    if (off < 0 || static_cast<size_t>(off) >= materials_storage.size()) {
+        return material_sets[0];
+    }
+    return material_sets[static_cast<size_t>(off)];
 }
 
 /** @brief 立方体贴图某一面的 2D 视图（@a base_array_layer 0…5 对应 +X −X +Y −Y
@@ -468,124 +471,154 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const std::string obj_path = lumen::core::get_resource_path(kHelmetObjRel);
-    if (!std::filesystem::exists(obj_path)) {
-        LUMEN_APP_LOG_ERROR(
-            "未找到头盔模型: {} (需 DamagedHelmet.obj 与同目录 JPG)", obj_path);
+    const std::string sponza_path =
+        lumen::core::get_resource_path(kSponzaGltfRel);
+    if (!std::filesystem::exists(sponza_path)) {
+        LUMEN_APP_LOG_ERROR("未找到 Sponza glTF: {}（含同级纹理）",
+                            sponza_path);
         return -1;
     }
 
-    lumen::core::ObjMesh helmet_obj {};
-    if (!lumen::core::load_obj(obj_path, helmet_obj)) {
-        LUMEN_APP_LOG_ERROR("OBJ 解析失败: {}", obj_path);
+    lumen::core::ObjMesh sponza_obj {};
+    std::vector<lumen::core::GltfSubmeshRange> sponza_submeshes;
+    std::vector<lumen::core::GltfMaterialData> sponza_gltf_materials;
+    lumen::core::GltfMaterialData sponza_fallback_mat {};
+    if (!lumen::core::load_gltf(sponza_path, sponza_obj, sponza_fallback_mat,
+                                &sponza_submeshes, &sponza_gltf_materials)) {
+        LUMEN_APP_LOG_ERROR("glTF 加载失败: {}", sponza_path);
         return -1;
     }
-    if (helmet_obj.vertices.empty()) {
-        LUMEN_APP_LOG_ERROR("OBJ 无顶点数据: {}", obj_path);
+    if (sponza_obj.vertices.empty() || sponza_obj.indices.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 网格为空");
         return -1;
     }
-    if (helmet_obj.indices.empty()) {
-        LUMEN_APP_LOG_ERROR("OBJ 无索引数据: {}", obj_path);
+    if (sponza_submeshes.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 无 primitive 分段（需 submesh）");
         return -1;
     }
 
-    LUMEN_APP_LOG_INFO(
-        "OBJ 模型已加载: 顶点数={}, 索引数={}, 面片(三角)数={}, 路径={}",
-        helmet_obj.vertices.size(), helmet_obj.indices.size(),
-        helmet_obj.indices.size() / 3U, obj_path);
+    center_and_scale_mesh(sponza_obj);
 
-    center_and_scale_mesh(helmet_obj);
-    // OBJ `vt` 的 v：0=纹理底边、1=顶边，与 Vulkan 归一化坐标（v=0 为底）一致。
-    // create_from_file 已 stbi_set_flip_vertically_on_load(1) 对齐行序，勿再对
-    // UV 做 1−v， 否则 Base Color 等与贴图预览会上下错开。
-
-    std::vector<HelmVertex> helm_verts;
-    helm_verts.reserve(helmet_obj.vertices.size());
-    for (const auto &ov : helmet_obj.vertices) {
-        helm_verts.push_back(
+    std::vector<HelmVertex> sponza_verts;
+    sponza_verts.reserve(sponza_obj.vertices.size());
+    for (const auto &ov : sponza_obj.vertices) {
+        sponza_verts.push_back(
             HelmVertex { .position = ov.position,
                          .normal = ov.normal,
                          .uv = ov.uv,
                          .tangent = { 1.0F, 0.0F, 0.0F, 1.0F } });
     }
-    compute_mesh_tangents(helm_verts, helmet_obj.indices);
-    const uint32_t helmet_index_count =
-        static_cast<uint32_t>(helmet_obj.indices.size());
+    compute_mesh_tangents(sponza_verts, sponza_obj.indices);
 
     VkQueue gq = ctx.graphics_queue();
-    lumen::render::Texture tex_albedo;
-    lumen::render::Texture tex_normal;
-    lumen::render::Texture tex_metallic_roughness;
-    lumen::render::Texture tex_ao;
-    lumen::render::Texture tex_emissive;
-    const std::string p_albedo =
-        lumen::core::get_resource_path(kHelmetBaseColor);
-    const std::string p_normal = lumen::core::get_resource_path(kHelmetNormal);
-    const std::string p_metallic =
-        lumen::core::get_resource_path(kHelmetMetallic);
-    const std::string p_roughness =
-        lumen::core::get_resource_path(kHelmetRoughness);
-    const std::string p_ao = lumen::core::get_resource_path(kHelmetOcclusion);
-    const std::string p_emissive =
-        lumen::core::get_resource_path(kHelmetEmissive);
 
-    if (!tex_albedo.create_from_file(ctx, p_albedo.c_str(), gq, cmdPool, {},
-                                     VK_FORMAT_R8G8B8A8_SRGB)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (baseColor): {}", p_albedo);
-        return -1;
-    }
-    if (!tex_normal.create_from_file(ctx, p_normal.c_str(), gq, cmdPool, {},
-                                     VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (normal): {}", p_normal);
-        return -1;
-    }
-    if (!lumen::render::create_metallic_roughness_texture_from_grayscale_files(
-            tex_metallic_roughness, ctx, p_metallic.c_str(), p_roughness.c_str(),
-            gq, cmdPool)) {
-        LUMEN_APP_LOG_ERROR("合并 metallic/roughness 贴图失败");
-        return -1;
-    }
-    if (!tex_ao.create_from_file(ctx, p_ao.c_str(), gq, cmdPool, {},
-                                 VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (occlusion): {}", p_ao);
-        return -1;
-    }
-    if (!tex_emissive.create_from_file(ctx, p_emissive.c_str(), gq, cmdPool, {},
-                                       VK_FORMAT_R8G8B8A8_SRGB)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (emissive): {}", p_emissive);
-        return -1;
-    }
-
-    lumen::render::PbrPlaceholderTextures helmet_pbr_placeholders;
-    if (!helmet_pbr_placeholders.create(ctx, gq, cmdPool) ||
-        !helmet_pbr_placeholders.is_complete()) {
+    lumen::render::PbrPlaceholderTextures pbr_placeholders;
+    if (!pbr_placeholders.create(ctx, gq, cmdPool) ||
+        !pbr_placeholders.is_complete()) {
         LUMEN_APP_LOG_ERROR("PBR 占位贴图创建失败");
         return -1;
     }
 
-    lumen::scene::PBRMaterial helmet_material {};
-    helmet_material.base_color_tex = &tex_albedo;
-    helmet_material.metallic_roughness_tex = &tex_metallic_roughness;
-    helmet_material.normal_tex = &tex_normal;
-    helmet_material.occlusion_tex = &tex_ao;
-    helmet_material.emissive_tex = &tex_emissive;
-    helmet_material.emissive_factor = glm::vec3(1.0F);
+    std::unordered_map<std::string, size_t> tex_key_to_index;
+    /// unique_ptr：vector 扩容时堆上 Texture 地址不变；vector<Texture> 会令
+    /// PBRMaterial 内指针全部悬垂并污染 descriptor 写入。
+    std::vector<std::unique_ptr<lumen::render::Texture>> sponza_texture_storage;
 
-    lumen::render::VertexBuffer helmet_vbuf;
-    if (!helmet_vbuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, helm_verts.data(),
-            helm_verts.size() * sizeof(HelmVertex))) {
-        LUMEN_APP_LOG_ERROR("头盔顶点缓冲失败");
+    auto acquire_texture = [&](const std::string &rel_path,
+                               VkFormat fmt) -> const lumen::render::Texture * {
+        if (rel_path.empty()) {
+            return nullptr;
+        }
+        const std::string key =
+            rel_path + '#' + std::to_string(static_cast<uint32_t>(fmt));
+        const auto found = tex_key_to_index.find(key);
+        if (found != tex_key_to_index.end()) {
+            return sponza_texture_storage[found->second].get();
+        }
+        const std::string full = lumen::core::get_resource_path(rel_path);
+        if (!std::filesystem::exists(full)) {
+            LUMEN_APP_LOG_WARN("贴图不存在，使用占位: {}", full);
+            return nullptr;
+        }
+        auto tex = std::make_unique<lumen::render::Texture>();
+        if (!tex->create_from_file(ctx, full.c_str(), gq, cmdPool, {}, fmt)) {
+            LUMEN_APP_LOG_WARN("贴图上传失败: {}", full);
+            return nullptr;
+        }
+        const size_t new_ix = sponza_texture_storage.size();
+        sponza_texture_storage.push_back(std::move(tex));
+        tex_key_to_index.emplace(key, new_ix);
+        return sponza_texture_storage[new_ix].get();
+    };
+
+    std::vector<lumen::scene::PBRMaterial> pbr_materials(
+        sponza_gltf_materials.size());
+    for (size_t i = 0; i < sponza_gltf_materials.size(); ++i) {
+        const lumen::core::GltfMaterialData &src = sponza_gltf_materials[i];
+        lumen::scene::PBRMaterial &dst = pbr_materials[i];
+        dst.base_color_factor = src.base_color_factor;
+        dst.metallic_factor = src.metallic_factor;
+        dst.roughness_factor = src.roughness_factor;
+        dst.emissive_factor = src.emissive_factor;
+        dst.double_sided = src.double_sided;
+        dst.alpha_mode = static_cast<lumen::scene::MaterialAlphaMode>(
+            static_cast<
+                std::underlying_type_t<lumen::core::GltfMaterialAlphaMode>>(
+                src.alpha_mode));
+        dst.base_color_tex =
+            acquire_texture(src.albedo_path, VK_FORMAT_R8G8B8A8_SRGB);
+        dst.normal_tex =
+            acquire_texture(src.normal_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.metallic_roughness_tex = acquire_texture(
+            src.metallic_roughness_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.occlusion_tex =
+            acquire_texture(src.ao_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.emissive_tex =
+            acquire_texture(src.emissive_path, VK_FORMAT_R8G8B8A8_SRGB);
+    }
+    if (pbr_materials.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 材质表为空");
         return -1;
     }
-    lumen::render::IndexBuffer helmet_ibuf;
-    helmet_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
-    if (!helmet_ibuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, helmet_obj.indices.data(),
-            helmet_obj.indices.size() * sizeof(uint32_t))) {
-        LUMEN_APP_LOG_ERROR("头盔索引缓冲失败");
+
+    lumen::render::VertexBuffer sponza_vbuf;
+    if (!sponza_vbuf.create_device_local_and_upload(
+            ctx, gq, cmdPool, sponza_verts.data(),
+            sponza_verts.size() * sizeof(HelmVertex))) {
+        LUMEN_APP_LOG_ERROR("Sponza 顶点缓冲失败");
         return -1;
     }
+    lumen::render::IndexBuffer sponza_ibuf;
+    sponza_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
+    if (!sponza_ibuf.create_device_local_and_upload(
+            ctx, gq, cmdPool, sponza_obj.indices.data(),
+            sponza_obj.indices.size() * sizeof(uint32_t))) {
+        LUMEN_APP_LOG_ERROR("Sponza 索引缓冲失败");
+        return -1;
+    }
+
+    lumen::scene::Mesh sponza_mesh {};
+    sponza_mesh.primitives.reserve(sponza_submeshes.size());
+    for (const lumen::core::GltfSubmeshRange &r : sponza_submeshes) {
+        int mi = r.material_index;
+        if (mi < 0 || mi >= static_cast<int>(pbr_materials.size())) {
+            mi = 0;
+        }
+        sponza_mesh.primitives.push_back(lumen::scene::Primitive {
+            .vertex_buffer = &sponza_vbuf,
+            .index_buffer = &sponza_ibuf,
+            .vertex_byte_offset = 0,
+            .first_index = r.first_index,
+            .index_count = r.index_count,
+            .material = &pbr_materials[static_cast<size_t>(mi)],
+        });
+    }
+
+    LUMEN_APP_LOG_INFO(
+        "Sponza: 顶点={} 索引={} 三角≈{} primitive={} 材质={} GPU 贴图实例={}",
+        sponza_obj.vertices.size(), sponza_obj.indices.size(),
+        sponza_obj.indices.size() / 3U, sponza_submeshes.size(),
+        pbr_materials.size(), sponza_texture_storage.size());
 
     auto commandBuffers = cmdPool.allocate(3);
     if (commandBuffers.size() != 3) {
@@ -761,31 +794,40 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::render::DescriptorPool helmet_dpool;
-    if (!helmet_dpool.create(
+    const uint32_t sponza_mat_count =
+        static_cast<uint32_t>(pbr_materials.size());
+    const uint32_t pbr_combined_for_materials = sponza_mat_count * 5u;
+    const uint32_t pbr_combined_total = 9u + pbr_combined_for_materials;
+    const uint32_t pbr_max_sets = 3u + sponza_mat_count;
+
+    lumen::render::DescriptorPool pbr_dpool;
+    if (!pbr_dpool.create(
             ctx,
             { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .count = 3 },
               { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .count = 14 } },
-            4)) {
-        LUMEN_APP_LOG_ERROR("头盔 DescriptorPool 失败");
+                .count = pbr_combined_total } },
+            pbr_max_sets)) {
+        LUMEN_APP_LOG_ERROR("PBR DescriptorPool 失败 (材质数={})",
+                            sponza_mat_count);
         return -1;
     }
 
-    VkDescriptorSet helmet_material_ds { VK_NULL_HANDLE };
-    if (!helmet_dpool.allocate(dev, helmet_material_dsl.handle(),
-                               helmet_material_ds)) {
-        LUMEN_APP_LOG_ERROR("头盔材质 DescriptorSet 分配失败");
-        return -1;
+    std::vector<VkDescriptorSet> sponza_material_ds(sponza_mat_count);
+    for (uint32_t mi = 0; mi < sponza_mat_count; ++mi) {
+        if (!pbr_dpool.allocate(dev, helmet_material_dsl.handle(),
+                                sponza_material_ds[mi])) {
+            LUMEN_APP_LOG_ERROR("材质 DescriptorSet 分配失败 mi={}", mi);
+            return -1;
+        }
+        lumen::render::write_pbr_material_descriptor_set(
+            dev, sponza_material_ds[mi], pbr_materials[mi], pbr_placeholders);
     }
-    lumen::render::write_pbr_material_descriptor_set(
-        dev, helmet_material_ds, helmet_material, helmet_pbr_placeholders);
 
     std::array<VkDescriptorSet, 3> helmet_scene_ds {};
     for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
-        if (!helmet_dpool.allocate(dev, helmet_scene_dsl.handle(),
-                                   helmet_scene_ds[i])) {
-            LUMEN_APP_LOG_ERROR("头盔场景 DescriptorSet 分配失败");
+        if (!pbr_dpool.allocate(dev, helmet_scene_dsl.handle(),
+                                helmet_scene_ds[i])) {
+            LUMEN_APP_LOG_ERROR("场景 DescriptorSet 分配失败");
             return -1;
         }
     }
@@ -811,10 +853,9 @@ static int run_pbr(int, char **) {
             sizeof(lumen::render::PbrForwardPushConstants)),
     };
     lumen::render::PipelineLayout helmet_pl;
-    if (!helmet_pl.create(ctx,
-                          { helmet_scene_dsl.handle(),
-                            helmet_material_dsl.handle() },
-                          { helmet_pc })) {
+    if (!helmet_pl.create(
+            ctx, { helmet_scene_dsl.handle(), helmet_material_dsl.handle() },
+            { helmet_pc })) {
         LUMEN_APP_LOG_ERROR("头盔 PipelineLayout 失败");
         return -1;
     }
@@ -859,10 +900,8 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    LUMEN_APP_LOG_INFO(
-        "pbr 资源就绪: OBJ 顶点={} 索引={} 三角形={}, 着色器 {} | {}",
-        helmet_obj.vertices.size(), helmet_obj.indices.size(),
-        helmet_obj.indices.size() / 3, helmet_vs_path, helmet_fs_path);
+    LUMEN_APP_LOG_INFO("PBR 场景资源就绪，着色器 {} | {}", helmet_vs_path,
+                       helmet_fs_path);
 
     float skyExposure { 4.0F };
     float iblStrength { 3.0F };
@@ -874,12 +913,12 @@ static int run_pbr(int, char **) {
 
     lumen::scene::SceneCamera scene_camera;
     lumen::scene::SceneOrbitController orbit;
-    scene_camera.set_projection_perspective(55.0F, 0.05F, 50.0F);
+    scene_camera.set_projection_perspective(55.0F, 0.05F, 120.0F);
     orbit.set_pivot(glm::vec3(0.0F));
     orbit.set_world_up(glm::vec3(0.0F, 1.0F, 0.0F));
     orbit.set_yaw(0.0F);
     orbit.set_pitch(0.0F);
-    orbit.set_radius(2.35F);
+    orbit.set_radius(9.0F);
     {
         lumen::scene::SceneOrbitController::Limits lim {};
         lim.min_radius = 0.45F;
@@ -916,27 +955,6 @@ static int run_pbr(int, char **) {
     auto tex_brdf =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             uiSampler.handle(), v_brdf,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-
-    auto img_albedo =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_albedo.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_normal =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_normal.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_metallic_roughness =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_metallic_roughness.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_ao =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_ao.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_emissive =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_emissive.view(),
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
 
     lumen::platform::EventPump pump;
@@ -1215,23 +1233,13 @@ static int run_pbr(int, char **) {
         }
         ImGui::End();
 
-        if (ImGui::Begin("DamagedHelmet 材质贴图")) {
-            const ImVec2 thumb(140, 140);
-            auto helmet_tex_cell = [&](const char *label, ImTextureID tex_id) {
-                ImGui::BeginGroup();
-                ImGui::TextUnformatted(label);
-                ImGui::Image(tex_id, thumb);
-                ImGui::EndGroup();
-                ImGui::SameLine(0.0F, ImGui::GetStyle().ItemInnerSpacing.x);
-            };
-            helmet_tex_cell("Base Color (sRGB)", img_albedo);
-            helmet_tex_cell("Normal", img_normal);
-            helmet_tex_cell("Metallic/Roughness (G/B)", img_metallic_roughness);
-            helmet_tex_cell("Ambient Occlusion", img_ao);
-            ImGui::BeginGroup();
-            ImGui::TextUnformatted("Emissive");
-            ImGui::Image(img_emissive, thumb);
-            ImGui::EndGroup();
+        if (ImGui::Begin("Sponza 场景网格")) {
+            ImGui::Text("Primitive 数: %zu", sponza_mesh.primitives.size());
+            ImGui::Text("材质槽位数: %zu", pbr_materials.size());
+            ImGui::Text("已加载 GPU 纹理数: %zu",
+                        sponza_texture_storage.size());
+            ImGui::TextWrapped("多 primitive 按 `scene::Mesh` 绘制；每材质一套 "
+                               "descriptor set=1。");
         }
         ImGui::End();
 
@@ -1328,32 +1336,44 @@ static int run_pbr(int, char **) {
 
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               helmet_pipe.handle());
-            std::array<VkDescriptorSet, 2> helmet_sets {
-                helmet_scene_ds[frameIdx], helmet_material_ds
-            };
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    helmet_pl.handle(), 0,
-                                    static_cast<uint32_t>(helmet_sets.size()),
-                                    helmet_sets.data(), 0, nullptr);
-            lumen::render::PbrForwardPushConstants hp {};
-            hp.model = helmet_model;
-            hp.base_color_factor = helmet_material.base_color_factor;
-            hp.emissive_factor_and_scale =
-                glm::vec4(helmet_material.emissive_factor, emissiveScale);
-            hp.metallic_factor = helmet_material.metallic_factor;
-            hp.roughness_factor = helmet_material.roughness_factor;
-            hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
-            hp.pad = { { 0, 0, 0 } };
-            vkCmdPushConstants(
-                cb, helmet_pl.handle(),
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                static_cast<uint32_t>(sizeof(hp)), &hp);
-            VkDeviceSize hv_off { 0 };
-            VkBuffer hvb_main = helmet_vbuf.handle();
-            vkCmdBindVertexBuffers(cb, 0, 1, &hvb_main, &hv_off);
-            vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
-                                 helmet_ibuf.vk_index_type());
-            vkCmdDrawIndexed(cb, helmet_index_count, 1, 0, 0, 0);
+            for (const lumen::scene::Primitive &prim : sponza_mesh.primitives) {
+                if (!prim.is_drawable()) {
+                    continue;
+                }
+                const lumen::scene::PBRMaterial *prim_mat =
+                    prim.material != nullptr ? prim.material
+                                             : &pbr_materials[0];
+                VkDescriptorSet mat_ds = vk_descriptor_for_pbr_material(
+                    prim_mat, pbr_materials, sponza_material_ds);
+                std::array<VkDescriptorSet, 2> pbr_sets {
+                    helmet_scene_ds[frameIdx], mat_ds
+                };
+                vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        helmet_pl.handle(), 0,
+                                        static_cast<uint32_t>(pbr_sets.size()),
+                                        pbr_sets.data(), 0, nullptr);
+                lumen::render::PbrForwardPushConstants hp {};
+                hp.model = helmet_model;
+                hp.base_color_factor = prim_mat->base_color_factor;
+                hp.emissive_factor_and_scale =
+                    glm::vec4(prim_mat->emissive_factor, emissiveScale);
+                hp.metallic_factor = prim_mat->metallic_factor;
+                hp.roughness_factor = prim_mat->roughness_factor;
+                hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
+                hp.pad = { { 0, 0, 0 } };
+                vkCmdPushConstants(cb, helmet_pl.handle(),
+                                   VK_SHADER_STAGE_VERTEX_BIT |
+                                       VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, static_cast<uint32_t>(sizeof(hp)), &hp);
+                VkDeviceSize voff =
+                    static_cast<VkDeviceSize>(prim.vertex_byte_offset);
+                VkBuffer vb = prim.vertex_buffer->handle();
+                vkCmdBindVertexBuffers(cb, 0, 1, &vb, &voff);
+                vkCmdBindIndexBuffer(cb, prim.index_buffer->handle(), 0,
+                                     prim.index_buffer->vk_index_type());
+                vkCmdDrawIndexed(cb, prim.index_count, 1, prim.first_index, 0,
+                                 0);
+            }
         }
 
         vkCmdEndRenderPass(cmd_buf.handle());
@@ -1384,8 +1404,6 @@ static int run_pbr(int, char **) {
                     k_dbg_tile_cols * k_dbg_tile_rows;
                 const float cw = wf / static_cast<float>(k_dbg_tile_cols);
                 const float ch = hf / static_cast<float>(k_dbg_tile_rows);
-                VkBuffer hvb = helmet_vbuf.handle();
-                VkDeviceSize hv_off_zero { 0 };
 
                 for (int ti = 0; ti < k_dbg_tile_count; ++ti) {
                     const int col = ti % k_dbg_tile_cols;
@@ -1393,7 +1411,7 @@ static int run_pbr(int, char **) {
                     const float aspect =
                         cw / static_cast<float>((std::max)(1.0F, ch));
                     glm::mat4 proj = glm::perspective(glm::radians(55.0F),
-                                                      aspect, 0.05F, 50.0F);
+                                                      aspect, 0.05F, 120.0F);
                     proj[1][1] *= -1.0F;
 
                     SceneUbo su {};
@@ -1428,31 +1446,49 @@ static int run_pbr(int, char **) {
 
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmet_pipe.handle());
-                    std::array<VkDescriptorSet, 2> helmet_sets_dbg {
-                        helmet_scene_ds[frameIdx], helmet_material_ds
-                    };
-                    vkCmdBindDescriptorSets(
-                        cb, VK_PIPELINE_BIND_POINT_GRAPHICS, helmet_pl.handle(),
-                        0, static_cast<uint32_t>(helmet_sets_dbg.size()),
-                        helmet_sets_dbg.data(), 0, nullptr);
-                    lumen::render::PbrForwardPushConstants hp {};
-                    hp.model = helmet_model;
-                    hp.base_color_factor = helmet_material.base_color_factor;
-                    hp.emissive_factor_and_scale =
-                        glm::vec4(helmet_material.emissive_factor, emissiveScale);
-                    hp.metallic_factor = helmet_material.metallic_factor;
-                    hp.roughness_factor = helmet_material.roughness_factor;
-                    hp.debug_view = ti;
-                    hp.pad = { { 0, 0, 0 } };
-                    vkCmdPushConstants(
-                        cb, helmet_pl.handle(),
-                        VK_SHADER_STAGE_VERTEX_BIT |
-                            VK_SHADER_STAGE_FRAGMENT_BIT,
-                        0, static_cast<uint32_t>(sizeof(hp)), &hp);
-                    vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off_zero);
-                    vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
-                                         helmet_ibuf.vk_index_type());
-                    vkCmdDrawIndexed(cb, helmet_index_count, 1, 0, 0, 0);
+                    for (const lumen::scene::Primitive &prim :
+                         sponza_mesh.primitives) {
+                        if (!prim.is_drawable()) {
+                            continue;
+                        }
+                        const lumen::scene::PBRMaterial *prim_mat =
+                            prim.material != nullptr ? prim.material
+                                                     : &pbr_materials[0];
+                        VkDescriptorSet mat_ds_dbg =
+                            vk_descriptor_for_pbr_material(
+                                prim_mat, pbr_materials, sponza_material_ds);
+                        std::array<VkDescriptorSet, 2> sets_dbg {
+                            helmet_scene_ds[frameIdx], mat_ds_dbg
+                        };
+                        vkCmdBindDescriptorSets(
+                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            helmet_pl.handle(), 0,
+                            static_cast<uint32_t>(sets_dbg.size()),
+                            sets_dbg.data(), 0, nullptr);
+                        lumen::render::PbrForwardPushConstants hp {};
+                        hp.model = helmet_model;
+                        hp.base_color_factor = prim_mat->base_color_factor;
+                        hp.emissive_factor_and_scale =
+                            glm::vec4(prim_mat->emissive_factor, emissiveScale);
+                        hp.metallic_factor = prim_mat->metallic_factor;
+                        hp.roughness_factor = prim_mat->roughness_factor;
+                        hp.debug_view = ti;
+                        hp.pad = { { 0, 0, 0 } };
+                        vkCmdPushConstants(cb, helmet_pl.handle(),
+                                           VK_SHADER_STAGE_VERTEX_BIT |
+                                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                                           0, static_cast<uint32_t>(sizeof(hp)),
+                                           &hp);
+                        VkDeviceSize voff =
+                            static_cast<VkDeviceSize>(prim.vertex_byte_offset);
+                        VkBuffer vbd = prim.vertex_buffer->handle();
+                        vkCmdBindVertexBuffers(cb, 0, 1, &vbd, &voff);
+                        vkCmdBindIndexBuffer(
+                            cb, prim.index_buffer->handle(), 0,
+                            prim.index_buffer->vk_index_type());
+                        vkCmdDrawIndexed(cb, prim.index_count, 1,
+                                         prim.first_index, 0, 0);
+                    }
                 }
             }
             vkCmdEndRenderPass(cmd_buf.handle());

@@ -24,6 +24,8 @@
  * 每个 primitive：
  *   - 独立材质
  *   - 独立 index range
+ *
+ * CPU 侧推荐的网格载体见 `scene/mesh.hpp`（`Mesh` / `Primitive` / `Model`）。
  */
 
 #pragma once
