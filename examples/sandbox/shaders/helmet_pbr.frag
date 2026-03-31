@@ -24,21 +24,24 @@ layout(set = 0, binding = 0) uniform SceneUBO {
 layout(set = 0, binding = 1) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 2) uniform samplerCube prefilterMap;
 layout(set = 0, binding = 3) uniform sampler2D brdfLUT;
-layout(set = 0, binding = 4) uniform sampler2D albedoMap;
-layout(set = 0, binding = 5) uniform sampler2D normalMap;
-layout(set = 0, binding = 6) uniform sampler2D metallicMap;
-layout(set = 0, binding = 7) uniform sampler2D roughnessMap;
-layout(set = 0, binding = 8) uniform sampler2D aoMap;
-layout(set = 0, binding = 9) uniform sampler2D emissiveMap;
+
+layout(set = 1, binding = 0) uniform sampler2D baseColorMap;
+layout(set = 1, binding = 1) uniform sampler2D metallicRoughnessMap;
+layout(set = 1, binding = 2) uniform sampler2D normalMap;
+layout(set = 1, binding = 3) uniform sampler2D aoMap;
+layout(set = 1, binding = 4) uniform sampler2D emissiveMap;
 
 layout(push_constant) uniform Push {
     mat4 model;
-    vec4 emissiveScale;
+    vec4 baseColorFactor;
+    vec4 emissiveFactorAndScale;
+    float metallicFactor;
+    float roughnessFactor;
     int debugView;
     int _pad[3];
 } pc;
 
-// albedoMap / emissiveMap 为 VK_FORMAT_*_SRGB：texture() 已返回线性 RGB，勿再手动 sRGB→linear。
+// baseColorMap / emissiveMap 为 VK_FORMAT_*_SRGB：texture() 已返回线性 RGB，勿再手动 sRGB→linear。
 
 const float k_pi = 3.14159265358979323846;
 
@@ -93,12 +96,16 @@ void main() {
         return;
     }
 
-    vec3 albedo = texture(albedoMap, vUv).rgb;
-    float metallic = texture(metallicMap, vUv).r;
+    vec4 baseSam = texture(baseColorMap, vUv) * pc.baseColorFactor;
+    vec3 albedo = baseSam.rgb;
+    float metallic =
+        texture(metallicRoughnessMap, vUv).b * pc.metallicFactor;
     float roughness =
-        clamp(texture(roughnessMap, vUv).r, 0.04, 1.0);
+        clamp(texture(metallicRoughnessMap, vUv).g * pc.roughnessFactor, 0.04,
+              1.0);
     float ao = texture(aoMap, vUv).r;
-    vec3 emissive = texture(emissiveMap, vUv).rgb * pc.emissiveScale.x;
+    vec3 emissive = texture(emissiveMap, vUv).rgb * pc.emissiveFactorAndScale.rgb
+                    * pc.emissiveFactorAndScale.w;
 
     float exposure = scene.envParams.x;
     float maxMip = scene.envParams.y;
@@ -112,7 +119,7 @@ void main() {
     }
     // 15 Base Color（glTF baseColorTexture：硬件解码后的线性 RGB + 原始 A）
     if (pc.debugView == 15) {
-        vec4 bc = texture(albedoMap, vUv);
+        vec4 bc = texture(baseColorMap, vUv) * pc.baseColorFactor;
         outColor = vec4(max(bc.rgb, vec3(0.0)), bc.a);
         return;
     }

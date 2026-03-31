@@ -21,10 +21,13 @@
 #include "render/resource/buffer.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
+#include "render/material/pbr_material_bind.hpp"
+#include "render/resource/pbr_placeholder_textures.hpp"
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
+#include "scene/pbr_material.hpp"
 #include "scene/scene_camera.hpp"
 #include "scene/scene_orbit_controller.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
@@ -163,17 +166,6 @@ void fill_scene_point_lights(SceneUbo &su, int active_count,
             glm::vec4(L.color, L.intensity);
     }
 }
-
-/// 与 `helmet_pbr.vert` push 块对齐（std430 规则，96 字节）
-struct HelmetPush {
-    glm::mat4 model { 1.0F };
-    glm::vec4 emissive_scale { 3.0F, 0.0F, 0.0F, 0.0F };
-    int32_t debug_view {
-        0
-    }; ///< 0 PBR … 14 自发光，15 Base Color（见 IBL 面板）
-    std::array<int32_t, 3> push_pad { { 0, 0, 0 } };
-};
-static_assert(sizeof(HelmetPush) == 96);
 
 struct HelmVertex {
     glm::vec3 position {};
@@ -523,8 +515,7 @@ static int run_pbr(int, char **) {
     VkQueue gq = ctx.graphics_queue();
     lumen::render::Texture tex_albedo;
     lumen::render::Texture tex_normal;
-    lumen::render::Texture tex_metallic;
-    lumen::render::Texture tex_roughness;
+    lumen::render::Texture tex_metallic_roughness;
     lumen::render::Texture tex_ao;
     lumen::render::Texture tex_emissive;
     const std::string p_albedo =
@@ -548,14 +539,10 @@ static int run_pbr(int, char **) {
         LUMEN_APP_LOG_ERROR("贴图加载失败 (normal): {}", p_normal);
         return -1;
     }
-    if (!tex_metallic.create_from_file(ctx, p_metallic.c_str(), gq, cmdPool, {},
-                                       VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (metallic): {}", p_metallic);
-        return -1;
-    }
-    if (!tex_roughness.create_from_file(ctx, p_roughness.c_str(), gq, cmdPool,
-                                        {}, VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (roughness): {}", p_roughness);
+    if (!lumen::render::create_metallic_roughness_texture_from_grayscale_files(
+            tex_metallic_roughness, ctx, p_metallic.c_str(), p_roughness.c_str(),
+            gq, cmdPool)) {
+        LUMEN_APP_LOG_ERROR("合并 metallic/roughness 贴图失败");
         return -1;
     }
     if (!tex_ao.create_from_file(ctx, p_ao.c_str(), gq, cmdPool, {},
@@ -568,6 +555,21 @@ static int run_pbr(int, char **) {
         LUMEN_APP_LOG_ERROR("贴图加载失败 (emissive): {}", p_emissive);
         return -1;
     }
+
+    lumen::render::PbrPlaceholderTextures helmet_pbr_placeholders;
+    if (!helmet_pbr_placeholders.create(ctx, gq, cmdPool) ||
+        !helmet_pbr_placeholders.is_complete()) {
+        LUMEN_APP_LOG_ERROR("PBR 占位贴图创建失败");
+        return -1;
+    }
+
+    lumen::scene::PBRMaterial helmet_material {};
+    helmet_material.base_color_tex = &tex_albedo;
+    helmet_material.metallic_roughness_tex = &tex_metallic_roughness;
+    helmet_material.normal_tex = &tex_normal;
+    helmet_material.occlusion_tex = &tex_ao;
+    helmet_material.emissive_tex = &tex_emissive;
+    helmet_material.emissive_factor = glm::vec3(1.0F);
 
     lumen::render::VertexBuffer helmet_vbuf;
     if (!helmet_vbuf.create_device_local_and_upload(
@@ -746,51 +748,16 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::render::DescriptorSetLayout helmet_dsl;
-    std::vector<lumen::render::DescriptorBinding> helmet_binds = {
-        { .binding = 0,
-          .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 1,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 2,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 3,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 4,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 5,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 6,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 7,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 8,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-        { .binding = 9,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
-    };
-    if (!helmet_dsl.create(ctx, helmet_binds)) {
-        LUMEN_APP_LOG_ERROR("头盔 DescriptorSetLayout 失败");
+    lumen::render::DescriptorSetLayout helmet_scene_dsl;
+    if (!helmet_scene_dsl.create(
+            ctx, lumen::render::pbr_scene_ibl_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("头盔场景 DescriptorSetLayout 失败");
+        return -1;
+    }
+    lumen::render::DescriptorSetLayout helmet_material_dsl;
+    if (!helmet_material_dsl.create(
+            ctx, lumen::render::pbr_material_texture_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("头盔材质 DescriptorSetLayout 失败");
         return -1;
     }
 
@@ -799,16 +766,26 @@ static int run_pbr(int, char **) {
             ctx,
             { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .count = 3 },
               { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .count = 27 } },
-            3)) {
+                .count = 14 } },
+            4)) {
         LUMEN_APP_LOG_ERROR("头盔 DescriptorPool 失败");
         return -1;
     }
 
-    std::array<VkDescriptorSet, 3> helmet_ds {};
-    for (uint32_t i = 0; i < helmet_ds.size(); ++i) {
-        if (!helmet_dpool.allocate(dev, helmet_dsl.handle(), helmet_ds[i])) {
-            LUMEN_APP_LOG_ERROR("头盔 DescriptorSet 分配失败");
+    VkDescriptorSet helmet_material_ds { VK_NULL_HANDLE };
+    if (!helmet_dpool.allocate(dev, helmet_material_dsl.handle(),
+                               helmet_material_ds)) {
+        LUMEN_APP_LOG_ERROR("头盔材质 DescriptorSet 分配失败");
+        return -1;
+    }
+    lumen::render::write_pbr_material_descriptor_set(
+        dev, helmet_material_ds, helmet_material, helmet_pbr_placeholders);
+
+    std::array<VkDescriptorSet, 3> helmet_scene_ds {};
+    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
+        if (!helmet_dpool.allocate(dev, helmet_scene_dsl.handle(),
+                                   helmet_scene_ds[i])) {
+            LUMEN_APP_LOG_ERROR("头盔场景 DescriptorSet 分配失败");
             return -1;
         }
     }
@@ -821,59 +798,23 @@ static int run_pbr(int, char **) {
         }
     }
 
-    for (uint32_t i = 0; i < helmet_ds.size(); ++i) {
-        lumen::render::write_descriptor_set(
-            dev, helmet_ds[i],
-            { { .binding = 0,
-                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                .buffer = helmet_ubos[i].handle(),
-                .offset = 0,
-                .range = sizeof(SceneUbo) } },
-            { { .binding = 1,
-                .imageView = ibl.irradiance.view(),
-                .sampler = ibl.irradiance.sampler(),
-                .imageLayout = ibl.irradiance.descriptor_layout() },
-              { .binding = 2,
-                .imageView = ibl.prefilter.view(),
-                .sampler = ibl.prefilter.sampler(),
-                .imageLayout = ibl.prefilter.descriptor_layout() },
-              { .binding = 3,
-                .imageView = ibl.brdf_lut.view(),
-                .sampler = ibl.brdf_lut.sampler(),
-                .imageLayout = ibl.brdf_lut.descriptor_layout() },
-              { .binding = 4,
-                .imageView = tex_albedo.view(),
-                .sampler = tex_albedo.sampler(),
-                .imageLayout = tex_albedo.descriptor_layout() },
-              { .binding = 5,
-                .imageView = tex_normal.view(),
-                .sampler = tex_normal.sampler(),
-                .imageLayout = tex_normal.descriptor_layout() },
-              { .binding = 6,
-                .imageView = tex_metallic.view(),
-                .sampler = tex_metallic.sampler(),
-                .imageLayout = tex_metallic.descriptor_layout() },
-              { .binding = 7,
-                .imageView = tex_roughness.view(),
-                .sampler = tex_roughness.sampler(),
-                .imageLayout = tex_roughness.descriptor_layout() },
-              { .binding = 8,
-                .imageView = tex_ao.view(),
-                .sampler = tex_ao.sampler(),
-                .imageLayout = tex_ao.descriptor_layout() },
-              { .binding = 9,
-                .imageView = tex_emissive.view(),
-                .sampler = tex_emissive.sampler(),
-                .imageLayout = tex_emissive.descriptor_layout() } });
+    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
+        lumen::render::write_pbr_scene_ibl_descriptor_set(
+            dev, helmet_scene_ds[i], helmet_ubos[i].handle(), sizeof(SceneUbo),
+            ibl.irradiance, ibl.prefilter, ibl.brdf_lut);
     }
 
     VkPushConstantRange helmet_pc {
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
-        .size = static_cast<uint32_t>(sizeof(HelmetPush)),
+        .size = static_cast<uint32_t>(
+            sizeof(lumen::render::PbrForwardPushConstants)),
     };
     lumen::render::PipelineLayout helmet_pl;
-    if (!helmet_pl.create(ctx, { helmet_dsl.handle() }, { helmet_pc })) {
+    if (!helmet_pl.create(ctx,
+                          { helmet_scene_dsl.handle(),
+                            helmet_material_dsl.handle() },
+                          { helmet_pc })) {
         LUMEN_APP_LOG_ERROR("头盔 PipelineLayout 失败");
         return -1;
     }
@@ -985,13 +926,9 @@ static int run_pbr(int, char **) {
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             uiSampler.handle(), tex_normal.view(),
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_metallic =
+    auto img_metallic_roughness =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_metallic.view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_roughness =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), tex_roughness.view(),
+            uiSampler.handle(), tex_metallic_roughness.view(),
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
     auto img_ao =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
@@ -1289,8 +1226,7 @@ static int run_pbr(int, char **) {
             };
             helmet_tex_cell("Base Color (sRGB)", img_albedo);
             helmet_tex_cell("Normal", img_normal);
-            helmet_tex_cell("Metallic", img_metallic);
-            helmet_tex_cell("Roughness", img_roughness);
+            helmet_tex_cell("Metallic/Roughness (G/B)", img_metallic_roughness);
             helmet_tex_cell("Ambient Occlusion", img_ao);
             ImGui::BeginGroup();
             ImGui::TextUnformatted("Emissive");
@@ -1392,18 +1328,26 @@ static int run_pbr(int, char **) {
 
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               helmet_pipe.handle());
+            std::array<VkDescriptorSet, 2> helmet_sets {
+                helmet_scene_ds[frameIdx], helmet_material_ds
+            };
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    helmet_pl.handle(), 0, 1,
-                                    &helmet_ds[frameIdx], 0, nullptr);
-            HelmetPush hp {};
+                                    helmet_pl.handle(), 0,
+                                    static_cast<uint32_t>(helmet_sets.size()),
+                                    helmet_sets.data(), 0, nullptr);
+            lumen::render::PbrForwardPushConstants hp {};
             hp.model = helmet_model;
-            hp.emissive_scale = glm::vec4(emissiveScale, 0.0F, 0.0F, 0.0F);
+            hp.base_color_factor = helmet_material.base_color_factor;
+            hp.emissive_factor_and_scale =
+                glm::vec4(helmet_material.emissive_factor, emissiveScale);
+            hp.metallic_factor = helmet_material.metallic_factor;
+            hp.roughness_factor = helmet_material.roughness_factor;
             hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
-            hp.push_pad = { { 0, 0, 0 } };
+            hp.pad = { { 0, 0, 0 } };
             vkCmdPushConstants(
                 cb, helmet_pl.handle(),
                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                static_cast<uint32_t>(sizeof(HelmetPush)), &hp);
+                static_cast<uint32_t>(sizeof(hp)), &hp);
             VkDeviceSize hv_off { 0 };
             VkBuffer hvb_main = helmet_vbuf.handle();
             vkCmdBindVertexBuffers(cb, 0, 1, &hvb_main, &hv_off);
@@ -1484,20 +1428,27 @@ static int run_pbr(int, char **) {
 
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmet_pipe.handle());
-                    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                            helmet_pl.handle(), 0, 1,
-                                            &helmet_ds[frameIdx], 0, nullptr);
-                    HelmetPush hp {};
+                    std::array<VkDescriptorSet, 2> helmet_sets_dbg {
+                        helmet_scene_ds[frameIdx], helmet_material_ds
+                    };
+                    vkCmdBindDescriptorSets(
+                        cb, VK_PIPELINE_BIND_POINT_GRAPHICS, helmet_pl.handle(),
+                        0, static_cast<uint32_t>(helmet_sets_dbg.size()),
+                        helmet_sets_dbg.data(), 0, nullptr);
+                    lumen::render::PbrForwardPushConstants hp {};
                     hp.model = helmet_model;
-                    hp.emissive_scale =
-                        glm::vec4(emissiveScale, 0.0F, 0.0F, 0.0F);
+                    hp.base_color_factor = helmet_material.base_color_factor;
+                    hp.emissive_factor_and_scale =
+                        glm::vec4(helmet_material.emissive_factor, emissiveScale);
+                    hp.metallic_factor = helmet_material.metallic_factor;
+                    hp.roughness_factor = helmet_material.roughness_factor;
                     hp.debug_view = ti;
-                    hp.push_pad = { { 0, 0, 0 } };
+                    hp.pad = { { 0, 0, 0 } };
                     vkCmdPushConstants(
                         cb, helmet_pl.handle(),
                         VK_SHADER_STAGE_VERTEX_BIT |
                             VK_SHADER_STAGE_FRAGMENT_BIT,
-                        0, static_cast<uint32_t>(sizeof(HelmetPush)), &hp);
+                        0, static_cast<uint32_t>(sizeof(hp)), &hp);
                     vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off_zero);
                     vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
                                          helmet_ibuf.vk_index_type());

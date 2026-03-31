@@ -21,7 +21,10 @@ layout(set = 0, binding = 0) uniform SceneUBO {
 
 layout(push_constant) uniform Push {
     mat4 model;
-    vec4 emissiveScale;
+    vec4 baseColorFactor;
+    vec4 emissiveFactorAndScale;
+    float metallicFactor;
+    float roughnessFactor;
     int debugView;
     int _pad[3];
 } pc;
