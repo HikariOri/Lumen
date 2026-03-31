@@ -35,7 +35,7 @@ static const void *kCmpPointLight { reinterpret_cast<const void *>(
 static const void *kCmpSpotLight { reinterpret_cast<const void *>(
     uintptr_t { 6 }) };
 
-void remove_light_components(::entt::registry &reg, ::entt::entity ent) {
+void remove_light_components(entt::registry &reg, entt::entity ent) {
     if (reg.all_of<lumen::scene::DirectionalLightComponent>(ent)) {
         reg.remove<lumen::scene::DirectionalLightComponent>(ent);
     }
@@ -59,8 +59,8 @@ void SceneInspectorPanel::on_imgui_render() {
     }
 
     ImGui::Begin("Properties");
-    ::entt::registry &reg = scene_->registry();
-    const ::entt::entity e = selection_->entity;
+    entt::registry &reg = scene_->registry();
+    const entt::entity e = selection_->entity;
 
     if (!reg.valid(e)) {
         ImGui::TextUnformatted("No entity selected.");
@@ -138,13 +138,13 @@ void SceneInspectorPanel::on_imgui_render() {
                                 pn ? pn->tag.c_str() : "?",
                                 static_cast<std::uint64_t>(par->parent));
                     if (ImGui::Button("Clear parent")) {
-                        scene_->set_parent(e, ::entt::null);
+                        scene_->set_parent(e, entt::null);
                     }
                 } else {
                     ImGui::Text("Parent: broken id=%" PRIu64,
                                 static_cast<std::uint64_t>(par->parent));
                     if (ImGui::Button("Clear parent")) {
-                        scene_->set_parent(e, ::entt::null);
+                        scene_->set_parent(e, entt::null);
                     }
                 }
             } else {

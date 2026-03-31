@@ -130,8 +130,8 @@ private:
 };
 
 void frame_orbit_on_drawable(SceneOrbitController &orbit,
-                             const ::entt::registry &reg,
-                             ::entt::entity drawable,
+                             const entt::registry &reg,
+                             entt::entity drawable,
                              const glm::vec3 &mesh_center_local,
                              const glm::vec3 &mesh_half_extents_local);
 

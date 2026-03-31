@@ -26,8 +26,8 @@ struct BillboardVertex {
     glm::vec2 uv;
 };
 
-void build_selected_light_debug(const ::entt::registry &registry,
-                                ::entt::entity selected,
+void build_selected_light_debug(const entt::registry &registry,
+                                entt::entity selected,
                                 std::vector<LineV> &out) {
     (void)registry;
     (void)selected;
@@ -246,8 +246,8 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     return true;
 }
 
-void LightViewportGizmos::prepare_frame(const ::entt::registry &registry,
-                                        ::entt::entity selected_for_debug,
+void LightViewportGizmos::prepare_frame(const entt::registry &registry,
+                                        entt::entity selected_for_debug,
                                         bool draw_icons_for_all_lights,
                                         bool draw_range_direction_for_selected,
                                         uint32_t frame_index) {
@@ -270,7 +270,7 @@ void LightViewportGizmos::prepare_frame(const ::entt::registry &registry,
 
 void LightViewportGizmos::record(VkCommandBuffer cmd, uint32_t frame_index,
                                  const glm::mat4 &view, const glm::mat4 &proj,
-                                 const ::entt::registry &registry) const {
+                                 const entt::registry &registry) const {
     if (draw_icons_this_frame_) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           icon_pipeline_.handle());

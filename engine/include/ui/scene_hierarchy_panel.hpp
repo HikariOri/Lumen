@@ -28,7 +28,7 @@ public:
 private:
     scene::Scene *scene_;
     EditorSelection *selection_;
-    std::vector<::entt::entity> pending_destroy_;
+    std::vector<entt::entity> pending_destroy_;
 };
 
 } // namespace ui

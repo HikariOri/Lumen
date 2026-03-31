@@ -15,7 +15,7 @@
 namespace lumen::ui {
 namespace {
 
-[[nodiscard]] bool is_root(const ::entt::registry &reg, ::entt::entity e) {
+[[nodiscard]] bool is_root(const entt::registry &reg, entt::entity e) {
     const auto *rel = reg.try_get<lumen::scene::RelationshipComponent>(e);
     if (!rel) {
         return true;
@@ -29,17 +29,17 @@ namespace {
 
 void draw_entity_node(lumen::scene::Scene *scene,
                       lumen::ui::EditorSelection *sel,
-                      std::vector<::entt::entity> *pending_destroy,
-                      ::entt::entity e) {
+                      std::vector<entt::entity> *pending_destroy,
+                      entt::entity e) {
     if (!scene || !sel || !scene->registry().valid(e)) {
         return;
     }
-    ::entt::registry &reg = scene->registry();
+    entt::registry &reg = scene->registry();
     auto &tag = reg.get<lumen::scene::TagComponent>(e).tag;
-    const std::vector<::entt::entity> children = scene->children_of(e);
+    const std::vector<entt::entity> children = scene->children_of(e);
     const bool has_children = !children.empty();
 
-    ImGui::PushID(static_cast<int>(::entt::to_integral(e)));
+    ImGui::PushID(static_cast<int>(entt::to_integral(e)));
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -63,7 +63,7 @@ void draw_entity_node(lumen::scene::Scene *scene,
     if (ImGui::BeginPopupContextItem()) {
         if (ImGui::MenuItem("Delete entity") && pending_destroy) {
             if (sel->entity == e) {
-                sel->entity = ::entt::null;
+                sel->entity = entt::null;
             }
             pending_destroy->push_back(e);
         }
@@ -92,19 +92,19 @@ void SceneHierarchyPanel::on_imgui_render() {
     }
 
     ImGui::Begin("Scene Hierarchy");
-    ::entt::registry &reg = scene_->registry();
+    entt::registry &reg = scene_->registry();
 
     if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
         const float btn_w = (ImGui::GetContentRegionAvail().x -
                              ImGui::GetStyle().ItemSpacing.x) *
                             0.5F;
         if (ImGui::Button("Create empty", ImVec2(btn_w, 0))) {
-            ::entt::entity parent { ::entt::null };
+            entt::entity parent { entt::null };
             if (reg.valid(selection_->entity)) {
                 parent = selection_->entity;
             }
-            const ::entt::entity n = scene_->create_entity("GameObject");
-            if (parent != ::entt::null && reg.valid(parent)) {
+            const entt::entity n = scene_->create_entity("GameObject");
+            if (parent != entt::null && reg.valid(parent)) {
                 scene_->set_parent(n, parent);
             }
             selection_->entity = n;
@@ -120,7 +120,7 @@ void SceneHierarchyPanel::on_imgui_render() {
                           ImGuiWindowFlags_HorizontalScrollbar);
 
         pending_destroy_.clear();
-        for (const ::entt::entity ent :
+        for (const entt::entity ent :
              reg.view<lumen::scene::TagComponent>()) {
             if (is_root(reg, ent)) {
                 draw_entity_node(scene_, selection_, &pending_destroy_, ent);
@@ -130,7 +130,7 @@ void SceneHierarchyPanel::on_imgui_render() {
         ImGui::EndChild();
     }
 
-    for (const ::entt::entity d : pending_destroy_) {
+    for (const entt::entity d : pending_destroy_) {
         scene_->destroy_entity(d);
     }
     pending_destroy_.clear();

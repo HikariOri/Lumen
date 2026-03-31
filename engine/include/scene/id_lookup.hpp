@@ -14,8 +14,8 @@
 namespace lumen {
 namespace scene {
 
-[[nodiscard]] inline std::optional<::entt::entity>
-find_entity_with_id(const ::entt::registry &reg, lumen::core::ID id) {
+[[nodiscard]] inline std::optional<entt::entity>
+find_entity_with_id(const entt::registry &reg, lumen::core::ID id) {
     if (id == lumen::core::INVALID_ID) {
         return std::nullopt;
     }
