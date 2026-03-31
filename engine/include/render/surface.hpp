@@ -24,7 +24,8 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "context.hpp"
+#include "platform/window.hpp"
 
 namespace lumen {
 namespace render {
@@ -47,8 +48,8 @@ namespace render {
  * - Surface 可能被多个 Swapchain 使用
  *
  * 使用方式：
- * - 通常由 Window 系统创建（如 SDL3）
- * - 再交由 Surface 接管（RAII）
+ * - 推荐：`Surface(ctx, window)`，内部使用 `ctx.instance()` 与 `Window::create_vulkan_surface`
+ * - 或：由平台创建 `VkSurfaceKHR` 后用 `Surface(instance, surface)` 接管（RAII）
  */
 class Surface {
 public:
@@ -72,6 +73,12 @@ public:
      */
     Surface(VkInstance instance, VkSurfaceKHR surface) noexcept
         : instance_(instance), surface_(surface) {}
+
+    /**
+     * @brief 从 Context 与 Window 创建（等价于双参数构造函数 + `create_vulkan_surface`）
+     */
+    Surface(const Context &ctx, const platform::Window &window) noexcept
+        : Surface(ctx.instance(), window.create_vulkan_surface(ctx)) {}
 
     /// 禁止拷贝（唯一所有权）
     Surface(const Surface &) = delete;

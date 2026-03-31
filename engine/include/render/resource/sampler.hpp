@@ -217,6 +217,14 @@ struct SamplerConfig {
      */
     float minLod { 0.0F };
     float maxLod { VK_LOD_CLAMP_NONE };
+
+    /**
+     * borderColor（CLAMP_TO_BORDER 时的边界色）
+     *
+     * 仅当 addressMode* 为 VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER 时生效。
+     * 常用：阴影贴图用 INT_OPAQUE_BLACK，自定义浮点边界用 FLOAT_* 系列。
+     */
+    VkBorderColor borderColor { VK_BORDER_COLOR_INT_OPAQUE_BLACK };
 };
 
 /**
@@ -274,6 +282,7 @@ public:
      * - anisotropyEnable → maxAnisotropy > 1.0
      * - maxAnisotropy → device feature dependent
      * - minLod / maxLod → LOD clamp
+     * - borderColor → CLAMP_TO_BORDER 采样边界
      *
      * @note 注意：
      * 必须确保：

@@ -9,8 +9,7 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
-
-#include <algorithm>
+#include <SDL3_image/SDL_image.h>
 
 namespace lumen::platform {
 
@@ -44,6 +43,12 @@ bool Window::create(const WindowConfig &config) {
         get_framebuffer_size(&w, &h);
         width_ = static_cast<uint32_t>(w);
         height_ = static_cast<uint32_t>(h);
+    }
+
+    if (!config.icon_path.empty()) {
+        if (!set_icon_from_file(config.icon_path)) {
+            LUMEN_LOG_WARN("窗口图标未应用 path={}", config.icon_path);
+        }
     }
 
     LUMEN_LOG_DEBUG("窗口创建成功 {}x{} \"{}\"", width_, height_, config.title);
@@ -127,9 +132,41 @@ void Window::set_title(const std::string &title) {
     }
 }
 
+bool Window::set_icon(SDL_Surface *icon) {
+    if (!window_ || icon == nullptr) {
+        return false;
+    }
+    if (!SDL_SetWindowIcon(window_, icon)) {
+        LUMEN_LOG_ERROR("SDL_SetWindowIcon 失败: {}", SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+bool Window::set_icon_from_file(const std::string &path) {
+    SDL_Surface *surf = IMG_Load(path.c_str());
+    if (surf == nullptr) {
+        LUMEN_LOG_ERROR("IMG_Load 图标失败 {}: {}", path, SDL_GetError());
+        return false;
+    }
+    const bool ok = set_icon(surf);
+    SDL_DestroySurface(surf);
+    return ok;
+}
+
 void Window::set_fullscreen(bool fullscreen) {
     if (window_) {
         SDL_SetWindowFullscreen(window_, fullscreen);
+    }
+}
+
+void Window::set_relative_mouse_mode(bool relative) {
+    if (!window_) {
+        return;
+    }
+    if (!SDL_SetWindowRelativeMouseMode(window_, relative)) {
+        LUMEN_LOG_WARN("SDL_SetWindowRelativeMouseMode({}) 失败: {}", relative,
+                       SDL_GetError());
     }
 }
 

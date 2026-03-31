@@ -40,48 +40,21 @@
  * @enddot
  *
  * @note
- * 当前实现中：
- * - 未执行 layout transition
- * - 未执行 buffer → image copy
- *
- * ⚠️ 实际项目必须补充 CommandBuffer 操作，否则图像不可用
+ * `create_from_file` 通过 `CommandPool::submit_one_shot` 完成上传与 mip 生成。
  */
 
 #include "render/resource/image.hpp"
 #include "core/logger.hpp"
+#include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
+#include "render/resource/detail/gpu_image_mipmap.hpp"
 
 #include <stb_image.h>
 
-#include <cmath>
-#include <limits>
+#include <cstdint>
 
 namespace lumen::render {
-
-namespace {
-
-/**
- * @brief 计算 mipmap 层级数量
- *
- * @param width 图像宽度
- * @param height 图像高度
- * @return mip 层数
- *
- * @details
- * 公式：
- * mipLevels = floor(log2(max(width, height))) + 1
- *
- * @note
- * Vulkan 要求 mip 每层尺寸为 1/2 递减直到 1x1
- */
-uint32_t calculate_mip_levels(uint32_t width, uint32_t height) {
-    return static_cast<uint32_t>(
-               std::floor(std::log2(std::max(width, height)))) +
-           1;
-}
-
-} // namespace
 
 bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
     /// 参数校验
@@ -104,7 +77,8 @@ bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
 
     /// 自动计算 mipmap
     if (info.generateMipmaps) {
-        mipLevels_ = calculate_mip_levels(info.width, info.height);
+        mipLevels_ =
+            gpu_image_mipmap::calculate_mip_levels(info.width, info.height);
     }
 
     /**
@@ -164,7 +138,6 @@ bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
      * - 哪些 mip / layer 可见
      *
      * VkImage 本身不能直接用于 shader 或 framebuffer
-     * :contentReference[oaicite:0]{index=0}
      */
     VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewInfo.image = image_;
@@ -191,7 +164,8 @@ bool Image::create(const Context &ctx, const ImageCreateInfo &info) {
     return true;
 }
 
-bool Image::create_from_file(const Context &ctx, const char *filePath) {
+bool Image::create_from_file(const Context &ctx, const char *filePath,
+                             VkQueue transferQueue, CommandPool &cmdPool) {
     /**
      * Vulkan 坐标系：
      * (0,0) 在左下角，因此需要翻转
@@ -206,21 +180,17 @@ bool Image::create_from_file(const Context &ctx, const char *filePath) {
     if (!pixels)
         return false;
 
-    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    if (w <= 0 || h <= 0) {
+        stbi_image_free(pixels);
+        return false;
+    }
 
-    size_t imageSize = static_cast<size_t>(w) * h * 4;
+    const VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    const size_t imageSize =
+        static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
 
-    /**
-     * -------------------------------
-     * 创建 staging buffer
-     * -------------------------------
-     *
-     * 用于 CPU → GPU 数据传输
-     */
-    Buffer staging;
-    BufferCreateInfo stagingInfo { imageSize, BufferUsage::Staging, true };
-
-    if (!staging.create(ctx, stagingInfo)) {
+    StagingBuffer staging;
+    if (!staging.create(ctx, imageSize)) {
         stbi_image_free(pixels);
         return false;
     }
@@ -228,38 +198,58 @@ bool Image::create_from_file(const Context &ctx, const char *filePath) {
     staging.upload(pixels, imageSize);
     stbi_image_free(pixels);
 
-    /**
-     * -------------------------------
-     * 创建目标 Image
-     * -------------------------------
-     */
+    const uint32_t texW = static_cast<uint32_t>(w);
+    const uint32_t texH = static_cast<uint32_t>(h);
+
     ImageCreateInfo info {};
-    info.width = static_cast<uint32_t>(w);
-    info.height = static_cast<uint32_t>(h);
+    info.width = texW;
+    info.height = texH;
     info.format = format;
-
-    /// 必须支持 copy + 采样
-    info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-
+    info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_SAMPLED_BIT;
     info.generateMipmaps = true;
 
-    if (!create(ctx, info))
+    if (!create(ctx, info)) {
         return false;
+    }
 
-    /**
-     * ⚠️ 关键缺失（必须实现）
-     *
-     * 实际流程应该是：
-     *
-     * 1. transition: UNDEFINED → TRANSFER_DST
-     * 2. vkCmdCopyBufferToImage
-     * 3. 生成 mipmap（blit）
-     * 4. transition → SHADER_READ_ONLY
-     *
-     * 否则图像不可被 shader 正确读取
-     */
+    const bool uploaded = cmdPool.submit_one_shot(
+        transferQueue, [&](const CommandBuffer &cmd) {
+            const VkCommandBuffer vkCmd = cmd.handle();
+            gpu_image_mipmap::transition_image_layout(
+                vkCmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, mipLevels_);
 
-    (void)staging; // TODO: 实现 copy + barrier
+            VkBufferImageCopy region {};
+            region.bufferOffset = 0;
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = 0;
+            region.imageSubresource.baseArrayLayer = 0;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset = { 0, 0, 0 };
+            region.imageExtent = { texW, texH, 1 };
+
+            vkCmdCopyBufferToImage(vkCmd, staging.handle(), image_,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                   &region);
+
+            if (mipLevels_ > 1) {
+                gpu_image_mipmap::generate_mipmaps(vkCmd, image_, texW, texH,
+                                                   mipLevels_);
+            } else {
+                gpu_image_mipmap::transition_image_layout(
+                    vkCmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1);
+            }
+        });
+
+    if (!uploaded) {
+        destroy_();
+        return false;
+    }
 
     return true;
 }

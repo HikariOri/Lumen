@@ -7,11 +7,8 @@
 #include "core/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
-#include "scene/components.hpp"
-#include "scene/transform.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 
 #include <entt/entt.hpp>
@@ -23,208 +20,18 @@ namespace {
 using LineV = LightViewportGizmos::LineVertex;
 
 constexpr std::size_t kLightDebugVbMaxBytes { 768U * 1024U };
-constexpr int kLightDebugCircleSegments { 28 };
-constexpr float kLightDebugDirBeamLength { 3.8f };
-constexpr float kLightDebugMaxHalfAngleRad { 1.553343f };
 
 struct BillboardVertex {
     glm::vec2 pos;
     glm::vec2 uv;
 };
 
-[[nodiscard]] glm::mat4 billboard_mvp(const glm::mat4 &view, const glm::mat4 &proj,
-                                      const glm::vec3 &world_pos,
-                                      float half_extent) {
-    const glm::mat4 inv_view = glm::inverse(view);
-    const glm::vec3 cam_pos = glm::vec3(inv_view[3]);
-    glm::vec3 n = cam_pos - world_pos;
-    if (glm::length(n) < 1e-5f) {
-        n = glm::vec3(0.0f, 0.0f, 1.0f);
-    } else {
-        n = glm::normalize(n);
-    }
-    const glm::vec3 up_ref = std::abs(n.y) < 0.99f ? glm::vec3(0.0f, 1.0f, 0.0f)
-                                                   : glm::vec3(1.0f, 0.0f, 0.0f);
-    const glm::vec3 right = glm::normalize(glm::cross(up_ref, n));
-    const glm::vec3 up = glm::normalize(glm::cross(n, right));
-    glm::mat4 model(1.0f);
-    model[0] = glm::vec4(right * half_extent, 0.0f);
-    model[1] = glm::vec4(up * half_extent, 0.0f);
-    model[2] = glm::vec4(n, 0.0f);
-    model[3] = glm::vec4(world_pos, 1.0f);
-    return proj * view * model;
-}
-
-inline glm::vec3 normalize_safe(glm::vec3 v, glm::vec3 fallback) {
-    const float len = glm::length(v);
-    return len > 1e-8f ? v / len : fallback;
-}
-
-inline glm::vec4 tint_axis_color(glm::vec4 base, glm::vec3 light_rgb) {
-    glm::vec4 c = base;
-    c.r = std::min(c.r * light_rgb.r, 1.0f);
-    c.g = std::min(c.g * light_rgb.g, 1.0f);
-    c.b = std::min(c.b * light_rgb.b, 1.0f);
-    return c;
-}
-
-void append_line(std::vector<LineV> &out, glm::vec3 a, glm::vec3 b,
-                 glm::vec4 color) {
-    out.push_back({ a, color });
-    out.push_back({ b, color });
-}
-
-void circle_in_plane(std::vector<LineV> &out, glm::vec3 center,
-                     glm::vec3 plane_axis, float radius, glm::vec4 color, int n) {
-    if (radius < 1e-4f || n < 3) {
-        return;
-    }
-    plane_axis = normalize_safe(plane_axis, glm::vec3(0.0f, 0.0f, 1.0f));
-    const glm::vec3 ref = std::abs(plane_axis.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f)
-                                                        : glm::vec3(1.0f, 0.0f, 0.0f);
-    glm::vec3 u =
-        normalize_safe(glm::cross(ref, plane_axis), glm::vec3(1.0f, 0.0f, 0.0f));
-    const glm::vec3 v = glm::cross(plane_axis, u);
-    constexpr float k_two_pi { 6.28318530718f };
-    for (int i = 0; i < n; ++i) {
-        const float a0 = k_two_pi * static_cast<float>(i) / static_cast<float>(n);
-        const float a1 =
-            k_two_pi * static_cast<float>(i + 1) / static_cast<float>(n);
-        const glm::vec3 p0 =
-            center + (u * std::cos(a0) + v * std::sin(a0)) * radius;
-        const glm::vec3 p1 =
-            center + (u * std::cos(a1) + v * std::sin(a1)) * radius;
-        append_line(out, p0, p1, color);
-    }
-}
-
-void wire_sphere(std::vector<LineV> &out, glm::vec3 center, float radius,
-                 glm::vec4 color) {
-    if (radius < 1e-4f) {
-        return;
-    }
-    circle_in_plane(out, center, glm::vec3(0.0f, 0.0f, 1.0f), radius, color,
-                    kLightDebugCircleSegments);
-    circle_in_plane(out, center, glm::vec3(0.0f, 1.0f, 0.0f), radius, color,
-                    kLightDebugCircleSegments);
-    circle_in_plane(out, center, glm::vec3(1.0f, 0.0f, 0.0f), radius, color,
-                    kLightDebugCircleSegments);
-}
-
-void arrow(std::vector<LineV> &out, glm::vec3 tail, glm::vec3 dir_unit,
-           float length, glm::vec4 color) {
-    if (length < 1e-4f) {
-        return;
-    }
-    const glm::vec3 tip = tail + dir_unit * length;
-    append_line(out, tail, tip, color);
-    const float head = std::min(length * 0.18f, 0.35f);
-    const glm::vec3 back = tip - dir_unit * head;
-    const glm::vec3 ref = std::abs(dir_unit.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f)
-                                                      : glm::vec3(1.0f, 0.0f, 0.0f);
-    glm::vec3 side0 =
-        normalize_safe(glm::cross(ref, dir_unit), glm::vec3(0.0f, 0.0f, 1.0f));
-    const glm::vec3 side1 = glm::cross(dir_unit, side0);
-    constexpr float k_two_pi { 6.28318530718f };
-    const float spread = head * 0.55f;
-    for (int k = 0; k < 3; ++k) {
-        const float ang = k_two_pi * static_cast<float>(k) / 3.0f;
-        const glm::vec3 wing =
-            back + (side0 * std::cos(ang) + side1 * std::sin(ang)) * spread;
-        append_line(out, tip, wing, color);
-    }
-}
-
-void spot_cone(std::vector<LineV> &out, glm::vec3 apex, glm::vec3 emit_axis_unit,
-               float range, float inner_half, float outer_half,
-               glm::vec3 light_rgb) {
-    range = std::max(range, 1e-3f);
-    emit_axis_unit =
-        normalize_safe(emit_axis_unit, glm::vec3(0.0f, 0.0f, -1.0f));
-    float inner_a = std::min(inner_half, outer_half);
-    float outer_a = std::max(inner_half, outer_half);
-    outer_a = std::min(outer_a, kLightDebugMaxHalfAngleRad);
-    inner_a = std::min(inner_a, outer_a);
-    const glm::vec3 base_c = apex + emit_axis_unit * range;
-    const float r_out = range * std::tan(outer_a);
-    const float r_in = range * std::tan(inner_a);
-    const glm::vec4 col_out =
-        tint_axis_color({ 1.0f, 0.52f, 0.12f, 0.88f }, light_rgb);
-    const glm::vec4 col_in =
-        tint_axis_color({ 1.0f, 0.88f, 0.35f, 0.55f }, light_rgb);
-    const glm::vec3 ref = std::abs(emit_axis_unit.y) < 0.9f
-                              ? glm::vec3(0.0f, 1.0f, 0.0f)
-                              : glm::vec3(1.0f, 0.0f, 0.0f);
-    glm::vec3 u = normalize_safe(glm::cross(ref, emit_axis_unit),
-                                 glm::vec3(1.0f, 0.0f, 0.0f));
-    const glm::vec3 v = glm::cross(emit_axis_unit, u);
-    constexpr float k_two_pi { 6.28318530718f };
-    const int n = kLightDebugCircleSegments;
-    for (int i = 0; i < n; ++i) {
-        const float a0 = k_two_pi * static_cast<float>(i) / static_cast<float>(n);
-        const float a1 =
-            k_two_pi * static_cast<float>(i + 1) / static_cast<float>(n);
-        for (int pass = 0; pass < 2; ++pass) {
-            const float rr = pass == 0 ? r_out : r_in;
-            const glm::vec4 cc = pass == 0 ? col_out : col_in;
-            if (rr < 1e-4f) {
-                continue;
-            }
-            const glm::vec3 p0 =
-                base_c + (u * std::cos(a0) + v * std::sin(a0)) * rr;
-            const glm::vec3 p1 =
-                base_c + (u * std::cos(a1) + v * std::sin(a1)) * rr;
-            append_line(out, p0, p1, cc);
-        }
-    }
-    for (int k = 0; k < 4; ++k) {
-        const float ang = k_two_pi * static_cast<float>(k) / 4.0f;
-        const glm::vec3 p_base =
-            base_c + (u * std::cos(ang) + v * std::sin(ang)) * r_out;
-        append_line(out, apex, p_base, col_out);
-    }
-}
-
 void build_selected_light_debug(const ::entt::registry &registry,
                                 ::entt::entity selected,
                                 std::vector<LineV> &out) {
+    (void)registry;
+    (void)selected;
     out.clear();
-    if (selected == ::entt::null || !registry.valid(selected) ||
-        !registry.all_of<lumen::scene::LightComponent>(selected)) {
-        return;
-    }
-    out.reserve(2048);
-    const auto &light = registry.get<lumen::scene::LightComponent>(selected);
-    const glm::mat4 world = lumen::scene::world_matrix(registry, selected);
-    const glm::vec3 wp = glm::vec3(world[3]);
-    const glm::mat3 lin = glm::mat3(world);
-    switch (light.type) {
-    case lumen::scene::LightType::Directional: {
-        const glm::vec3 surf_to_light = normalize_safe(
-            lin * light.local_direction, glm::vec3(0.0f, 1.0f, 0.0f));
-        const glm::vec3 emit_dir = -surf_to_light;
-        const glm::vec4 c =
-            tint_axis_color({ 1.0f, 0.92f, 0.28f, 0.92f }, light.color);
-        arrow(out, wp, emit_dir, kLightDebugDirBeamLength, c);
-        break;
-    }
-    case lumen::scene::LightType::Point: {
-        const float R = std::max(light.range, 1e-2f);
-        const glm::vec4 c =
-            tint_axis_color({ 0.28f, 0.72f, 1.0f, 0.78f }, light.color);
-        wire_sphere(out, wp, R, c);
-        break;
-    }
-    case lumen::scene::LightType::Spot: {
-        const glm::vec3 emit_axis =
-            normalize_safe(lin * light.local_direction,
-                           glm::vec3(0.0f, 0.0f, -1.0f));
-        const float range = std::max(light.range, 1e-2f);
-        spot_cone(out, wp, emit_axis, range, light.inner_radians,
-                  light.outer_radians, light.color);
-        break;
-    }
-    }
 }
 
 } // namespace
@@ -317,14 +124,15 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
         { { -1.0f, 1.0f }, { 0.0f, 0.0f } },
     };
     const uint32_t k_quad_idx[] = { 0u, 1u, 2u, 0u, 2u, 3u };
-    if (!icon_vertex_buffer_.create(ctx, sizeof(k_quad)) ||
-        !icon_index_buffer_.create(ctx, sizeof(k_quad_idx))) {
+    if (!icon_vertex_buffer_.create_device_local_and_upload(
+            ctx, info.graphics_queue, *info.cmd_pool, k_quad, sizeof(k_quad)) ||
+        !icon_index_buffer_.create_device_local_and_upload(
+            ctx, info.graphics_queue, *info.cmd_pool, k_quad_idx,
+            sizeof(k_quad_idx))) {
         destroy();
         return false;
     }
-    icon_vertex_buffer_.upload(k_quad, sizeof(k_quad));
     icon_index_buffer_.set_index_type(render::IndexBuffer::IndexType::Uint32);
-    icon_index_buffer_.upload(k_quad_idx, sizeof(k_quad_idx));
 
     if (!icon_desc_layout_.create(
             ctx, { { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
@@ -362,16 +170,18 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
                                    tex_spot_.view(), tex_spot_.sampler());
 
     render::GraphicsPipelineConfig icon_cfg {};
-    icon_cfg.stages.push_back(
+    icon_cfg.shaderStages.push_back(
         { icon_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    icon_cfg.stages.push_back(
+    icon_cfg.shaderStages.push_back(
         { icon_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     icon_cfg.vertexBindings.push_back(
-        { 0, sizeof(BillboardVertex), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(BillboardVertex), render::VertexInputRate::PerVertex });
     icon_cfg.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, pos) });
+        { 0, 0, render::VertexAttributeFormat::F32Vec2,
+          offsetof(BillboardVertex, pos) });
     icon_cfg.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(BillboardVertex, uv) });
+        { 1, 0, render::VertexAttributeFormat::F32Vec2,
+          offsetof(BillboardVertex, uv) });
     icon_cfg.depthTest = true;
     icon_cfg.depthWrite = false;
     icon_cfg.depthCompareOp = VK_COMPARE_OP_LESS;
@@ -396,17 +206,19 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     }
 
     render::GraphicsPipelineConfig dbg_cfg {};
-    dbg_cfg.stages.push_back(
+    dbg_cfg.shaderStages.push_back(
         { dbg_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    dbg_cfg.stages.push_back(
+    dbg_cfg.shaderStages.push_back(
         { dbg_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
     dbg_cfg.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
     dbg_cfg.vertexBindings.push_back(
-        { 0, sizeof(LineV), VK_VERTEX_INPUT_RATE_VERTEX });
+        { 0, sizeof(LineV), render::VertexInputRate::PerVertex });
     dbg_cfg.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineV, position) });
+        { 0, 0, render::VertexAttributeFormat::F32Vec3,
+          offsetof(LineV, position) });
     dbg_cfg.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(LineV, color) });
+        { 1, 0, render::VertexAttributeFormat::F32Vec4,
+          offsetof(LineV, color) });
     dbg_cfg.depthTest = true;
     dbg_cfg.depthWrite = false;
     dbg_cfg.depthCompareOp = VK_COMPARE_OP_LESS;
@@ -467,34 +279,7 @@ void LightViewportGizmos::record(VkCommandBuffer cmd, uint32_t frame_index,
         vkCmdBindVertexBuffers(cmd, 0, 1, &lib_vb, &off0);
         vkCmdBindIndexBuffer(cmd, icon_index_buffer_.handle(), 0,
                              icon_index_buffer_.vk_index_type());
-        for (const ::entt::entity le :
-             registry.view<lumen::scene::LightComponent>()) {
-            const auto &lc = registry.get<lumen::scene::LightComponent>(le);
-            const glm::mat4 world = lumen::scene::world_matrix(registry, le);
-            const glm::vec3 wp = glm::vec3(world[3]);
-            const glm::mat4 mvp =
-                billboard_mvp(view, proj, wp, icon_half_extent_);
-            std::uint32_t set_i = 0;
-            switch (lc.type) {
-            case lumen::scene::LightType::Directional:
-                set_i = 0;
-                break;
-            case lumen::scene::LightType::Point:
-                set_i = 1;
-                break;
-            case lumen::scene::LightType::Spot:
-                set_i = 2;
-                break;
-            }
-            VkDescriptorSet ds = icon_sets_[set_i];
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    icon_pipeline_layout_.handle(), 0, 1, &ds,
-                                    0, nullptr);
-            vkCmdPushConstants(cmd, icon_pipeline_layout_.handle(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                               glm::value_ptr(mvp));
-            vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
-        }
+        (void)registry;
     }
 
     if (debug_ready_ && line_vertex_count_ > 0 &&

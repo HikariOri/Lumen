@@ -34,7 +34,7 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-util)
 target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-glsl)
 target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-cpp)
 target_link_libraries(${ENGINE_TARGET} PUBLIC nlohmann_json::nlohmann_json)
-target_link_libraries(${ENGINE_TARGET} PRIVATE volk::volk volk::volk_headers)
+target_link_libraries(${ENGINE_TARGET} PUBLIC volk::volk volk::volk_headers)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
 

@@ -12,16 +12,17 @@ namespace lumen {
 namespace ui {
 namespace {
 
-/// ImGui::GetContentRegionAvail() 在窗口过窄、Dock 首帧等情况下可能为负或非有限值；
-/// 直接 static_cast<uint32_t> 会无符号回绕，进而把离屏 resize 撑爆。
+/// ImGui::GetContentRegionAvail() 在窗口过窄、Dock
+/// 首帧等情况下可能为负或非有限值； 直接 static_cast<uint32_t>
+/// 会无符号回绕，进而把离屏 resize 撑爆。
 uint32_t content_avail_to_pixel_dim(float v) {
-    if (!std::isfinite(v) || v < 1.0f) {
-        return 1u;
+    if (!std::isfinite(v) || v < 1.0F) {
+        return 1U;
     }
-    constexpr float kMaxReasonable = 16384.0f;
+    constexpr float kMaxReasonable = 16384.0F;
     const float c = std::min(v, kMaxReasonable);
     const auto as_u32 = static_cast<uint32_t>(c);
-    return std::max(1u, as_u32);
+    return std::max(1U, as_u32);
 }
 
 } // namespace
@@ -32,8 +33,7 @@ ViewportMouseState viewport_mouse_state(const TextureViewRect &rect,
     const float w = rect.width();
     const float h = rect.height();
     s.inViewport = mouseX >= rect.minX && mouseX <= rect.maxX &&
-                   mouseY >= rect.minY && mouseY <= rect.maxY && w > 0 &&
-                   h > 0;
+                   mouseY >= rect.minY && mouseY <= rect.maxY && w > 0 && h > 0;
     if (s.inViewport) {
         s.localX = mouseX - rect.minX;
         s.localY = mouseY - rect.minY;
@@ -53,12 +53,12 @@ void imgui_viewport_mouse_debug(const TextureViewRect &rect,
     ImGui::Text("size: %.0f x %.0f", rect.width(), rect.height());
     if (mouseState.inViewport) {
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
-                          "Mouse in %s: local=(%.0f, %.0f) norm=(%.3f, %.3f)",
-                          label, mouseState.localX, mouseState.localY,
-                          mouseState.normX, mouseState.normY);
+                           "Mouse in %s: local=(%.0f, %.0f) norm=(%.3f, %.3f)",
+                           label, mouseState.localX, mouseState.localY,
+                           mouseState.normX, mouseState.normY);
     } else {
         ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Mouse: [not in %s]",
-                          label);
+                           label);
     }
 }
 
@@ -72,8 +72,8 @@ void imgui_texture_view_panel(
     const uint32_t w_px = content_avail_to_pixel_dim(avail.x);
     const uint32_t h_px = content_avail_to_pixel_dim(avail.y);
     ImGui::Image(textureId,
-                  ImVec2(static_cast<float>(w_px), static_cast<float>(h_px)),
-                  uv0, uv1);
+                 ImVec2(static_cast<float>(w_px), static_cast<float>(h_px)),
+                 uv0, uv1);
     if (outWidth) {
         *outWidth = w_px;
     }

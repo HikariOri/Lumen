@@ -8,7 +8,7 @@
 |------|------|
 | sandbox | 2D 纹理矩形，WASD 移动 / QE 旋转 |
 | shadertoy | 全屏 Shadertoy 效果，拖鼠标控制相机 |
-| demo3d | 3D OBJ + 场景视口；`SceneOrbitCamera` / `SceneCameraController`（见 [scene-camera.md](../design/scene-camera.md)） |
+| demo3d | 3D OBJ + 场景视口；`SceneCamera`、`ISceneCameraController`、`SceneOrbitController`（见 [scene-camera.md](../design/scene-camera.md)） |
 
 构建后对应可执行文件位于 `build/<Config>/` 下。
 
@@ -26,7 +26,7 @@
 | 日志 | `LUMEN_APP_LOG_*`（应用层）|
 | 设备等待 | `ctx.wait_idle()` |
 | GPU 缓冲 / 图像内存 | `Context::init_device` 后使用 `ctx.vma_allocator()`；`Buffer` / `Image` / `Texture` 内部通过 **VMA** 分配（非裸 `vkAllocateMemory`） |
-| 场景轨道相机 | `lumen::scene::SceneOrbitCamera`、`SceneCameraController`、`frame_orbit_on_drawable`（见 [scene-camera.md](../design/scene-camera.md)） |
+| 场景相机 / 轨道 | `lumen::scene::SceneCamera`、`ISceneCameraController`、`SceneOrbitController`、`frame_orbit_on_drawable`（见 [scene-camera.md](../design/scene-camera.md)） |
 | Swapchain 重建 | `recreate_swapchain_resources(ctx, swapchain, framebuffers, frameSync, renderPass.handle(), w, h, framesInFlight, depthImageView)` |
 
 ## 文档索引

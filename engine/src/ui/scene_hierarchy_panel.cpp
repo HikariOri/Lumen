@@ -5,6 +5,7 @@
 #include "ui/scene_hierarchy_panel.hpp"
 
 #include "scene/components.hpp"
+#include "scene/id_lookup.hpp"
 #include "scene/scene.hpp"
 #include "ui/editor_selection.hpp"
 
@@ -15,24 +16,26 @@ namespace lumen::ui {
 namespace {
 
 [[nodiscard]] bool is_root(const ::entt::registry &reg, ::entt::entity e) {
-    const auto *p = reg.try_get<lumen::scene::ParentComponent>(e);
-    if (!p) {
+    const auto *rel = reg.try_get<lumen::scene::RelationshipComponent>(e);
+    if (!rel) {
         return true;
     }
-    if (p->parent == ::entt::null || !reg.valid(p->parent)) {
+    if (rel->parent == lumen::core::INVALID_ID) {
         return true;
     }
-    return false;
+    const auto p = lumen::scene::find_entity_with_id(reg, rel->parent);
+    return !p || !reg.valid(*p);
 }
 
-void draw_entity_node(lumen::scene::Scene *scene, lumen::ui::EditorSelection *sel,
+void draw_entity_node(lumen::scene::Scene *scene,
+                      lumen::ui::EditorSelection *sel,
                       std::vector<::entt::entity> *pending_destroy,
                       ::entt::entity e) {
     if (!scene || !sel || !scene->registry().valid(e)) {
         return;
     }
     ::entt::registry &reg = scene->registry();
-    auto &name = reg.get<lumen::scene::NameComponent>(e).name;
+    auto &tag = reg.get<lumen::scene::TagComponent>(e).tag;
     const std::vector<::entt::entity> children = scene->children_of(e);
     const bool has_children = !children.empty();
 
@@ -46,9 +49,9 @@ void draw_entity_node(lumen::scene::Scene *scene, lumen::ui::EditorSelection *se
 
     bool open = false;
     if (has_children) {
-        open = ImGui::TreeNodeEx(name.c_str(), flags);
+        open = ImGui::TreeNodeEx(tag.c_str(), flags);
     } else {
-        ImGui::TreeNodeEx(name.c_str(),
+        ImGui::TreeNodeEx(tag.c_str(),
                           flags | ImGuiTreeNodeFlags_Leaf |
                               ImGuiTreeNodeFlags_NoTreePushOnOpen);
     }
@@ -92,9 +95,9 @@ void SceneHierarchyPanel::on_imgui_render() {
     ::entt::registry &reg = scene_->registry();
 
     if (ImGui::CollapsingHeader("Actions", ImGuiTreeNodeFlags_DefaultOpen)) {
-        const float btn_w =
-            (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) *
-            0.5f;
+        const float btn_w = (ImGui::GetContentRegionAvail().x -
+                             ImGui::GetStyle().ItemSpacing.x) *
+                            0.5F;
         if (ImGui::Button("Create empty", ImVec2(btn_w, 0))) {
             ::entt::entity parent { ::entt::null };
             if (reg.valid(selection_->entity)) {
@@ -118,7 +121,7 @@ void SceneHierarchyPanel::on_imgui_render() {
 
         pending_destroy_.clear();
         for (const ::entt::entity ent :
-             reg.view<lumen::scene::NameComponent>()) {
+             reg.view<lumen::scene::TagComponent>()) {
             if (is_root(reg, ent)) {
                 draw_entity_node(scene_, selection_, &pending_destroy_, ent);
             }

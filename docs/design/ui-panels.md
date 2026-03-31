@@ -7,7 +7,7 @@
 ```
 engine/include/ui/
 ├── imgui_backend.hpp       # ImGui 后端封装（Vulkan + SDL3）
-├── input_bridge.hpp        # SDL→ImGui 事件、WantCapture 查询（见 ../reference/event-input.md）
+├── imgui_layer.hpp         # 对应 ImGuiLayer：SDL、Overlay、WantCapture（见 ../reference/event-input.md）
 ├── panel.hpp               # IPanel、PanelManager（集中绘制、可选默认 Dock）
 ├── editor_selection.hpp    # 当前选中实体（供 Hierarchy / Inspector / Gizmo 共享）
 ├── scene_hierarchy_panel.hpp
@@ -19,8 +19,9 @@ engine/include/ui/
 engine/include/scene/       # EnTT 场景（与渲染解耦）
 ├── components.hpp          # ObjectId、Name、Transform、Light…
 ├── light.hpp               # GPULight、pack_lights_for_ubo
-├── scene_orbit_camera.hpp  # 编辑器轨道相机（见 scene-camera.md）
-├── scene_camera_controller.hpp
+├── scene_camera.hpp        # 透视 / 正交 + lookAt（见 scene-camera.md）
+├── scene_camera_controller.hpp  # ISceneCameraController
+├── scene_orbit_controller.hpp   # SceneOrbitController、frame_orbit_on_drawable
 ├── scene.hpp               # Scene 封装 registry、父子、环检测
 └── transform.hpp           # world_matrix（层级链）
 
@@ -37,19 +38,19 @@ engine/src/scene/
 ├── scene.cpp
 ├── transform.cpp
 ├── light.cpp
-├── scene_orbit_camera.cpp
-└── scene_camera_controller.cpp
+├── scene_camera.cpp
+└── scene_orbit_controller.cpp
 ```
 
 * **自由函数面板**（如 `imgui_texture_view_panel`）：由调用方在帧内直接调用。
 * **PanelManager**：统一对实现了 `IPanel` 的面板调用 `on_imgui_render()`，适合日志、GPU 信息、**Hierarchy / Inspector**（数据源为 `lumen::scene::Scene` + `EditorSelection`）等可注册窗口。
 * **材质 / 环境（IBL）**：规划中的参数与贴图编辑、环境立方体贴图加载见 [material-system-ibl-pbr.md](material-system-ibl-pbr.md)（可落在 Inspector 折叠块或独立 `IPanel`）。
 
-所有 ImGui 绘制**需在 ImGui 帧内**完成（`imgui_backend_new_frame()` 之后、`imgui_backend_render(cmd)` 之前）。
+所有 ImGui 绘制**需在 ImGui 帧内**完成（`ImGuiLayer::begin_frame()` 之后、`ImGuiLayer::end_frame(cmd)` 之前；二者封装 `imgui_backend_new_frame` / `imgui_backend_render`）。
 
 ### 1.1 PanelManager 与 Dock
 
-典型顺序：先 `DockSpaceOverViewport` 得到 `dockspaceId`，再 `panel_manager.set_default_dock_id(dockspaceId)`，然后绘制纹理视口等自定义窗口，最后 `panel_manager.render_all()`。`render_all()` 会在每个面板前设置 `SetNextWindowDockID`（`FirstUseEver`），便于首次布局进同一 Dock 空间。
+典型顺序：若使用引擎默认全屏 Dock（`imgui_backend_new_frame` 内已建），用 `imgui_backend_main_dockspace_id()` 得到 ID，再 `panel_manager.set_default_dock_id(dock_id)`；否则可自行 `DockSpaceOverViewport` 等取得 `dockspaceId`。然后绘制纹理视口等自定义窗口，最后 `panel_manager.render_all()`。`render_all()` 会在每个面板前设置 `SetNextWindowDockID`（`FirstUseEver`），便于首次布局进同一 Dock 空间。
 
 ```cpp
 #include "ui/panel.hpp"
@@ -134,7 +135,7 @@ lumen::ui::imgui_texture_view_panel("Wireframe", wireframeTextureId,
 
 1. **本帧**：`imgui_texture_view_panel` 输出 `nextSceneW` / `nextSceneH`
 2. **帧间**：检查 `sceneTarget.extent()` 与 `nextSceneW/nextSceneH` 是否一致
-3. **若需 resize**：`ctx.wait_idle()` → `sceneTarget.resize(ctx, nextSceneW, nextSceneH)` → `imgui_backend_remove_texture(oldId)` → `imgui_backend_add_texture(...)` 获取新 ID
+3. **若需 resize**：`ctx.wait_idle()` → `sceneTarget.resize(nextSceneW, nextSceneH)` → `imgui_backend_remove_texture(oldId)` → `imgui_backend_add_texture(...)` 获取新 ID
 
 详见 [ImGui 3D 场景渲染到窗口](imgui-integration.md#4-3d-场景渲染到-imgui-窗口)。
 

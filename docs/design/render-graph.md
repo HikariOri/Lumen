@@ -298,6 +298,7 @@ RenderGraph：UIPass 依赖 OffscreenImage，OffscreenImage 依赖 ScenePass
 
 - `engine/include/render/pass/render_graph.hpp`：RenderGraph / RGPass / RGImage
 - `engine/include/render/pass/render_target.hpp`：OffscreenRenderTarget / SwapchainRenderTarget
+- [offscreen-render-target-roadmap.md](offscreen-render-target-roadmap.md)：离屏目标共享 `RenderPass`、与 RenderGraph 深度整合等**远期路线**
 - `examples/demo3d/src/main.cpp`：Scene → Offscreen → ImGui → Swapchain 实际流程
 - [render-engine-roadmap.md](render-engine-roadmap.md)：完整管线设计
 

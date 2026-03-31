@@ -1,111 +1,345 @@
 /**
  * @file main.cpp
- * @brief Sandbox：测试引擎功能，纹理矩形
+ * @brief PBR — IBL 烘焙、HDR 天空盒、Sponza（glTF 多 primitive / 多材质）
  */
 
-#include "engine.hpp"
+#include "ibl_bake.hpp"
 
+#include "core/gltf_loader.hpp"
+#include "core/gltf_material.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
-#include "core/time.hpp"
+#include "platform/event.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
+#include "render/frame_sync.hpp"
+#include "render/material/pbr_material_bind.hpp"
 #include "render/pass/render_pass.hpp"
+#include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
+#include "render/resource/buffer.hpp"
 #include "render/resource/descriptor.hpp"
+#include "render/resource/image.hpp"
+#include "render/resource/pbr_placeholder_textures.hpp"
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
+#include "render/surface.hpp"
 #include "render/swapchain.hpp"
+#include "scene/mesh.hpp"
+#include "scene/pbr_material.hpp"
+#include "scene/scene_camera.hpp"
+#include "scene/scene_orbit_controller.hpp"
+#include "ui/gpu_capabilities_panel.hpp"
+#include "ui/imgui_backend.hpp"
+#include "ui/imgui_layer.hpp"
+#include "ui/log_panel.hpp"
+#include "ui/panel.hpp"
+#include "ui/scene_viewport_panel.hpp"
 
 #include <SDL3/SDL.h>
-#include <glm/glm.hpp>
-
-struct Vertex {
-    glm::vec2 position;
-    glm::vec2 uv;
-};
-
-/// UBO 与着色器 layout(std140) 对应
-struct UBO {
-    glm::vec2 position { 0.0f, 0.0f };
-    float rotation { 0.0f };
-    float _pad; // std140 对齐到 16 字节
-};
+#include <imgui.h>
 
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <limits>
+#include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <vulkan/vulkan.h>
+
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace {
 
-constexpr uint32_t kMaxFramesInFlight { 2 };
+constexpr const char *kHdrRelPath { "assets/environment_maps/meadow_2_2k.hdr" };
+
+constexpr const char *kSponzaGltfRel {
+    // "assets/models/Sponza/glTF/Sponza.gltf"
+    // "assets/models/rex_master/scene.gltf"
+    // "assets/models/chisa_wuthering_waves/scene.gltf"
+    "assets/models/chisa_wuthering_waves/scene.gltf"
+};
+
+// 单位立方体（与 ibl_bake 天空捕获一致）
+constexpr std::array<float, 36U * 3U> kSkyCubePositions { {
+    -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F,
+    1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  -1.0F,
+    -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, 1.0F,
+
+    1.0F,  -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F,
+
+    -1.0F, -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F, -1.0F, 1.0F,
+
+    -1.0F, 1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  1.0F,
+    1.0F,  1.0F,  1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,  -1.0F,
+
+    -1.0F, -1.0F, -1.0F, -1.0F, -1.0F, 1.0F,  1.0F,  -1.0F, 1.0F,
+    1.0F,  -1.0F, 1.0F,  1.0F,  -1.0F, -1.0F, -1.0F, -1.0F, -1.0F,
+} };
+
+struct SkyPush {
+    glm::mat4 sky_mvp {};
+    glm::vec4 params {}; // x: exposure
+};
+
+constexpr int k_scene_point_light_cap { 4 };
+
+/// std140，与 helmet_pbr.{vert,frag} 中 SceneUBO 一致
+struct PointLightGpu {
+    glm::vec4 position_radius {};
+    glm::vec4 color_intensity {};
+};
+
+struct SceneUbo {
+    glm::mat4 view { 1.0F };
+    glm::mat4 proj { 1.0F };
+    glm::vec4 camera_world { 0.0F, 0.0F, 0.0F, 1.0F };
+    glm::vec4 env_params { 0.0F }; // exposure, maxMip, diffMip, iblStrength
+    /// x: 生效数量 0…4；y: 全局强度倍率；zw 保留
+    glm::vec4 point_light_params { 0.0F };
+    std::array<PointLightGpu, k_scene_point_light_cap> point_lights {};
+};
+static_assert(sizeof(PointLightGpu) == 32U);
+static_assert(sizeof(SceneUbo) == 304U);
+
+struct PointLightInit {
+    glm::vec3 pos {};
+    float range { 5.0F };
+    glm::vec3 color { 1.0F };
+    float intensity { 2.0F };
+};
+
+constexpr std::array<PointLightInit, k_scene_point_light_cap>
+    k_default_point_lights {
+        PointLightInit { glm::vec3 { 1.5F, 2.0F, 1.2F }, 5.0F,
+                         glm::vec3 { 1.0F, 0.92F, 0.82F }, 3.0F },
+        PointLightInit { glm::vec3 { -2.0F, 1.2F, 0.8F }, 5.5F,
+                         glm::vec3 { 0.55F, 0.72F, 1.0F }, 2.4F },
+        PointLightInit { glm::vec3 { 0.0F, 0.45F, -2.2F }, 6.0F,
+                         glm::vec3 { 1.0F, 0.85F, 0.68F }, 2.0F },
+        PointLightInit { glm::vec3 { -0.9F, -0.4F, 1.7F }, 4.5F,
+                         glm::vec3 { 0.48F, 0.52F, 0.58F }, 1.9F },
+    };
+
+void fill_scene_point_lights(SceneUbo &su, int active_count,
+                             float strength_scale) {
+    const int n = std::clamp(active_count, 0, k_scene_point_light_cap);
+    su.point_light_params =
+        glm::vec4(static_cast<float>(n), strength_scale, 0.0F, 0.0F);
+    for (int i = 0; i < k_scene_point_light_cap; ++i) {
+        const PointLightInit &L =
+            k_default_point_lights[static_cast<size_t>(i)];
+        su.point_lights[static_cast<size_t>(i)].position_radius =
+            glm::vec4(L.pos, L.range);
+        su.point_lights[static_cast<size_t>(i)].color_intensity =
+            glm::vec4(L.color, L.intensity);
+    }
+}
+
+struct HelmVertex {
+    glm::vec3 position {};
+    glm::vec3 normal {};
+    glm::vec2 uv {};
+    glm::vec4 tangent { 1.0F, 0.0F, 0.0F, 1.0F };
+};
+
+void center_and_scale_mesh(lumen::core::ObjMesh &mesh) {
+    if (mesh.vertices.empty()) {
+        return;
+    }
+    glm::vec3 bmin(std::numeric_limits<float>::max());
+    glm::vec3 bmax(std::numeric_limits<float>::lowest());
+    for (const auto &v : mesh.vertices) {
+        bmin = glm::min(bmin, v.position);
+        bmax = glm::max(bmax, v.position);
+    }
+    const glm::vec3 center { 0.5F * (bmin + bmax) };
+    for (auto &v : mesh.vertices) {
+        v.position -= center;
+    }
+    const glm::vec3 ext { bmax - bmin };
+    const float mx = (std::max)(ext.x, (std::max)(ext.y, ext.z));
+    const float s = mx > 1e-8F ? (1.8F / mx) : 1.0F;
+    for (auto &v : mesh.vertices) {
+        v.position *= s;
+    }
+}
+
+void compute_mesh_tangents(std::vector<HelmVertex> &verts,
+                           const std::vector<uint32_t> &indices) {
+    std::vector<glm::vec3> tan1(verts.size(), glm::vec3(0.0F));
+    std::vector<glm::vec3> tan2(verts.size(), glm::vec3(0.0F));
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const uint32_t i0 = indices[i];
+        const uint32_t i1 = indices[i + 1];
+        const uint32_t i2 = indices[i + 2];
+        const HelmVertex &v0 = verts[i0];
+        const HelmVertex &v1 = verts[i1];
+        const HelmVertex &v2 = verts[i2];
+        const glm::vec3 edge1 = v1.position - v0.position;
+        const glm::vec3 edge2 = v2.position - v0.position;
+        const glm::vec2 duv1 = v1.uv - v0.uv;
+        const glm::vec2 duv2 = v2.uv - v0.uv;
+        const float denom = duv1.x * duv2.y - duv2.x * duv1.y + 1e-8F;
+        const float f = 1.0F / denom;
+        const glm::vec3 t = f * (edge1 * duv2.y - edge2 * duv1.y);
+        const glm::vec3 b = f * (edge2 * duv1.x - edge1 * duv2.x);
+        tan1[i0] += t;
+        tan1[i1] += t;
+        tan1[i2] += t;
+        tan2[i0] += b;
+        tan2[i1] += b;
+        tan2[i2] += b;
+    }
+    for (size_t i = 0; i < verts.size(); ++i) {
+        const glm::vec3 &n = verts[i].normal;
+        glm::vec3 t = tan1[i];
+        t = glm::normalize(t - n * glm::dot(n, t));
+        const float w =
+            glm::dot(glm::cross(n, t), glm::normalize(tan2[i])) < 0.0F ? -1.0F
+                                                                       : 1.0F;
+        verts[i].tangent = glm::vec4(t, w);
+    }
+}
+
+[[nodiscard]] VkDescriptorSet vk_descriptor_for_pbr_material(
+    const lumen::scene::PBRMaterial *material,
+    const std::vector<lumen::scene::PBRMaterial> &materials_storage,
+    const std::vector<VkDescriptorSet> &material_sets) {
+    if (material_sets.empty()) {
+        return VK_NULL_HANDLE;
+    }
+    if (material == nullptr || materials_storage.empty()) {
+        return material_sets[0];
+    }
+    const ptrdiff_t off = material - materials_storage.data();
+    if (off < 0 || static_cast<size_t>(off) >= materials_storage.size()) {
+        return material_sets[0];
+    }
+    return material_sets[static_cast<size_t>(off)];
+}
+
+/** @brief 立方体贴图某一面的 2D 视图（@a base_array_layer 0…5 对应 +X −X +Y −Y
+ * +Z −Z） */
+[[nodiscard]] VkImageView create_cubemap_face_2d_view(VkDevice dev, VkImage img,
+                                                      VkFormat fmt,
+                                                      uint32_t mip_level,
+                                                      uint32_t base_array_layer,
+                                                      const char *label) {
+    VkImageViewCreateInfo vi { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vi.image = img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = fmt;
+    vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vi.subresourceRange.baseMipLevel = mip_level;
+    vi.subresourceRange.levelCount = 1;
+    vi.subresourceRange.baseArrayLayer = base_array_layer;
+    vi.subresourceRange.layerCount = 1;
+    VkImageView v { VK_NULL_HANDLE };
+    const VkResult rc = vkCreateImageView(dev, &vi, nullptr, &v);
+    if (rc != VK_SUCCESS) {
+        LUMEN_APP_LOG_ERROR("vkCreateImageView 失败 ({}) result={}", label,
+                            static_cast<int>(rc));
+        return VK_NULL_HANDLE;
+    }
+    return v;
+}
+
+void destroy_view(VkDevice dev, VkImageView v) {
+    if (v != VK_NULL_HANDLE) {
+        vkDestroyImageView(dev, v, nullptr);
+    }
+}
+
+void imgui_draw_cubemap_face_grid(const std::array<ImTextureID, 6> &faces,
+                                  const ImVec2 &face_sz) {
+    static constexpr const char *k_face_nm[6] = { "+X", "-X", "+Y",
+                                                  "-Y", "+Z", "-Z" };
+    for (int row = 0; row < 2; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const int fi = row * 3 + col;
+            ImGui::BeginGroup();
+            ImGui::TextUnformatted(k_face_nm[fi]);
+            ImGui::Image(faces[static_cast<size_t>(fi)], face_sz);
+            ImGui::EndGroup();
+            if (col < 2) {
+                ImGui::SameLine(0.0F, ImGui::GetStyle().ItemSpacing.x);
+            }
+        }
+    }
+}
 
 } // namespace
 
-static int run_sandbox() {
+static int run_pbr(int, char **) {
     lumen::platform::Window window;
     lumen::platform::WindowConfig winConfig;
-    winConfig.title = "Lumen Sandbox - 纹理矩形";
-    winConfig.width = 800;
-    winConfig.height = 600;
-
+    winConfig.title = "Lumen — PBR DamagedHelmet + IBL";
+    winConfig.width = 1280;
+    winConfig.height = 800;
+    winConfig.icon_path =
+        lumen::core::get_resource_path("assets/icons/哈士奇.png");
     if (!window.create(winConfig)) {
         LUMEN_APP_LOG_ERROR("窗口创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("窗口创建成功: {}x{}", window.width(), window.height());
 
-    auto extensions = window.get_vulkan_instance_extensions();
     lumen::render::ContextConfig ctxConfig;
-    ctxConfig.instanceExtensions.assign(extensions.begin(), extensions.end());
-
     lumen::render::Context ctx;
-    if (!ctx.init_instance(ctxConfig)) {
+    if (!ctx.init_instance(ctxConfig, window)) {
         LUMEN_APP_LOG_ERROR("Vulkan Instance 创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("Sandbox 启动");
-    LUMEN_APP_LOG_INFO("Vulkan Instance 创建成功");
 
-    lumen::render::Surface surface(
-        ctx.instance(), window.create_vulkan_surface(ctx.instance()));
+    lumen::render::Surface surface(ctx, window);
     if (!surface.is_valid()) {
         LUMEN_APP_LOG_ERROR("Vulkan Surface 创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("Vulkan Surface 创建成功");
 
     if (!ctx.init_device(surface.handle())) {
         LUMEN_APP_LOG_ERROR("Vulkan Device 创建失败");
         return -1;
     }
-    {
-        auto gpu = ctx.physical_device_info();
-        LUMEN_APP_LOG_INFO("Vulkan Device 创建成功: {} ({})", gpu.deviceName,
-                           lumen::render::device_type_name(gpu.deviceType));
-        if (gpu.deviceLocalMemoryBytes > 0) {
-            LUMEN_APP_LOG_INFO("  显存: {:.1f} GiB",
-                               gpu.deviceLocalMemoryBytes /
-                                   (1024.0 * 1024.0 * 1024.0));
-        }
+
+    int window_width { 0 };
+    int window_height { 0 };
+    window.get_framebuffer_size(&window_width, &window_height);
+    if (window_width <= 0 || window_height <= 0) {
+        LUMEN_APP_LOG_WARN("窗口帧缓冲尺寸无效 {}x{}，使用配置 {}x{}",
+                           window_width, window_height, winConfig.width,
+                           winConfig.height);
+        window_width = winConfig.width;
+        window_height = winConfig.height;
     }
 
-    int w { 0 }, h { 0 };
-    window.get_framebuffer_size(&w, &h);
-
     lumen::render::Swapchain swapchain;
-    if (!swapchain.create(ctx, surface.handle(), static_cast<uint32_t>(w),
-                          static_cast<uint32_t>(h))) {
+    if (!swapchain.create(ctx, surface.handle(),
+                          static_cast<uint32_t>(window_width),
+                          static_cast<uint32_t>(window_height))) {
         LUMEN_APP_LOG_ERROR("Swapchain 创建失败");
         return -1;
     }
-    LUMEN_APP_LOG_INFO("Swapchain 创建成功, {} 张图像",
-                       swapchain.image_count());
 
-    // RenderPass（无深度，与 Swapchain 格式匹配）
+    // 交换链：仅 ImGui 合成（无深度）
     lumen::render::RenderPassConfig rpConfig;
     rpConfig.useDepth = false;
     rpConfig.colorAttachment.format = swapchain.image_format();
@@ -115,7 +349,6 @@ static int run_sandbox() {
         return -1;
     }
 
-    // Framebuffers
     lumen::render::Framebuffer framebuffers;
     if (!framebuffers.create(ctx.device(), renderPass.handle(), swapchain,
                              VK_NULL_HANDLE)) {
@@ -123,437 +356,1263 @@ static int run_sandbox() {
         return -1;
     }
 
-    // Shaders（纹理矩形）
-    std::string vertPath =
-        lumen::core::get_resource_path("shaders/texture.vert.spv");
-    std::string fragPath =
-        lumen::core::get_resource_path("shaders/texture.frag.spv");
-    lumen::render::ShaderModule vertShader;
-    lumen::render::ShaderModule fragShader;
-    if (!vertShader.create_from_file(ctx.device(), vertPath.c_str())) {
-        LUMEN_APP_LOG_ERROR("顶点着色器加载失败: {}", vertPath);
-        return -1;
-    }
-    if (!fragShader.create_from_file(ctx.device(), fragPath.c_str())) {
-        LUMEN_APP_LOG_ERROR("片段着色器加载失败: {}", fragPath);
+    lumen::render::RenderPassConfig offscreen_rp_cfg;
+    offscreen_rp_cfg.useDepth = true;
+    offscreen_rp_cfg.colorAttachment.format = swapchain.image_format();
+    offscreen_rp_cfg.colorAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    lumen::render::RenderPass offscreen_render_pass;
+    if (!offscreen_render_pass.create(ctx.device(), offscreen_rp_cfg)) {
+        LUMEN_APP_LOG_ERROR("离屏 RenderPass 创建失败");
         return -1;
     }
 
-    // 矩形 4 个顶点（左下、左上、右上、右下）+ UV
-    const std::array<Vertex, 4> vertices = { {
-        { glm::vec2(-0.5f, -0.5f), glm::vec2(0.0f, 1.0f) }, // 左下
-        { glm::vec2(-0.5f, 0.5f), glm::vec2(0.0f, 0.0f) },  // 左上
-        { glm::vec2(0.5f, 0.5f), glm::vec2(1.0f, 0.0f) },   // 右上
-        { glm::vec2(0.5f, -0.5f), glm::vec2(1.0f, 1.0f) },  // 右下
-    } };
-
-    // 索引：两个三角形组成矩形（0,1,2 和 0,2,3）
-    const std::array<uint16_t, 6> indices = { 0, 1, 2, 0, 2, 3 };
-
-    lumen::render::VertexBuffer vertexBuffer;
-    if (!vertexBuffer.create(ctx, sizeof(vertices))) {
-        LUMEN_APP_LOG_ERROR("VertexBuffer 创建失败");
-        return -1;
+    lumen::render::OffscreenRenderTarget sceneTarget;
+    {
+        lumen::render::OffscreenRenderTargetConfig scene_cfg;
+        scene_cfg.width =
+            static_cast<uint32_t>((std::max)(2, window_width * 3 / 4));
+        scene_cfg.height =
+            static_cast<uint32_t>((std::max)(2, window_height * 3 / 4));
+        scene_cfg.format = swapchain.image_format();
+        scene_cfg.useDepth = true;
+        scene_cfg.colorFinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (!sceneTarget.create(ctx, scene_cfg, &offscreen_render_pass)) {
+            LUMEN_APP_LOG_ERROR("场景离屏渲染目标创建失败");
+            return -1;
+        }
     }
-    vertexBuffer.upload(vertices.data(), sizeof(vertices));
 
-    lumen::render::IndexBuffer indexBuffer;
-    if (!indexBuffer.create(ctx, sizeof(indices))) {
-        LUMEN_APP_LOG_ERROR("IndexBuffer 创建失败");
-        return -1;
+    lumen::render::OffscreenRenderTarget debug_tile_target;
+    {
+        lumen::render::OffscreenRenderTargetConfig dbg_cfg;
+        dbg_cfg.width =
+            static_cast<uint32_t>((std::max)(2, window_width * 3 / 4));
+        dbg_cfg.height =
+            static_cast<uint32_t>((std::max)(2, window_height * 3 / 4));
+        dbg_cfg.format = swapchain.image_format();
+        dbg_cfg.useDepth = true;
+        dbg_cfg.colorFinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (!debug_tile_target.create(ctx, dbg_cfg, &offscreen_render_pass)) {
+            LUMEN_APP_LOG_ERROR("分屏调试用离屏目标创建失败");
+            return -1;
+        }
     }
-    indexBuffer.set_index_type(lumen::render::IndexBuffer::IndexType::Uint16);
-    indexBuffer.upload(indices.data(), sizeof(indices));
 
-    // CommandPool（纹理加载需提前创建）
     lumen::render::CommandPool cmdPool;
     if (!cmdPool.create(ctx, ctx.graphics_queue_family())) {
         LUMEN_APP_LOG_ERROR("CommandPool 创建失败");
         return -1;
     }
 
-    // 纹理：优先从文件加载，失败则用程序化棋盘格
-    lumen::render::Texture texture;
-    std::string texPath = lumen::core::get_resource_path(
-        "./assets/textures/ikun2026_happy_new_year.jpg");
-    if (!texture.create_from_file(ctx, texPath.c_str(), ctx.graphics_queue(),
-                                  cmdPool)) {
-        // 程序化棋盘格纹理 64x64 RGBA
-        constexpr uint32_t kTexSize = 64;
-        std::vector<uint8_t> pixels(kTexSize * kTexSize * 4);
-        for (uint32_t y = 0; y < kTexSize; ++y) {
-            for (uint32_t x = 0; x < kTexSize; ++x) {
-                bool checker = ((x / 8) + (y / 8)) % 2 == 0;
-                uint8_t v = checker ? 255 : 80;
-                size_t i = (y * kTexSize + x) * 4;
-                pixels[i + 0] = v;
-                pixels[i + 1] = v;
-                pixels[i + 2] = checker ? 180 : 100;
-                pixels[i + 3] = 255;
+    const std::string hdr_path = lumen::core::get_resource_path(kHdrRelPath);
+    LUMEN_APP_LOG_INFO("IBL 烘焙 HDR: {}", hdr_path);
+
+    pbr::IblTextures ibl {};
+    std::string bake_err;
+    if (!pbr::bake_ibl(ctx, cmdPool, ctx.graphics_queue(), hdr_path.c_str(),
+                       ibl, bake_err)) {
+        LUMEN_APP_LOG_ERROR("IBL 烘焙失败: {}", bake_err);
+        return -1;
+    }
+
+    const float k_prefilter_max_lod = static_cast<float>(
+        ibl.prefilter.mip_levels() > 0 ? ibl.prefilter.mip_levels() - 1 : 0);
+
+    VkDevice dev = ctx.device();
+    const VkFormat ibl_fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
+
+    std::array<VkImageView, 6> v_env_faces {};
+    std::array<VkImageView, 6> v_irr_faces {};
+    std::array<VkImageView, 6> v_pre_faces {};
+    for (uint32_t face = 0; face < 6; ++face) {
+        char env_label[48];
+        std::snprintf(env_label, sizeof env_label, "IBL environment face %u",
+                      face);
+        v_env_faces[face] = create_cubemap_face_2d_view(
+            dev, ibl.environment.image(), ibl_fmt, 0, face, env_label);
+        char irr_label[48];
+        std::snprintf(irr_label, sizeof irr_label, "IBL irradiance face %u",
+                      face);
+        v_irr_faces[face] = create_cubemap_face_2d_view(
+            dev, ibl.irradiance.image(), ibl_fmt, 0, face, irr_label);
+        char pre_label[48];
+        std::snprintf(pre_label, sizeof pre_label, "IBL prefilter face %u",
+                      face);
+        v_pre_faces[face] = create_cubemap_face_2d_view(
+            dev, ibl.prefilter.image(), ibl_fmt, 0, face, pre_label);
+    }
+    VkImageView v_brdf = ibl.brdf_lut.view();
+
+    auto all_six_valid = [](const std::array<VkImageView, 6> &a) -> bool {
+        for (VkImageView v : a) {
+            if (v == VK_NULL_HANDLE) {
+                return false;
             }
         }
-        if (!texture.create_from_memory(ctx, pixels.data(), pixels.size(),
-                                        kTexSize, kTexSize,
-                                        ctx.graphics_queue(), cmdPool)) {
-            LUMEN_APP_LOG_ERROR("纹理创建失败");
-            return -1;
-        }
-        LUMEN_APP_LOG_INFO("使用程序化棋盘格纹理");
-    } else {
-        LUMEN_APP_LOG_INFO("纹理加载成功: {}", texPath);
-    }
-
-    // Per-frame UniformBuffer（避免多帧并发时覆盖）
-    std::array<lumen::render::UniformBuffer, kMaxFramesInFlight> uniformBuffers;
-    for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (!uniformBuffers[i].create(ctx, sizeof(UBO))) {
-            LUMEN_APP_LOG_ERROR("UniformBuffer[{}] 创建失败", i);
-            return -1;
-        }
-    }
-
-    // DescriptorSetLayout：binding 0 = UBO, binding 1 = 纹理
-    lumen::render::DescriptorSetLayout descLayout;
-    std::vector<lumen::render::DescriptorBinding> bindings = {
-        { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
-        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-          VK_SHADER_STAGE_FRAGMENT_BIT },
+        return true;
     };
-    if (!descLayout.create(ctx, bindings)) {
-        LUMEN_APP_LOG_ERROR("DescriptorSetLayout 创建失败");
-        return -1;
-    }
-
-    // DescriptorPool 与 Per-frame DescriptorSet
-    lumen::render::DescriptorPool descPool;
-    if (!descPool.create(
-            ctx,
-            { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxFramesInFlight },
-              { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                kMaxFramesInFlight } },
-            kMaxFramesInFlight)) {
-        LUMEN_APP_LOG_ERROR("DescriptorPool 创建失败");
-        return -1;
-    }
-    std::array<VkDescriptorSet, kMaxFramesInFlight> descriptorSets {};
-    for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
-        if (!descPool.allocate(ctx.device(), descLayout.handle(),
-                               descriptorSets[i])) {
-            LUMEN_APP_LOG_ERROR("DescriptorSet[{}] 分配失败", i);
-            return -1;
+    const bool env_views_ok = all_six_valid(v_env_faces);
+    const bool irr_views_ok = all_six_valid(v_irr_faces);
+    const bool pre_views_ok = all_six_valid(v_pre_faces);
+    if (!env_views_ok || !irr_views_ok || !pre_views_ok ||
+        v_brdf == VK_NULL_HANDLE) {
+        LUMEN_APP_LOG_ERROR(
+            "ImGui 预览用 ImageView 无效: env6={} irr6={} pre6={} brdf={}",
+            env_views_ok, irr_views_ok, pre_views_ok, v_brdf != VK_NULL_HANDLE);
+        for (VkImageView fv : v_env_faces) {
+            destroy_view(dev, fv);
         }
-        lumen::render::write_descriptor_buffer(
-            ctx.device(), descriptorSets[i], 0,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uniformBuffers[i].handle(), 0,
-            sizeof(UBO));
-        lumen::render::write_descriptor_image(
-            ctx.device(), descriptorSets[i], 1, texture.view(),
-            texture.sampler(), texture.descriptor_layout());
-    }
-
-    // PipelineLayout（含 descriptor set layout）
-    lumen::render::PipelineLayout pipelineLayout;
-    if (!pipelineLayout.create(ctx, { descLayout.handle() }, {})) {
-        LUMEN_APP_LOG_ERROR("PipelineLayout 创建失败");
+        for (VkImageView fv : v_irr_faces) {
+            destroy_view(dev, fv);
+        }
+        for (VkImageView fv : v_pre_faces) {
+            destroy_view(dev, fv);
+        }
         return -1;
     }
 
-    // GraphicsPipeline
-    lumen::render::GraphicsPipelineConfig pipeConfig;
-    pipeConfig.stages.push_back(
-        { vertShader.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    pipeConfig.stages.push_back(
-        { fragShader.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
-    pipeConfig.vertexBindings.push_back(
-        { 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX });
-    pipeConfig.vertexAttributes.push_back(
-        { 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, position) });
-    pipeConfig.vertexAttributes.push_back(
-        { 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv) });
-    pipeConfig.depthTest = false;
-    pipeConfig.depthWrite = false;
-    pipeConfig.cullMode = VK_CULL_MODE_NONE;
-
-    lumen::render::GraphicsPipeline pipeline;
-    if (!pipeline.create(ctx, pipelineLayout.handle(), renderPass.handle(), 0,
-                         pipeConfig)) {
-        LUMEN_APP_LOG_ERROR("GraphicsPipeline 创建失败");
+    const std::string sponza_path =
+        lumen::core::get_resource_path(kSponzaGltfRel);
+    if (!std::filesystem::exists(sponza_path)) {
+        LUMEN_APP_LOG_ERROR("未找到 Sponza glTF: {}（含同级纹理）",
+                            sponza_path);
         return -1;
     }
 
-    // CommandBuffers（cmdPool 已用于纹理加载）
-    auto cmdBuffers = cmdPool.allocate(kMaxFramesInFlight);
-    if (cmdBuffers.size() != kMaxFramesInFlight) {
+    lumen::core::ObjMesh sponza_obj {};
+    std::vector<lumen::core::GltfSubmeshRange> sponza_submeshes;
+    std::vector<lumen::core::GltfMaterialData> sponza_gltf_materials;
+    lumen::core::GltfMaterialData sponza_fallback_mat {};
+    if (!lumen::core::load_gltf(sponza_path, sponza_obj, sponza_fallback_mat,
+                                &sponza_submeshes, &sponza_gltf_materials)) {
+        LUMEN_APP_LOG_ERROR("glTF 加载失败: {}", sponza_path);
+        return -1;
+    }
+    if (sponza_obj.vertices.empty() || sponza_obj.indices.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 网格为空");
+        return -1;
+    }
+    if (sponza_submeshes.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 无 primitive 分段（需 submesh）");
+        return -1;
+    }
+
+    center_and_scale_mesh(sponza_obj);
+
+    std::vector<HelmVertex> sponza_verts;
+    sponza_verts.reserve(sponza_obj.vertices.size());
+    for (const auto &ov : sponza_obj.vertices) {
+        sponza_verts.push_back(
+            HelmVertex { .position = ov.position,
+                         .normal = ov.normal,
+                         .uv = ov.uv,
+                         .tangent = { 1.0F, 0.0F, 0.0F, 1.0F } });
+    }
+    compute_mesh_tangents(sponza_verts, sponza_obj.indices);
+
+    VkQueue gq = ctx.graphics_queue();
+
+    lumen::render::PbrPlaceholderTextures pbr_placeholders;
+    if (!pbr_placeholders.create(ctx, gq, cmdPool) ||
+        !pbr_placeholders.is_complete()) {
+        LUMEN_APP_LOG_ERROR("PBR 占位贴图创建失败");
+        return -1;
+    }
+
+    std::unordered_map<std::string, size_t> tex_key_to_index;
+    /// unique_ptr：vector 扩容时堆上 Texture 地址不变；vector<Texture> 会令
+    /// PBRMaterial 内指针全部悬垂并污染 descriptor 写入。
+    std::vector<std::unique_ptr<lumen::render::Texture>> sponza_texture_storage;
+
+    auto acquire_texture = [&](const std::string &rel_path,
+                               VkFormat fmt) -> const lumen::render::Texture * {
+        if (rel_path.empty()) {
+            return nullptr;
+        }
+        const std::string key =
+            rel_path + '#' + std::to_string(static_cast<uint32_t>(fmt));
+        const auto found = tex_key_to_index.find(key);
+        if (found != tex_key_to_index.end()) {
+            return sponza_texture_storage[found->second].get();
+        }
+        const std::string full = lumen::core::get_resource_path(rel_path);
+        if (!std::filesystem::exists(full)) {
+            LUMEN_APP_LOG_WARN("贴图不存在，使用占位: {}", full);
+            return nullptr;
+        }
+        auto tex = std::make_unique<lumen::render::Texture>();
+        if (!tex->create_from_file(ctx, full.c_str(), gq, cmdPool, {}, fmt)) {
+            LUMEN_APP_LOG_WARN("贴图上传失败: {}", full);
+            return nullptr;
+        }
+        const size_t new_ix = sponza_texture_storage.size();
+        sponza_texture_storage.push_back(std::move(tex));
+        tex_key_to_index.emplace(key, new_ix);
+        return sponza_texture_storage[new_ix].get();
+    };
+
+    std::vector<lumen::scene::PBRMaterial> pbr_materials(
+        sponza_gltf_materials.size());
+    for (size_t i = 0; i < sponza_gltf_materials.size(); ++i) {
+        const lumen::core::GltfMaterialData &src = sponza_gltf_materials[i];
+        lumen::scene::PBRMaterial &dst = pbr_materials[i];
+        dst.base_color_factor = src.base_color_factor;
+        dst.metallic_factor = src.metallic_factor;
+        dst.roughness_factor = src.roughness_factor;
+        dst.emissive_factor = src.emissive_factor;
+        dst.double_sided = src.double_sided;
+        dst.alpha_mode = static_cast<lumen::scene::MaterialAlphaMode>(
+            static_cast<
+                std::underlying_type_t<lumen::core::GltfMaterialAlphaMode>>(
+                src.alpha_mode));
+        dst.base_color_tex =
+            acquire_texture(src.albedo_path, VK_FORMAT_R8G8B8A8_SRGB);
+        dst.normal_tex =
+            acquire_texture(src.normal_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.metallic_roughness_tex = acquire_texture(
+            src.metallic_roughness_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.occlusion_tex =
+            acquire_texture(src.ao_path, VK_FORMAT_R8G8B8A8_UNORM);
+        dst.emissive_tex =
+            acquire_texture(src.emissive_path, VK_FORMAT_R8G8B8A8_SRGB);
+    }
+    if (pbr_materials.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 材质表为空");
+        return -1;
+    }
+
+    lumen::render::VertexBuffer sponza_vbuf;
+    if (!sponza_vbuf.create_device_local_and_upload(
+            ctx, gq, cmdPool, sponza_verts.data(),
+            sponza_verts.size() * sizeof(HelmVertex))) {
+        LUMEN_APP_LOG_ERROR("Sponza 顶点缓冲失败");
+        return -1;
+    }
+    lumen::render::IndexBuffer sponza_ibuf;
+    sponza_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
+    if (!sponza_ibuf.create_device_local_and_upload(
+            ctx, gq, cmdPool, sponza_obj.indices.data(),
+            sponza_obj.indices.size() * sizeof(uint32_t))) {
+        LUMEN_APP_LOG_ERROR("Sponza 索引缓冲失败");
+        return -1;
+    }
+
+    lumen::scene::Mesh sponza_mesh {};
+    sponza_mesh.primitives.reserve(sponza_submeshes.size());
+    for (const lumen::core::GltfSubmeshRange &r : sponza_submeshes) {
+        int mi = r.material_index;
+        if (mi < 0 || mi >= static_cast<int>(pbr_materials.size())) {
+            mi = 0;
+        }
+        sponza_mesh.primitives.push_back(lumen::scene::Primitive {
+            .vertex_buffer = &sponza_vbuf,
+            .index_buffer = &sponza_ibuf,
+            .vertex_byte_offset = 0,
+            .first_index = r.first_index,
+            .index_count = r.index_count,
+            .material = &pbr_materials[static_cast<size_t>(mi)],
+        });
+    }
+
+    LUMEN_APP_LOG_INFO(
+        "Sponza: 顶点={} 索引={} 三角≈{} primitive={} 材质={} GPU 贴图实例={}",
+        sponza_obj.vertices.size(), sponza_obj.indices.size(),
+        sponza_obj.indices.size() / 3U, sponza_submeshes.size(),
+        pbr_materials.size(), sponza_texture_storage.size());
+
+    auto commandBuffers = cmdPool.allocate(3);
+    if (commandBuffers.size() != 3) {
         LUMEN_APP_LOG_ERROR("CommandBuffer 分配失败");
         return -1;
     }
 
-    // FrameSync：per-image semaphores 避免 Swapchain 复用冲突
     lumen::render::FrameSync frameSync;
-    if (!frameSync.create(ctx.device(), swapchain.image_count(),
-                          kMaxFramesInFlight)) {
+    if (!frameSync.create(ctx.device(), swapchain.image_count(), 3)) {
         LUMEN_APP_LOG_ERROR("FrameSync 创建失败");
         return -1;
     }
 
-    LUMEN_APP_LOG_INFO("引擎初始化完成，进入主循环 [WASD] 移动 [QE] 旋转");
-    lumen::core::anchor_steady_epoch();
-    lumen::core::FrameDeltaClock frame_dt;
-    float lastLoggedTime = -10.0f; // 用于限速调试日志
-    uint64_t frameCount = 0;       // 用于限速调试日志
-    glm::vec2 rectPos { 0.0f, 0.0f };
-    float rectRotation { 0.0f };
-    constexpr float kMoveSpeed = 1.5f;
-    constexpr float kRotSpeed = 2.5f;
-    constexpr uint64_t kLogInterval = 60; // 每 N 帧输出一次阶段日志
-    int fbWidth { w }, fbHeight { h };
-    bool needRecreateSwapchain { false };
+    lumen::ui::ImGuiBackendInitInfo imguiInfo;
+    imguiInfo.ctx = &ctx;
+    imguiInfo.swapchain = &swapchain;
+    imguiInfo.renderPass = renderPass.handle();
+    imguiInfo.window = window.sdl_window();
+    static std::string font_sc;
+    static std::string font_jp;
+    font_sc = lumen::core::get_resource_path(
+        "assets/fonts/SourceHanSansSC/OTF/SimplifiedChinese/"
+        "SourceHanSansSC-Bold.otf");
+    font_jp = lumen::core::get_resource_path(
+        "assets/fonts/SourceHanSansSC/OTF/Japanese/SourceHanSans-Bold.otf");
+    imguiInfo.cjk_font_ttf_path = font_sc.c_str();
+    imguiInfo.cjk_font_japanese_merge_path = font_jp.c_str();
+    imguiInfo.enable_docking = true;
+    if (!lumen::ui::imgui_backend_init(imguiInfo)) {
+        LUMEN_APP_LOG_ERROR("ImGui 初始化失败");
+        return -1;
+    }
+
+    lumen::render::Sampler uiSampler;
+    if (!uiSampler.create(ctx)) {
+        LUMEN_APP_LOG_ERROR("UI Sampler 创建失败");
+        return -1;
+    }
+
+    lumen::render::Sampler scene_sampler;
+    if (!scene_sampler.create(ctx)) {
+        LUMEN_APP_LOG_ERROR("场景采样器创建失败");
+        return -1;
+    }
+
+    auto sceneTexID =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            scene_sampler.handle(), sceneTarget.color_view(),
+            sceneTarget.color_sample_layout()));
+    auto debug_scene_tex_id =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            scene_sampler.handle(), debug_tile_target.color_view(),
+            debug_tile_target.color_sample_layout()));
+
+    const std::string sky_vs_path =
+        lumen::core::get_resource_path("shaders/skybox.vert.spv");
+    const std::string sky_fs_path =
+        lumen::core::get_resource_path("shaders/skybox.frag.spv");
+    lumen::render::ShaderModule sm_sky_vs;
+    lumen::render::ShaderModule sm_sky_fs;
+    if (!sm_sky_vs.create_from_file(dev, sky_vs_path.c_str())) {
+        LUMEN_APP_LOG_ERROR("天空盒顶点着色器加载失败: {}", sky_vs_path);
+        return -1;
+    }
+    if (!sm_sky_fs.create_from_file(dev, sky_fs_path.c_str())) {
+        LUMEN_APP_LOG_ERROR("天空盒片元着色器加载失败: {}", sky_fs_path);
+        return -1;
+    }
+
+    lumen::render::DescriptorSetLayout sky_dsl;
+    std::vector<lumen::render::DescriptorBinding> sky_binds = {
+        { .binding = 0,
+          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .count = 1,
+          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+    };
+    if (!sky_dsl.create(ctx, sky_binds)) {
+        LUMEN_APP_LOG_ERROR("天空盒 DescriptorSetLayout 失败");
+        return -1;
+    }
+
+    lumen::render::DescriptorPool sky_dpool;
+    if (!sky_dpool.create(ctx,
+                          { { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                              .count = 1 } },
+                          1)) {
+        LUMEN_APP_LOG_ERROR("天空盒 DescriptorPool 失败");
+        return -1;
+    }
+
+    VkDescriptorSet sky_ds { VK_NULL_HANDLE };
+    if (!sky_dpool.allocate(dev, sky_dsl.handle(), sky_ds)) {
+        LUMEN_APP_LOG_ERROR("天空盒 DescriptorSet 分配失败");
+        return -1;
+    }
+    lumen::render::write_descriptor_set(
+        dev, sky_ds, {},
+        { { .binding = 0,
+            .imageView = ibl.environment.view(),
+            .sampler = ibl.environment.sampler(),
+            .imageLayout = ibl.environment.descriptor_layout() } });
+
+    VkPushConstantRange sky_pc {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = static_cast<uint32_t>(sizeof(SkyPush)),
+    };
+    lumen::render::PipelineLayout sky_pl;
+    if (!sky_pl.create(ctx, { sky_dsl.handle() }, { sky_pc })) {
+        LUMEN_APP_LOG_ERROR("天空盒 PipelineLayout 失败");
+        return -1;
+    }
+
+    lumen::render::GraphicsPipelineConfig sky_cfg {};
+    sky_cfg.shaderStages.push_back(
+        { sm_sky_vs.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    sky_cfg.shaderStages.push_back(
+        { sm_sky_fs.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    sky_cfg.vertexBindings.push_back(
+        { .binding = 0,
+          .stride = sizeof(float) * 3,
+          .inputRate = lumen::render::VertexInputRate::PerVertex });
+    sky_cfg.vertexAttributes.push_back(
+        { .location = 0,
+          .binding = 0,
+          .format = lumen::render::VertexAttributeFormat::F32Vec3,
+          .offset = 0 });
+    sky_cfg.depthTest = true;
+    sky_cfg.depthWrite = false;
+    sky_cfg.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    sky_cfg.cullMode = VK_CULL_MODE_FRONT_BIT;
+    sky_cfg.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
+    lumen::render::GraphicsPipeline sky_pipe;
+    if (!sky_pipe.create(ctx, sky_pl, offscreen_render_pass, 0, sky_cfg)) {
+        LUMEN_APP_LOG_ERROR("天空盒 GraphicsPipeline 失败");
+        return -1;
+    }
+
+    lumen::render::VertexBuffer sky_vbuf;
+    if (!sky_vbuf.create_device_local_and_upload(
+            ctx, ctx.graphics_queue(), cmdPool, kSkyCubePositions.data(),
+            sizeof(kSkyCubePositions))) {
+        LUMEN_APP_LOG_ERROR("天空盒顶点缓冲上传失败");
+        return -1;
+    }
+
+    const std::string helmet_vs_path =
+        lumen::core::get_resource_path("shaders/helmet_pbr.vert.spv");
+    const std::string helmet_fs_path =
+        lumen::core::get_resource_path("shaders/helmet_pbr.frag.spv");
+    lumen::render::ShaderModule sm_helmet_vs;
+    lumen::render::ShaderModule sm_helmet_fs;
+    if (!sm_helmet_vs.create_from_file(dev, helmet_vs_path.c_str())) {
+        LUMEN_APP_LOG_ERROR("头盔顶点着色器加载失败: {}", helmet_vs_path);
+        return -1;
+    }
+    if (!sm_helmet_fs.create_from_file(dev, helmet_fs_path.c_str())) {
+        LUMEN_APP_LOG_ERROR("头盔片元着色器加载失败: {}", helmet_fs_path);
+        return -1;
+    }
+
+    lumen::render::DescriptorSetLayout helmet_scene_dsl;
+    if (!helmet_scene_dsl.create(
+            ctx, lumen::render::pbr_scene_ibl_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("头盔场景 DescriptorSetLayout 失败");
+        return -1;
+    }
+    lumen::render::DescriptorSetLayout helmet_material_dsl;
+    if (!helmet_material_dsl.create(
+            ctx, lumen::render::pbr_material_texture_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("头盔材质 DescriptorSetLayout 失败");
+        return -1;
+    }
+
+    const uint32_t sponza_mat_count =
+        static_cast<uint32_t>(pbr_materials.size());
+    const uint32_t pbr_combined_for_materials = sponza_mat_count * 5u;
+    const uint32_t pbr_combined_total = 9u + pbr_combined_for_materials;
+    const uint32_t pbr_max_sets = 3u + sponza_mat_count;
+
+    lumen::render::DescriptorPool pbr_dpool;
+    if (!pbr_dpool.create(
+            ctx,
+            { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .count = 3 },
+              { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .count = pbr_combined_total } },
+            pbr_max_sets)) {
+        LUMEN_APP_LOG_ERROR("PBR DescriptorPool 失败 (材质数={})",
+                            sponza_mat_count);
+        return -1;
+    }
+
+    std::vector<VkDescriptorSet> sponza_material_ds(sponza_mat_count);
+    for (uint32_t mi = 0; mi < sponza_mat_count; ++mi) {
+        if (!pbr_dpool.allocate(dev, helmet_material_dsl.handle(),
+                                sponza_material_ds[mi])) {
+            LUMEN_APP_LOG_ERROR("材质 DescriptorSet 分配失败 mi={}", mi);
+            return -1;
+        }
+        lumen::render::write_pbr_material_descriptor_set(
+            dev, sponza_material_ds[mi], pbr_materials[mi], pbr_placeholders);
+    }
+
+    std::array<VkDescriptorSet, 3> helmet_scene_ds {};
+    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
+        if (!pbr_dpool.allocate(dev, helmet_scene_dsl.handle(),
+                                helmet_scene_ds[i])) {
+            LUMEN_APP_LOG_ERROR("场景 DescriptorSet 分配失败");
+            return -1;
+        }
+    }
+
+    std::array<lumen::render::UniformBuffer, 3> helmet_ubos {};
+    for (uint32_t i = 0; i < helmet_ubos.size(); ++i) {
+        if (!helmet_ubos[i].create_persistent(ctx, sizeof(SceneUbo))) {
+            LUMEN_APP_LOG_ERROR("头盔 UniformBuffer 失败");
+            return -1;
+        }
+    }
+
+    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
+        lumen::render::write_pbr_scene_ibl_descriptor_set(
+            dev, helmet_scene_ds[i], helmet_ubos[i].handle(), sizeof(SceneUbo),
+            ibl.irradiance, ibl.prefilter, ibl.brdf_lut);
+    }
+
+    VkPushConstantRange helmet_pc {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = static_cast<uint32_t>(
+            sizeof(lumen::render::PbrForwardPushConstants)),
+    };
+    lumen::render::PipelineLayout helmet_pl;
+    if (!helmet_pl.create(
+            ctx, { helmet_scene_dsl.handle(), helmet_material_dsl.handle() },
+            { helmet_pc })) {
+        LUMEN_APP_LOG_ERROR("头盔 PipelineLayout 失败");
+        return -1;
+    }
+
+    lumen::render::GraphicsPipelineConfig helmet_cfg {};
+    helmet_cfg.shaderStages.push_back(
+        { sm_helmet_vs.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    helmet_cfg.shaderStages.push_back(
+        { sm_helmet_fs.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    helmet_cfg.vertexBindings.push_back(
+        { .binding = 0,
+          .stride = sizeof(HelmVertex),
+          .inputRate = lumen::render::VertexInputRate::PerVertex });
+    helmet_cfg.vertexAttributes.push_back(
+        { .location = 0,
+          .binding = 0,
+          .format = lumen::render::VertexAttributeFormat::F32Vec3,
+          .offset = offsetof(HelmVertex, position) });
+    helmet_cfg.vertexAttributes.push_back(
+        { .location = 1,
+          .binding = 0,
+          .format = lumen::render::VertexAttributeFormat::F32Vec3,
+          .offset = offsetof(HelmVertex, normal) });
+    helmet_cfg.vertexAttributes.push_back(
+        { .location = 2,
+          .binding = 0,
+          .format = lumen::render::VertexAttributeFormat::F32Vec2,
+          .offset = offsetof(HelmVertex, uv) });
+    helmet_cfg.vertexAttributes.push_back(
+        { .location = 3,
+          .binding = 0,
+          .format = lumen::render::VertexAttributeFormat::F32Vec4,
+          .offset = offsetof(HelmVertex, tangent) });
+    // 关闭剔除，避免绕序/双面导致整模不可见；确认后可改回 BACK + CCW/CW
+    helmet_cfg.cullMode = VK_CULL_MODE_NONE;
+    helmet_cfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    lumen::render::GraphicsPipeline helmet_pipe;
+    if (!helmet_pipe.create(ctx, helmet_pl, offscreen_render_pass, 0,
+                            helmet_cfg)) {
+        LUMEN_APP_LOG_ERROR("头盔 GraphicsPipeline 失败");
+        return -1;
+    }
+
+    LUMEN_APP_LOG_INFO("PBR 场景资源就绪，着色器 {} | {}", helmet_vs_path,
+                       helmet_fs_path);
+
+    float skyExposure { 4.0F };
+    float iblStrength { 3.0F };
+    float emissiveScale { 3.0F };
+    int pointlightCount { k_scene_point_light_cap };
+    float pointDirectStrength { 1.15F };
+    int helmetDebugView { 0 };
+    bool pbrDebugTileGrid { false };
+
+    lumen::scene::SceneCamera scene_camera;
+    lumen::scene::SceneOrbitController orbit;
+    scene_camera.set_projection_perspective(55.0F, 0.05F, 120.0F);
+    orbit.set_pivot(glm::vec3(0.0F));
+    orbit.set_world_up(glm::vec3(0.0F, 1.0F, 0.0F));
+    orbit.set_yaw(0.0F);
+    orbit.set_pitch(0.0F);
+    orbit.set_radius(9.0F);
+    {
+        lumen::scene::SceneOrbitController::Limits lim {};
+        lim.min_radius = 0.45F;
+        lim.max_radius = 28.0F;
+        lim.min_pitch = glm::radians(-89.0F);
+        lim.max_pitch = glm::radians(89.0F);
+        orbit.set_limits(lim);
+        lumen::scene::SceneOrbitController::Settings st {};
+        st.rmb_look_sensitivity = glm::radians(0.18F);
+        st.mouse_smooth_time_seconds = 0.0F;
+        orbit.set_settings(st);
+    }
+
+    uint32_t pendingSceneWidth { sceneTarget.width() };
+    uint32_t pendingSceneHeight { sceneTarget.height() };
+
+    std::array<ImTextureID, 6> tex_env_faces {};
+    std::array<ImTextureID, 6> tex_irr_faces {};
+    std::array<ImTextureID, 6> tex_pre_faces {};
+    for (uint32_t face = 0; face < 6; ++face) {
+        tex_env_faces[face] =
+            reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+                uiSampler.handle(), v_env_faces[face],
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+        tex_irr_faces[face] =
+            reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+                uiSampler.handle(), v_irr_faces[face],
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+        tex_pre_faces[face] =
+            reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+                uiSampler.handle(), v_pre_faces[face],
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    }
+    auto tex_brdf =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            uiSampler.handle(), v_brdf,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
 
     lumen::platform::EventPump pump;
-    uint32_t currentFrame { 0 };
+    uint32_t frameIdx { 0 };
     bool running { true };
+    bool need_recreate_swapchain { false };
 
-    pump.on_quit([&] { running = false; });
-    pump.on_key_down([&](const lumen::platform::EventKeyDown &e) {
-        if (e.key == lumen::platform::Key::Escape) {
-            running = false;
-            return;
-        }
-        LUMEN_APP_LOG_DEBUG("按键按下: {} ({}){}",
-                            lumen::platform::key_name(e.key), e.key,
-                            e.repeat ? " 重复" : "");
-    });
-    pump.on_key_up([](const lumen::platform::EventKeyUp &e) {
-        LUMEN_APP_LOG_DEBUG("按键松开: {} ({})",
-                            lumen::platform::key_name(e.key), e.key);
-    });
-    pump.on_mouse_button_down(
-        [](const lumen::platform::EventMouseButtonDown &e) {
-            LUMEN_APP_LOG_DEBUG("鼠标按下: {} ({:.0f}, {:.0f})",
-                                lumen::platform::mouse_button_name(e.button),
-                                e.x, e.y);
-        });
-    pump.on_mouse_button_up([](const lumen::platform::EventMouseButtonUp &e) {
-        LUMEN_APP_LOG_DEBUG("鼠标松开: {} ({:.0f}, {:.0f})",
-                            lumen::platform::mouse_button_name(e.button), e.x,
-                            e.y);
-    });
-    pump.on_mouse_wheel([](const lumen::platform::EventMouseWheel &e) {
-        LUMEN_APP_LOG_DEBUG("滚轮: dx={:.1f} dy={:.1f}", e.deltaX, e.deltaY);
-    });
-    pump.on_mouse_move([](const lumen::platform::EventMouseMove &e) {
-        LUMEN_APP_LOG_DEBUG("鼠标移动: ({:.0f}, {:.0f})", e.x, e.y);
-    });
-    pump.on_window_resize([&](const lumen::platform::EventWindowResize &r) {
-        fbWidth = r.width;
-        fbHeight = r.height;
-        needRecreateSwapchain = true;
-        LUMEN_APP_LOG_DEBUG("窗口大小: {}x{}", r.width, r.height);
+    lumen::ui::ImGuiLayer imgui_layer;
+    imgui_layer.attach(pump);
+
+    lumen::ui::PanelManager dock_panels;
+    dock_panels.add(std::make_unique<lumen::ui::LogPanel>());
+    dock_panels.add(std::make_unique<lumen::ui::GpuCapabilitiesPanel>(ctx));
+
+    pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventQuit>(
+            [&](lumen::platform::EventQuit &) {
+                running = false;
+                return true;
+            });
+        d.dispatch<lumen::platform::EventKeyDown>(
+            [&](lumen::platform::EventKeyDown &e) {
+                if (e.key == lumen::platform::Key::Escape) {
+                    running = false;
+                }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &) {
+                need_recreate_swapchain = true;
+                return false;
+            });
     });
 
-    constexpr uint64_t kAcquireTimeoutNs = 100'000'000;
-    constexpr uint64_t kFenceWaitTimeoutNs = 16'000'000;
+    constexpr uint64_t kAcquireTimeoutNs { 100'000'000 };
+    /// 略长于常见 16ms 帧，减轻慢帧时轮询等待的无意义超时次数
+    constexpr uint64_t kFenceWaitNs { 50'000'000 };
+    bool acquire_fail_logged { false };
+    auto prev_frame_time = std::chrono::steady_clock::now();
 
     while (running) {
-        bool doLog = (frameCount < 5) || (frameCount % kLogInterval == 0);
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] 循环开始", frameCount);
-        }
-
         if (!pump.poll()) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] 检测到退出", frameCount);
+            LUMEN_APP_LOG_INFO("事件泵结束，退出主循环");
             break;
         }
 
-        // 窗口 resize 或 Present 返回 OUT_OF_DATE 时重建 Swapchain
-        if (needRecreateSwapchain) {
-            window.get_framebuffer_size(&fbWidth, &fbHeight);
-            lumen::render::recreate_swapchain_resources(
-                ctx, swapchain, framebuffers, frameSync, renderPass.handle(),
-                static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight),
-                kMaxFramesInFlight, VK_NULL_HANDLE);
-            needRecreateSwapchain = false;
+        const auto frame_now = std::chrono::steady_clock::now();
+        const float delta_seconds =
+            std::chrono::duration<float>(frame_now - prev_frame_time).count();
+        prev_frame_time = frame_now;
+
+        if (need_recreate_swapchain) {
+            window.get_framebuffer_size(&window_width, &window_height);
+            if (window_width <= 0 || window_height <= 0) {
+                LUMEN_APP_LOG_WARN("Swapchain 重建跳过: 帧缓冲尺寸无效 {}x{}",
+                                   window_width, window_height);
+            } else if (!lumen::render::recreate_swapchain_resources(
+                           ctx, swapchain, framebuffers, frameSync, renderPass,
+                           static_cast<uint32_t>(window_width),
+                           static_cast<uint32_t>(window_height), 3,
+                           VK_NULL_HANDLE)) {
+                LUMEN_APP_LOG_ERROR("recreate_swapchain_resources 失败 {}x{}",
+                                    window_width, window_height);
+            } else {
+                lumen::ui::imgui_backend_set_min_image_count(
+                    swapchain.image_count());
+                LUMEN_APP_LOG_INFO("Swapchain 已重建 {}x{}", window_width,
+                                   window_height);
+            }
+            need_recreate_swapchain = false;
+            frameIdx = 0;
             continue;
         }
 
-        // 只等待即将复用的 currentFrame 的 fence，避免等待从未被 submit 的
-        // prevFrame
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] 等待 fence curr={} ...", frameCount,
-                                currentFrame);
-        }
-        while (!frameSync.wait_fence(currentFrame, kFenceWaitTimeoutNs)) {
+        while (!frameSync.wait_fence(frameIdx, kFenceWaitNs)) {
             if (!pump.poll()) {
                 running = false;
                 break;
             }
             SDL_Delay(1);
         }
-        if (!running)
+        if (!running) {
             break;
-
-        // 键盘控制：WASD 移动，QE 旋转
-        const float dt = static_cast<float>(frame_dt.tick_seconds());
-        const auto &inp = pump.input();
-        if (inp.is_key_down(lumen::platform::Key::W))
-            rectPos.y -= kMoveSpeed * dt; // Vulkan NDC Y 向下，减为上
-        if (inp.is_key_down(lumen::platform::Key::S))
-            rectPos.y += kMoveSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::A))
-            rectPos.x -= kMoveSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::D))
-            rectPos.x += kMoveSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::Q))
-            rectRotation -= kRotSpeed * dt;
-        if (inp.is_key_down(lumen::platform::Key::E))
-            rectRotation += kRotSpeed * dt;
-
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] acquire 图像 ...", frameCount);
         }
 
-        uint32_t imageIndex = swapchain.acquire_next_image(
-            frameSync.image_available(currentFrame), VK_NULL_HANDLE,
-            kAcquireTimeoutNs);
-        if (imageIndex == UINT32_MAX) {
-            if (doLog) {
-                LUMEN_APP_LOG_DEBUG("[frame {}] acquire 失败/超时，跳过",
-                                    frameCount);
+        if (pendingSceneWidth >= 2U && pendingSceneHeight >= 2U &&
+            (pendingSceneWidth != sceneTarget.width() ||
+             pendingSceneHeight != sceneTarget.height())) {
+            ctx.wait_idle();
+            lumen::ui::imgui_backend_remove_texture(
+                reinterpret_cast<void *>(sceneTexID));
+            lumen::ui::imgui_backend_remove_texture(
+                reinterpret_cast<void *>(debug_scene_tex_id));
+            sceneTexID = static_cast<ImTextureID>(0);
+            debug_scene_tex_id = static_cast<ImTextureID>(0);
+            if (!sceneTarget.resize(pendingSceneWidth, pendingSceneHeight)) {
+                LUMEN_APP_LOG_ERROR("场景离屏目标 resize 失败");
+                running = false;
+                break;
+            }
+            if (!debug_tile_target.resize(pendingSceneWidth,
+                                          pendingSceneHeight)) {
+                LUMEN_APP_LOG_ERROR("分屏调试离屏目标 resize 失败");
+                running = false;
+                break;
+            }
+            sceneTexID = reinterpret_cast<ImTextureID>(
+                lumen::ui::imgui_backend_add_texture(
+                    scene_sampler.handle(), sceneTarget.color_view(),
+                    sceneTarget.color_sample_layout()));
+            debug_scene_tex_id = reinterpret_cast<ImTextureID>(
+                lumen::ui::imgui_backend_add_texture(
+                    scene_sampler.handle(), debug_tile_target.color_view(),
+                    debug_tile_target.color_sample_layout()));
+        }
+
+        if (swapchain.extent().width == 0 || swapchain.extent().height == 0) {
+            SDL_Delay(16);
+            continue;
+        }
+
+        const uint32_t img_index =
+            swapchain.acquire_next_image(frameSync.image_available(frameIdx),
+                                         VK_NULL_HANDLE, kAcquireTimeoutNs);
+        if (img_index == UINT32_MAX) {
+            if (!acquire_fail_logged) {
+                LUMEN_APP_LOG_WARN(
+                    "acquire_next_image 未取到图像 (超时/最小化/OUT_OF_DATE)，"
+                    "跳过本帧 (连续失败仅打本条，恢复后重置)");
+                acquire_fail_logged = true;
             }
             continue;
         }
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] acquired imageIndex={}", frameCount,
-                                imageIndex);
+        acquire_fail_logged = false;
+
+        bool scene_view_hovered { false };
+        bool debug_scene_view_hovered { false };
+
+        imgui_layer.begin_frame();
+
+        constexpr float k_scene_orbit_wheel_scale { 0.14F };
+        const auto on_orbit_viewport_scroll = [&](float wheel) {
+            orbit.apply_scroll_zoom(wheel, k_scene_orbit_wheel_scale);
+        };
+
+        lumen::ui::imgui_scene_viewport_panel(
+            "Scene", sceneTexID, &pendingSceneWidth, &pendingSceneHeight,
+            &scene_view_hovered, on_orbit_viewport_scroll);
+
+        if (pbrDebugTileGrid &&
+            debug_scene_tex_id != static_cast<ImTextureID>(0)) {
+            auto draw_tile_labels =
+                [&](const lumen::ui::TextureViewRect &rect) {
+                    constexpr int k_dbg_cols = 4;
+                    constexpr int k_dbg_rows = 4;
+                    ImDrawList *const dl = ImGui::GetWindowDrawList();
+                    const ImU32 lab_col = IM_COL32(255, 255, 120, 255);
+                    const ImU32 sh_col = IM_COL32(0, 0, 0, 180);
+                    static constexpr const char
+                        *k_dbg_zh[k_dbg_cols * k_dbg_rows] = {
+                            "PBR 完整", "几何法线",   "法线贴图",  "反照率",
+                            "金属度",   "粗糙度",     "AO",        "漫反射 IBL",
+                            "镜面 IBL", "Irradiance", "Prefilter", "N·V",
+                            "F0",       "BRDF LUT",   "自发光",    "Base Color",
+                        };
+                    const ImVec2 p0(rect.minX, rect.minY);
+                    const ImVec2 p1(rect.maxX, rect.maxY);
+                    const float disp_w = p1.x - p0.x;
+                    const float disp_h = p1.y - p0.y;
+                    for (int ti = 0; ti < k_dbg_cols * k_dbg_rows; ++ti) {
+                        const int col = ti % k_dbg_cols;
+                        const int row = ti / k_dbg_cols;
+                        const float x =
+                            p0.x + (disp_w / static_cast<float>(k_dbg_cols)) *
+                                       static_cast<float>(col);
+                        const float y =
+                            p0.y + (disp_h / static_cast<float>(k_dbg_rows)) *
+                                       static_cast<float>(row);
+                        ImVec2 a(x + 3.0F, y + 4.0F);
+                        ImVec2 b(x + 2.0F, y + 3.0F);
+                        dl->AddText(b, sh_col, k_dbg_zh[ti]);
+                        dl->AddText(a, lab_col, k_dbg_zh[ti]);
+                    }
+                };
+            lumen::ui::imgui_scene_viewport_panel(
+                "PBR 分屏调试 (4×4)", debug_scene_tex_id, nullptr, nullptr,
+                &debug_scene_view_hovered, on_orbit_viewport_scroll,
+                draw_tile_labels);
         }
 
-        vkResetCommandBuffer(cmdBuffers[currentFrame], 0);
+        if (ImGui::Begin("环境光贴图")) {
+            ImGui::TextWrapped("HDR 源：%s", hdr_path.c_str());
+            ImGui::TextUnformatted("烘焙纹理均为 RGBA32F 线性；立方体面序与 "
+                                   "Vulkan 一致（+X −X +Y −Y +Z "
+                                   "−Z）。");
+            char ibl_info[384];
+            std::snprintf(
+                ibl_info, sizeof ibl_info,
+                "Environment %u×%u · mip %u  |  Irradiance %u×%u · mip %u  |  "
+                "Prefilter %u×%u · mip %u  |  BRDF LUT %u×%u",
+                ibl.environment.width(), ibl.environment.height(),
+                ibl.environment.mip_levels(), ibl.irradiance.width(),
+                ibl.irradiance.height(), ibl.irradiance.mip_levels(),
+                ibl.prefilter.width(), ibl.prefilter.height(),
+                ibl.prefilter.mip_levels(), ibl.brdf_lut.width(),
+                ibl.brdf_lut.height());
+            ImGui::TextWrapped("%s", ibl_info);
+            ImGui::Separator();
+            ImGui::SliderFloat("天空曝光", &skyExposure, 0.05F, 4.0F, "%.2f");
+            ImGui::SliderFloat("IBL 强度", &iblStrength, 0.0F, 3.0F, "%.2f");
+            ImGui::Separator();
+            ImGui::TextUnformatted("Environment 立方体（mip 0）");
+            imgui_draw_cubemap_face_grid(tex_env_faces, ImVec2(140.0F, 140.0F));
+            ImGui::TextUnformatted("Irradiance 立方体（mip 0）");
+            imgui_draw_cubemap_face_grid(tex_irr_faces, ImVec2(110.0F, 110.0F));
+            ImGui::TextUnformatted(
+                "Prefilter 立方体（mip 0；着色器按粗糙度采样完整 mip 链）");
+            imgui_draw_cubemap_face_grid(tex_pre_faces, ImVec2(110.0F, 110.0F));
+            ImGui::TextUnformatted("BRDF 积分 LUT（RG，线性）");
+            ImGui::Image(tex_brdf, ImVec2(220.0F, 220.0F));
+        }
+        ImGui::End();
 
-        VkCommandBufferBeginInfo beginInfo {
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-        };
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(cmdBuffers[currentFrame], &beginInfo) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] vkBeginCommandBuffer 失败",
-                                frameCount);
+        if (ImGui::Begin("IBL 预览")) {
+            ImGui::TextUnformatted(
+                "右键拖拽旋转（「Scene」或「PBR 分屏调试」画面内、非 Alt）；"
+                "Alt+左/中键 轨道/平移/缩放；WASD+EQ 平移；在上述画面上滚轮缩放"
+                "（绕枢轴）");
+            ImGui::TextUnformatted("天空曝光与 IBL 强度见「环境光贴图」。");
+            float orbit_r = orbit.radius();
+            ImGui::SliderFloat("轨道距离（缩放）", &orbit_r, 0.45F, 28.0F,
+                               "%.2f");
+            orbit.set_radius(orbit_r);
+            ImGui::SliderFloat("自发光倍率", &emissiveScale, 0.0F, 12.0F,
+                               "%.1f");
+            ImGui::Separator();
+            ImGui::TextUnformatted(
+                "点光源（GGX 直射；分屏首格与「Scene」完整 PBR 一致）");
+            ImGui::SliderInt("点光数量", &pointlightCount, 0,
+                             k_scene_point_light_cap);
+            ImGui::SliderFloat("点光强度", &pointDirectStrength, 0.0F, 6.0F,
+                               "%.2f");
+        }
+        ImGui::End();
+
+        if (ImGui::Begin("PBR 着色调试")) {
+            ImGui::TextUnformatted("视口操作说明见「IBL 预览」。");
+            ImGui::Separator();
+            ImGui::Checkbox("分屏光照调试 (4×4，「PBR 分屏调试」窗口)",
+                            &pbrDebugTileGrid);
+            ImGui::TextUnformatted("关闭分屏后可用单项模式：");
+            ImGui::BeginDisabled(pbrDebugTileGrid);
+            ImGui::RadioButton("PBR 光照", &helmetDebugView, 0);
+            ImGui::RadioButton("世界空间几何法线 (顶点法线)", &helmetDebugView,
+                               1);
+            ImGui::RadioButton("扰动后法线 (法线贴图)", &helmetDebugView, 2);
+            ImGui::RadioButton("反照率", &helmetDebugView, 3);
+            ImGui::RadioButton("金属度", &helmetDebugView, 4);
+            ImGui::RadioButton("粗糙度", &helmetDebugView, 5);
+            ImGui::RadioButton("AO", &helmetDebugView, 6);
+            ImGui::RadioButton("漫反射 IBL", &helmetDebugView, 7);
+            ImGui::RadioButton("镜面 IBL", &helmetDebugView, 8);
+            ImGui::RadioButton("Irradiance 采样", &helmetDebugView, 9);
+            ImGui::RadioButton("Prefilter 采样", &helmetDebugView, 10);
+            ImGui::RadioButton("N·V", &helmetDebugView, 11);
+            ImGui::RadioButton("F0", &helmetDebugView, 12);
+            ImGui::RadioButton("BRDF LUT (RG)", &helmetDebugView, 13);
+            ImGui::RadioButton("自发光", &helmetDebugView, 14);
+            ImGui::RadioButton("Base Color", &helmetDebugView, 15);
+            char dbg_line[64];
+            std::snprintf(dbg_line, sizeof dbg_line, "当前模式号: %d",
+                          helmetDebugView);
+            ImGui::TextUnformatted(dbg_line);
+            ImGui::EndDisabled();
+        }
+        ImGui::End();
+
+        if (ImGui::Begin("Sponza 场景网格")) {
+            ImGui::Text("Primitive 数: %zu", sponza_mesh.primitives.size());
+            ImGui::Text("材质槽位数: %zu", pbr_materials.size());
+            ImGui::Text("已加载 GPU 纹理数: %zu",
+                        sponza_texture_storage.size());
+            ImGui::TextWrapped("多 primitive 按 `scene::Mesh` 绘制；每材质一套 "
+                               "descriptor set=1。");
+        }
+        ImGui::End();
+
+        if (lumen::ui::imgui_backend_docking_enabled()) {
+            dock_panels.set_default_dock_id(
+                lumen::ui::imgui_backend_main_dockspace_id());
+        }
+        dock_panels.render_all();
+
+        const bool scene_tex_viewport_hovered =
+            scene_view_hovered || debug_scene_view_hovered;
+        const bool imgui_blocks_scene_mouse =
+            lumen::ui::imgui_wants_mouse() && !scene_tex_viewport_hovered;
+        const bool want_rel_mouse = orbit.apply_per_frame_editor_navigation(
+            pump.input(), scene_tex_viewport_hovered, imgui_blocks_scene_mouse,
+            delta_seconds);
+        window.set_relative_mouse_mode(want_rel_mouse);
+        orbit.apply_to(scene_camera);
+
+        auto &cmd_buf = commandBuffers[frameIdx];
+        if (!cmd_buf.reset()) {
+            LUMEN_APP_LOG_ERROR("CommandBuffer::reset 失败 frameIdx={}",
+                                frameIdx);
+            continue;
+        }
+        if (!cmd_buf.begin()) {
+            LUMEN_APP_LOG_ERROR("CommandBuffer::begin 失败 frameIdx={}",
+                                frameIdx);
             continue;
         }
 
-        VkRenderPassBeginInfo rpBegin {
+        std::array<VkClearValue, 2> scene_clears {};
+        scene_clears[0].color = { { 0.08F, 0.08F, 0.1F, 1.0F } };
+        scene_clears[1].depthStencil = { 1.0F, 0 };
+
+        VkRenderPassBeginInfo scene_rp {
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
         };
-        rpBegin.renderPass = renderPass.handle();
-        rpBegin.framebuffer = framebuffers.get(imageIndex);
-        rpBegin.renderArea.offset = { 0, 0 };
-        rpBegin.renderArea.extent = swapchain.extent();
-        VkClearValue clearColor {};
-        clearColor.color = { { 0.1f, 0.1f, 0.15f, 1.0f } };
-        rpBegin.clearValueCount = 1;
-        rpBegin.pClearValues = &clearColor;
+        scene_rp.renderPass = sceneTarget.render_pass();
+        scene_rp.framebuffer = sceneTarget.framebuffer();
+        scene_rp.renderArea.offset = { 0, 0 };
+        scene_rp.renderArea.extent = sceneTarget.extent();
+        scene_rp.clearValueCount = static_cast<uint32_t>(scene_clears.size());
+        scene_rp.pClearValues = scene_clears.data();
 
-        vkCmdBeginRenderPass(cmdBuffers[currentFrame], &rpBegin,
+        vkCmdBeginRenderPass(cmd_buf.handle(), &scene_rp,
                              VK_SUBPASS_CONTENTS_INLINE);
 
-        VkViewport viewport {};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(swapchain.extent().width);
-        viewport.height = static_cast<float>(swapchain.extent().height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(cmdBuffers[currentFrame], 0, 1, &viewport);
+        {
+            const VkExtent2D ext = sceneTarget.extent();
+            const float wf = static_cast<float>(ext.width);
+            const float hf = static_cast<float>(ext.height);
 
-        VkRect2D scissor {};
-        scissor.offset = { 0, 0 };
-        scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuffers[currentFrame], 0, 1, &scissor);
+            const float aspect =
+                wf / static_cast<float>((std::max)(1U, ext.height));
+            const glm::mat4 view = scene_camera.view_matrix();
+            const glm::mat4 proj = scene_camera.projection_matrix(aspect);
+            const glm::vec3 eye = scene_camera.eye_position();
+            const glm::mat4 sky_v = glm::mat4(glm::mat3(view));
 
-        vkCmdBindPipeline(cmdBuffers[currentFrame],
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+            VkCommandBuffer cb = cmd_buf.handle();
+            const glm::mat4 helmet_model { 1.0F };
 
-        UBO ubo {};
-        ubo.position = rectPos;
-        ubo.rotation = rectRotation;
-        uniformBuffers[currentFrame].update(ubo);
+            SceneUbo su {};
+            su.view = view;
+            su.proj = proj;
+            su.camera_world = glm::vec4(eye, 1.0F);
+            su.env_params =
+                glm::vec4(skyExposure, k_prefilter_max_lod, 0.0F, iblStrength);
+            fill_scene_point_lights(su, pointlightCount, pointDirectStrength);
+            helmet_ubos[frameIdx].update(su);
 
-        vkCmdBindDescriptorSets(cmdBuffers[currentFrame],
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout.handle(), 0, 1,
-                                &descriptorSets[currentFrame], 0, nullptr);
+            VkViewport vp { 0.0F, 0.0F, wf, hf, 0.0F, 1.0F };
+            vkCmdSetViewport(cb, 0, 1, &vp);
+            VkRect2D scissor { { 0, 0 }, ext };
+            vkCmdSetScissor(cb, 0, 1, &scissor);
 
-        VkBuffer vb = vertexBuffer.handle();
-        VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuffers[currentFrame], 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmdBuffers[currentFrame], indexBuffer.handle(), 0,
-                             indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuffers[currentFrame], 6, 1, 0, 0, 0);
+            SkyPush sky_push {};
+            sky_push.sky_mvp = proj * sky_v;
+            sky_push.params = glm::vec4(skyExposure, 0.0F, 0.0F, 0.0F);
 
-        vkCmdEndRenderPass(cmdBuffers[currentFrame]);
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              sky_pipe.handle());
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    sky_pl.handle(), 0, 1, &sky_ds, 0, nullptr);
+            vkCmdPushConstants(
+                cb, sky_pl.handle(),
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                static_cast<uint32_t>(sizeof(SkyPush)), &sky_push);
+            VkDeviceSize sky_off { 0 };
+            VkBuffer sky_vbh = sky_vbuf.handle();
+            vkCmdBindVertexBuffers(cb, 0, 1, &sky_vbh, &sky_off);
+            vkCmdDraw(cb, 36, 1, 0, 0);
 
-        if (vkEndCommandBuffer(cmdBuffers[currentFrame]) != VK_SUCCESS) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] vkEndCommandBuffer 失败",
-                                frameCount);
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              helmet_pipe.handle());
+            for (const lumen::scene::Primitive &prim : sponza_mesh.primitives) {
+                if (!prim.is_drawable()) {
+                    continue;
+                }
+                const lumen::scene::PBRMaterial *prim_mat =
+                    prim.material != nullptr ? prim.material
+                                             : &pbr_materials[0];
+                VkDescriptorSet mat_ds = vk_descriptor_for_pbr_material(
+                    prim_mat, pbr_materials, sponza_material_ds);
+                std::array<VkDescriptorSet, 2> pbr_sets {
+                    helmet_scene_ds[frameIdx], mat_ds
+                };
+                vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        helmet_pl.handle(), 0,
+                                        static_cast<uint32_t>(pbr_sets.size()),
+                                        pbr_sets.data(), 0, nullptr);
+                lumen::render::PbrForwardPushConstants hp {};
+                hp.model = helmet_model;
+                hp.base_color_factor = prim_mat->base_color_factor;
+                hp.emissive_factor_and_scale =
+                    glm::vec4(prim_mat->emissive_factor, emissiveScale);
+                hp.metallic_factor = prim_mat->metallic_factor;
+                hp.roughness_factor = prim_mat->roughness_factor;
+                hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
+                hp.pad = { { 0, 0, 0 } };
+                vkCmdPushConstants(cb, helmet_pl.handle(),
+                                   VK_SHADER_STAGE_VERTEX_BIT |
+                                       VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   0, static_cast<uint32_t>(sizeof(hp)), &hp);
+                VkDeviceSize voff =
+                    static_cast<VkDeviceSize>(prim.vertex_byte_offset);
+                VkBuffer vb = prim.vertex_buffer->handle();
+                vkCmdBindVertexBuffers(cb, 0, 1, &vb, &voff);
+                vkCmdBindIndexBuffer(cb, prim.index_buffer->handle(), 0,
+                                     prim.index_buffer->vk_index_type());
+                vkCmdDrawIndexed(cb, prim.index_count, 1, prim.first_index, 0,
+                                 0);
+            }
+        }
+
+        vkCmdEndRenderPass(cmd_buf.handle());
+
+        if (pbrDebugTileGrid) {
+            VkRenderPassBeginInfo dbg_rp {
+                VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+            };
+            dbg_rp.renderPass = debug_tile_target.render_pass();
+            dbg_rp.framebuffer = debug_tile_target.framebuffer();
+            dbg_rp.renderArea.offset = { 0, 0 };
+            dbg_rp.renderArea.extent = debug_tile_target.extent();
+            dbg_rp.clearValueCount = static_cast<uint32_t>(scene_clears.size());
+            dbg_rp.pClearValues = scene_clears.data();
+            vkCmdBeginRenderPass(cmd_buf.handle(), &dbg_rp,
+                                 VK_SUBPASS_CONTENTS_INLINE);
+            {
+                const VkExtent2D ext = debug_tile_target.extent();
+                const float wf = static_cast<float>(ext.width);
+                const float hf = static_cast<float>(ext.height);
+                const glm::mat4 view = scene_camera.view_matrix();
+                const glm::vec3 eye = scene_camera.eye_position();
+                VkCommandBuffer cb = cmd_buf.handle();
+                const glm::mat4 helmet_model { 1.0F };
+                constexpr int k_dbg_tile_cols = 4;
+                constexpr int k_dbg_tile_rows = 4;
+                constexpr int k_dbg_tile_count =
+                    k_dbg_tile_cols * k_dbg_tile_rows;
+                const float cw = wf / static_cast<float>(k_dbg_tile_cols);
+                const float ch = hf / static_cast<float>(k_dbg_tile_rows);
+
+                for (int ti = 0; ti < k_dbg_tile_count; ++ti) {
+                    const int col = ti % k_dbg_tile_cols;
+                    const int row = ti / k_dbg_tile_cols;
+                    const float aspect =
+                        cw / static_cast<float>((std::max)(1.0F, ch));
+                    glm::mat4 proj = glm::perspective(glm::radians(55.0F),
+                                                      aspect, 0.05F, 120.0F);
+                    proj[1][1] *= -1.0F;
+
+                    SceneUbo su {};
+                    su.view = view;
+                    su.proj = proj;
+                    su.camera_world = glm::vec4(eye, 1.0F);
+                    su.env_params = glm::vec4(skyExposure, k_prefilter_max_lod,
+                                              0.0F, iblStrength);
+                    fill_scene_point_lights(su, pointlightCount,
+                                            pointDirectStrength);
+                    helmet_ubos[frameIdx].update(su);
+
+                    VkViewport vp_tile {};
+                    vp_tile.x = static_cast<float>(col) * cw;
+                    // 与「PBR 分屏调试」ImGui 角标自上而下（row 0 在上）一致
+                    vp_tile.y = static_cast<float>(row) * ch;
+                    vp_tile.width = cw;
+                    vp_tile.height = ch;
+                    vp_tile.minDepth = 0.0F;
+                    vp_tile.maxDepth = 1.0F;
+                    vkCmdSetViewport(cb, 0, 1, &vp_tile);
+                    const int32_t sx =
+                        static_cast<int32_t>(std::lround(vp_tile.x));
+                    const int32_t sy =
+                        static_cast<int32_t>(std::lround(vp_tile.y));
+                    const uint32_t sc_w = static_cast<uint32_t>(
+                        (std::max)(1L, std::lround(static_cast<double>(cw))));
+                    const uint32_t sc_h = static_cast<uint32_t>(
+                        (std::max)(1L, std::lround(static_cast<double>(ch))));
+                    VkRect2D scissor_tile { { sx, sy }, { sc_w, sc_h } };
+                    vkCmdSetScissor(cb, 0, 1, &scissor_tile);
+
+                    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      helmet_pipe.handle());
+                    for (const lumen::scene::Primitive &prim :
+                         sponza_mesh.primitives) {
+                        if (!prim.is_drawable()) {
+                            continue;
+                        }
+                        const lumen::scene::PBRMaterial *prim_mat =
+                            prim.material != nullptr ? prim.material
+                                                     : &pbr_materials[0];
+                        VkDescriptorSet mat_ds_dbg =
+                            vk_descriptor_for_pbr_material(
+                                prim_mat, pbr_materials, sponza_material_ds);
+                        std::array<VkDescriptorSet, 2> sets_dbg {
+                            helmet_scene_ds[frameIdx], mat_ds_dbg
+                        };
+                        vkCmdBindDescriptorSets(
+                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            helmet_pl.handle(), 0,
+                            static_cast<uint32_t>(sets_dbg.size()),
+                            sets_dbg.data(), 0, nullptr);
+                        lumen::render::PbrForwardPushConstants hp {};
+                        hp.model = helmet_model;
+                        hp.base_color_factor = prim_mat->base_color_factor;
+                        hp.emissive_factor_and_scale =
+                            glm::vec4(prim_mat->emissive_factor, emissiveScale);
+                        hp.metallic_factor = prim_mat->metallic_factor;
+                        hp.roughness_factor = prim_mat->roughness_factor;
+                        hp.debug_view = ti;
+                        hp.pad = { { 0, 0, 0 } };
+                        vkCmdPushConstants(cb, helmet_pl.handle(),
+                                           VK_SHADER_STAGE_VERTEX_BIT |
+                                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                                           0, static_cast<uint32_t>(sizeof(hp)),
+                                           &hp);
+                        VkDeviceSize voff =
+                            static_cast<VkDeviceSize>(prim.vertex_byte_offset);
+                        VkBuffer vbd = prim.vertex_buffer->handle();
+                        vkCmdBindVertexBuffers(cb, 0, 1, &vbd, &voff);
+                        vkCmdBindIndexBuffer(
+                            cb, prim.index_buffer->handle(), 0,
+                            prim.index_buffer->vk_index_type());
+                        vkCmdDrawIndexed(cb, prim.index_count, 1,
+                                         prim.first_index, 0, 0);
+                    }
+                }
+            }
+            vkCmdEndRenderPass(cmd_buf.handle());
+        }
+
+        VkClearValue swap_clear {};
+        swap_clear.color = { { 0.07F, 0.08F, 0.11F, 1.0F } };
+        VkRenderPassBeginInfo swap_rp {
+            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        };
+        swap_rp.renderPass = renderPass.handle();
+        swap_rp.framebuffer = framebuffers.get(img_index);
+        swap_rp.renderArea.offset = { 0, 0 };
+        swap_rp.renderArea.extent = swapchain.extent();
+        swap_rp.clearValueCount = 1;
+        swap_rp.pClearValues = &swap_clear;
+        vkCmdBeginRenderPass(cmd_buf.handle(), &swap_rp,
+                             VK_SUBPASS_CONTENTS_INLINE);
+
+        {
+            const VkExtent2D swap_ext = swapchain.extent();
+            VkViewport fb_vp {};
+            fb_vp.x = 0.0F;
+            fb_vp.y = 0.0F;
+            fb_vp.width = static_cast<float>(swap_ext.width);
+            fb_vp.height = static_cast<float>(swap_ext.height);
+            fb_vp.minDepth = 0.0F;
+            fb_vp.maxDepth = 1.0F;
+            vkCmdSetViewport(cmd_buf.handle(), 0, 1, &fb_vp);
+            VkRect2D fb_sc { { 0, 0 }, swap_ext };
+            vkCmdSetScissor(cmd_buf.handle(), 0, 1, &fb_sc);
+        }
+
+        imgui_layer.end_frame(cmd_buf.handle());
+
+        vkCmdEndRenderPass(cmd_buf.handle());
+        if (!cmd_buf.end()) {
+            LUMEN_APP_LOG_ERROR("CommandBuffer::end 失败 frameIdx={}",
+                                frameIdx);
             continue;
         }
 
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] QueueSubmit ...", frameCount);
-        }
-        VkSemaphore waitSem = frameSync.image_available(currentFrame);
-        VkSemaphore signalSem = frameSync.render_finished(imageIndex);
-
-        VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-        VkPipelineStageFlags waitStage =
+        VkSemaphore wait_sem = frameSync.image_available(frameIdx);
+        VkSemaphore signal_sem = frameSync.render_finished(img_index);
+        VkPipelineStageFlags wait_stage =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &waitSem;
-        submitInfo.pWaitDstStageMask = &waitStage;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmdBuffers[currentFrame];
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &signalSem;
 
-        if (vkQueueSubmit(ctx.graphics_queue(), 1, &submitInfo,
-                          frameSync.in_flight_fence(currentFrame)) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] vkQueueSubmit 失败", frameCount);
+        VkCommandBuffer submit_cb = cmd_buf.handle();
+        VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        sub.waitSemaphoreCount = 1;
+        sub.pWaitSemaphores = &wait_sem;
+        sub.pWaitDstStageMask = &wait_stage;
+        sub.commandBufferCount = 1;
+        sub.pCommandBuffers = &submit_cb;
+        sub.signalSemaphoreCount = 1;
+        sub.pSignalSemaphores = &signal_sem;
+
+        if (!frameSync.reset_fence(frameIdx)) {
+            LUMEN_APP_LOG_ERROR("vkResetFences 失败 frameIdx={}", frameIdx);
+            continue;
+        }
+        const VkResult submit_rc = vkQueueSubmit(
+            ctx.graphics_queue(), 1, &sub, frameSync.in_flight_fence(frameIdx));
+        if (submit_rc != VK_SUCCESS) {
+            LUMEN_APP_LOG_ERROR("vkQueueSubmit 失败 result={}",
+                                static_cast<int>(submit_rc));
+            ctx.wait_idle();
+            if (!frameSync.recreate_in_flight_fence_signaled(frameIdx)) {
+                LUMEN_APP_LOG_ERROR("submit 失败后 fence 恢复失败 frameIdx={}",
+                                    frameIdx);
+                running = false;
+            }
             continue;
         }
 
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] Present ...", frameCount);
-        }
-        VkResult presentResult =
-            swapchain.present(ctx.present_queue(), imageIndex,
-                              frameSync.render_finished(imageIndex));
-        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
-            needRecreateSwapchain = true;
-        } else if (presentResult != VK_SUCCESS &&
-                   presentResult != VK_SUBOPTIMAL_KHR) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] Present 失败 result={}", frameCount,
-                                static_cast<int>(presentResult));
+        const VkResult pr =
+            swapchain.present(ctx.present_queue(), img_index, signal_sem);
+        if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
+            LUMEN_APP_LOG_WARN("present OUT_OF_DATE，将重建 Swapchain");
+            need_recreate_swapchain = true;
+        } else if (pr != VK_SUCCESS && pr != VK_SUBOPTIMAL_KHR) {
+            LUMEN_APP_LOG_ERROR("present 失败 result={}", static_cast<int>(pr));
         }
 
-        if (doLog) {
-            LUMEN_APP_LOG_DEBUG("[frame {}] 帧完成", frameCount);
-        }
-        currentFrame = (currentFrame + 1) % kMaxFramesInFlight;
-        ++frameCount;
+        frameIdx = (frameIdx + 1) % 3;
     }
 
-    ctx.wait_idle();
+    window.set_relative_mouse_mode(false);
+    vkDeviceWaitIdle(dev);
+    if (sceneTexID != static_cast<ImTextureID>(0)) {
+        lumen::ui::imgui_backend_remove_texture(
+            reinterpret_cast<void *>(sceneTexID));
+    }
+    if (debug_scene_tex_id != static_cast<ImTextureID>(0)) {
+        lumen::ui::imgui_backend_remove_texture(
+            reinterpret_cast<void *>(debug_scene_tex_id));
+    }
+    lumen::ui::imgui_backend_shutdown();
 
-    LUMEN_APP_LOG_INFO("Sandbox 退出");
+    for (VkImageView fv : v_env_faces) {
+        destroy_view(dev, fv);
+    }
+    for (VkImageView fv : v_irr_faces) {
+        destroy_view(dev, fv);
+    }
+    for (VkImageView fv : v_pre_faces) {
+        destroy_view(dev, fv);
+    }
+
+    std::vector<lumen::render::CommandBuffer> free_bufs;
+    for (auto &c : commandBuffers) {
+        free_bufs.push_back(std::move(c));
+    }
+    cmdPool.free(free_bufs);
+
     return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
     if (!lumen::core::Logger::init()) {
         return -1;
     }
-    int result = run_sandbox();
+    const int result = run_pbr(argc, argv);
     lumen::core::Logger::shutdown();
     return result;
 }

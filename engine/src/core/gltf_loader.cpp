@@ -1,6 +1,46 @@
 /**
  * @file gltf_loader.cpp
- * @brief tinygltf + 自定义图像（stb / libktx）加载 glTF 2.0
+ * @brief glTF 2.0 / GLB 加载实现（tinygltf + stb + libktx）
+ *
+ * @details
+ * 实现 glTF 模型加载，包括：
+ *
+ * ============================================================
+ * 几何数据
+ * ============================================================
+ * - 解析 Scene → Node → Mesh → Primitive
+ * - 应用节点层级变换（TRS / matrix）
+ * - 提取：
+ *   - POSITION
+ *   - NORMAL
+ *   - TEXCOORD_0
+ * - 合并为单一 ObjMesh
+ *
+ * ============================================================
+ * 材质系统（PBR）
+ * ============================================================
+ * - 支持 Metallic-Roughness
+ * - 支持 KHR_materials_pbrSpecularGlossiness 扩展
+ * - 解析贴图路径：
+ *   - baseColor
+ *   - metallicRoughness
+ *   - normal
+ *   - occlusion
+ *   - emissive
+ *
+ * ============================================================
+ * 图像解码
+ * ============================================================
+ * - PNG / JPEG → stb_image
+ * - KTX / KTX2 → libktx
+ *
+ * @note
+ * - 所有 mesh 会被“拍平”为一个顶点/索引缓冲
+ * - submesh 用于区分不同材质
+ *
+ * @warning
+ * - 未做顶点去重（但 glTF 通常已优化）
+ * - 未处理 tangent（法线贴图可能错误）
  */
 
 #include "core/gltf_loader.hpp"
@@ -8,7 +48,7 @@
 #include "core/logger.hpp"
 #include "core/path.hpp"
 
-#include "scene/components.hpp"
+#include "core/gltf_material.hpp"
 
 #include <ghc/filesystem.hpp>
 #include <stb_image.h>
@@ -34,6 +74,9 @@ namespace {
 
 namespace fs = ghc::filesystem;
 
+/**
+ * @brief 判断字符串是否以指定后缀结尾（忽略大小写）
+ */
 bool ends_with_ci(std::string_view s, std::string_view ext) {
     if (s.size() < ext.size()) {
         return false;
@@ -49,6 +92,19 @@ bool ends_with_ci(std::string_view s, std::string_view ext) {
     }
     return true;
 }
+
+/**
+ * @brief tinygltf 自定义图像加载器
+ *
+ * @details
+ * 用于替换 tinygltf 默认图像加载：
+ * - 支持 KTX / KTX2（GPU友好）
+ * - fallback 到 stb_image（PNG/JPEG）
+ *
+ * @note
+ * - glTF 中 image.uri 可能为空（嵌入 buffer）
+ * - magic header 用于识别 KTX
+ */
 
 bool tinygltf_load_image(tinygltf::Image *image, const int image_idx,
                          std::string *err, std::string *warn, int /*req_width*/,
@@ -117,6 +173,13 @@ bool tinygltf_load_image(tinygltf::Image *image, const int image_idx,
     return true;
 }
 
+/**
+ * @brief 将绝对路径转换为资源相对路径
+ *
+ * @details
+ * 用于统一资源路径（例如：
+ * textures/albedo.png）
+ */
 std::string resource_relative_path(const fs::path &absolute_path) {
     std::error_code ec;
     const fs::path root { lumen::core::get_resource_path("") };
@@ -127,6 +190,22 @@ std::string resource_relative_path(const fs::path &absolute_path) {
     return rel.generic_string();
 }
 
+/**
+ * @brief 计算节点局部变换矩阵
+ *
+ * @details
+ * glTF 节点支持两种方式：
+ *
+ * 1. matrix（4x4）
+ * 2. TRS（translation / rotation / scale）
+ *
+ * 优先使用 matrix，否则使用 TRS：
+ *
+ *   M = T * R * S
+ *
+ * @note
+ * - rotation 为 quaternion（xyzw → wxyz）
+ */
 glm::mat4 node_local_matrix(const tinygltf::Node &n) {
     if (n.matrix.size() == 16) {
         glm::dmat4 m(1.0);
@@ -162,6 +241,19 @@ glm::mat4 node_local_matrix(const tinygltf::Node &n) {
     return T * R * S;
 }
 
+/**
+ * @brief 递归遍历节点树
+ *
+ * @param[in] model glTF 模型
+ * @param[in] node_idx 当前节点
+ * @param[in] parent 父节点变换
+ * @param[in] on_mesh 回调（遇到 mesh 时触发）
+ *
+ * @details
+ * 构建 world matrix：
+ *
+ *   world = parent * local
+ */
 void traverse_nodes(
     const tinygltf::Model &model, int node_idx, const glm::mat4 &parent,
     const std::function<void(int, const glm::mat4 &)> &on_mesh) {
@@ -175,6 +267,14 @@ void traverse_nodes(
     }
 }
 
+/**
+ * @brief 读取索引（uint16 / uint32）
+ *
+ * @note
+ * glTF index accessor 支持：
+ * - UNSIGNED_SHORT
+ * - UNSIGNED_INT
+ */
 std::uint32_t read_index(const tinygltf::Model &model,
                          const tinygltf::Accessor &acc, size_t i) {
     const tinygltf::BufferView &view = model.bufferViews[acc.bufferView];
@@ -195,6 +295,9 @@ std::uint32_t read_index(const tinygltf::Model &model,
     return v;
 }
 
+/**
+ * @brief 读取 vec3 属性（POSITION / NORMAL）
+ */
 bool read_float3(const tinygltf::Model &model, int accessor_idx, size_t i,
                  glm::vec3 &out) {
     const tinygltf::Accessor &acc = model.accessors[accessor_idx];
@@ -214,6 +317,9 @@ bool read_float3(const tinygltf::Model &model, int accessor_idx, size_t i,
     return true;
 }
 
+/**
+ * @brief 读取 vec2 属性（UV）
+ */
 bool read_float2(const tinygltf::Model &model, int accessor_idx, size_t i,
                  glm::vec2 &out) {
     const tinygltf::Accessor &acc = model.accessors[accessor_idx];
@@ -233,6 +339,26 @@ bool read_float2(const tinygltf::Model &model, int accessor_idx, size_t i,
     return true;
 }
 
+/**
+ * @brief 追加一个 primitive 到输出 mesh
+ *
+ * @details
+ * 一个 primitive：
+ * - 一组顶点
+ * - 一个材质
+ * - 一段 index buffer
+ *
+ * 处理流程：
+ * - 读取属性
+ * - 应用 world transform
+ * - 写入 vertex buffer
+ * - 写入 index buffer
+ * - 记录 submesh
+ *
+ * @note
+ * 法线变换：
+ *   n' = normalize((M^-1)^T * n)
+ */
 void append_primitive(const tinygltf::Model &model,
                       const tinygltf::Primitive &prim, const glm::mat4 &world,
                       ObjMesh &out, std::vector<GltfSubmeshRange> *ranges) {
@@ -287,6 +413,13 @@ void append_primitive(const tinygltf::Model &model,
         glm::vec2 uv { 0.F };
         if (uv_acc >= 0) {
             (void)read_float2(model, uv_acc, i, uv);
+            /**
+             * glTF：`TEXCOORD_0` 原点为贴图左上角，+v 向下（glTF 2.0 规范）。
+             * `Texture::create_from_file` 使用 stbi 垂直翻转以适配引擎/Vulkan
+             * 行序；OBJ 路径下 `vt` 已与之对齐，但 glTF 原始 v 需翻转，否则会
+             * 上下颠倒或与法线贴图轴向不一致。
+             */
+            uv.y = 1.0F - uv.y;
         }
 
         out.vertices.push_back(ObjVertex { wp, n, uv });
@@ -317,6 +450,9 @@ void append_primitive(const tinygltf::Model &model,
     }
 }
 
+/**
+ * @brief 追加 mesh（包含多个 primitive）
+ */
 void append_mesh(const tinygltf::Model &model, int mesh_idx,
                  const glm::mat4 &world, ObjMesh &out,
                  std::vector<GltfSubmeshRange> *ranges) {
@@ -332,7 +468,9 @@ void append_mesh(const tinygltf::Model &model, int mesh_idx,
 constexpr const char *kExtPbrSpecularGlossiness =
     "KHR_materials_pbrSpecularGlossiness";
 
-/// glTF TextureInfo：`{ "index": n }`
+/**
+ * @brief 从 JSON TextureInfo 读取纹理索引
+ */
 int texture_index_from_json_object(const tinygltf::Value &obj) {
     if (!obj.IsObject() || !obj.Has("index")) {
         return -1;
@@ -343,6 +481,10 @@ int texture_index_from_json_object(const tinygltf::Value &obj) {
     }
     return ix.GetNumberAsInt();
 }
+
+/**
+ * @brief 设置纹理路径（转换为相对路径）
+ */
 
 void set_texture_path(const fs::path &gltf_dir, const tinygltf::Model &model,
                       int tex_index, std::string &out_path) {
@@ -361,12 +503,19 @@ void set_texture_path(const fs::path &gltf_dir, const tinygltf::Model &model,
     out_path = resource_relative_path(full.lexically_normal());
 }
 
-/// 与 [Vulkan-Samples](https://github.com/KhronosGroup/Vulkan-Samples) 的
-/// `parse_material` 一致：从 `ParameterMap` 读取标量因子（可覆盖 struct
-/// 默认值）。
+/**
+ * @brief 应用材质参数（标量）
+ *
+ * @details
+ * 从 tinygltf::ParameterMap 读取：
+ * - baseColorFactor
+ * - metallicFactor
+ * - roughnessFactor
+ * - emissiveFactor
+ */
 void apply_material_factors_from_parameter(const std::string &key,
                                            const tinygltf::Parameter &param,
-                                           scene::MaterialComponent &out) {
+                                           GltfMaterialData &out) {
     if (key == "baseColorFactor") {
         const auto c = param.ColorFactor();
         out.base_color_factor =
@@ -384,15 +533,20 @@ void apply_material_factors_from_parameter(const std::string &key,
     }
 }
 
-/// 键名含 `Texture` 且 `TextureIndex()` 有效时，按 glTF 语义写入
-/// `MaterialComponent`。 `skip_base_color_texture_from_maps`：KHR spec/gloss
-/// 已从扩展写入 diffuse 时，勿让 `values` 里重复的 `baseColorTexture`
-/// 覆盖反照率路径。
+/**
+ * @brief 应用材质贴图
+ *
+ * @details
+ * 根据 key 写入对应路径：
+ * - baseColorTexture
+ * - normalTexture
+ * - metallicRoughnessTexture
+ */
 void apply_material_texture_from_key(const std::string &key,
                                      const tinygltf::Parameter &param,
                                      const fs::path &gltf_dir,
                                      const tinygltf::Model &model,
-                                     scene::MaterialComponent &out,
+                                     GltfMaterialData &out,
                                      bool skip_base_color_texture_from_maps) {
     if (key.find("Texture") == std::string::npos) {
         return;
@@ -422,9 +576,12 @@ void apply_material_texture_from_key(const std::string &key,
     }
 }
 
+/**
+ * @brief 合并 material 参数表（values / additionalValues）
+ */
 void merge_parameter_maps_into_material(
     const tinygltf::Material &m, const fs::path &gltf_dir,
-    const tinygltf::Model &model, scene::MaterialComponent &out,
+    const tinygltf::Model &model, GltfMaterialData &out,
     bool skip_base_color_texture_from_maps) {
     for (const auto &kv : m.values) {
         apply_material_factors_from_parameter(kv.first, kv.second, out);
@@ -438,8 +595,27 @@ void merge_parameter_maps_into_material(
     }
 }
 
+/**
+ * @brief 填充 GltfMaterialData（核心）
+ *
+ * @details
+ * 支持：
+ *
+ * - PBR Metallic-Roughness
+ * - KHR_materials_pbrSpecularGlossiness
+ *
+ * 处理逻辑：
+ * 1. 读取基础参数
+ * 2. 解析贴图
+ * 3. 处理扩展
+ * 4. fallback（spec/gloss → roughness）
+ *
+ * @note
+ * spec/gloss → roughness:
+ *   roughness = 1 - glossiness
+ */
 void fill_material(const tinygltf::Model &model, int material_index,
-                   const fs::path &gltf_dir, scene::MaterialComponent &out) {
+                   const fs::path &gltf_dir, GltfMaterialData &out) {
     if (material_index < 0 ||
         material_index >= static_cast<int>(model.materials.size())) {
         return;
@@ -447,11 +623,11 @@ void fill_material(const tinygltf::Model &model, int material_index,
     const tinygltf::Material &m = model.materials[material_index];
 
     if (m.alphaMode == "MASK") {
-        out.alpha_mode = scene::MaterialAlphaMode::Mask;
+        out.alpha_mode = GltfMaterialAlphaMode::Mask;
     } else if (m.alphaMode == "BLEND") {
-        out.alpha_mode = scene::MaterialAlphaMode::Blend;
+        out.alpha_mode = GltfMaterialAlphaMode::Blend;
     } else {
-        out.alpha_mode = scene::MaterialAlphaMode::Opaque;
+        out.alpha_mode = GltfMaterialAlphaMode::Opaque;
     }
     out.alpha_cutoff = static_cast<float>(m.alphaCutoff);
     out.double_sided = m.doubleSided;
@@ -561,6 +737,13 @@ void fill_material(const tinygltf::Model &model, int material_index,
     }
 }
 
+/**
+ * @brief 查找场景中第一个材质
+ *
+ * @details
+ * 用于 fallback：
+ * - 当未使用 submesh 时
+ */
 int find_first_material_index(const tinygltf::Model &model, int node_idx) {
     const tinygltf::Node &node = model.nodes[node_idx];
     if (node.mesh >= 0 && node.mesh < static_cast<int>(model.meshes.size())) {
@@ -582,10 +765,60 @@ int find_first_material_index(const tinygltf::Model &model, int node_idx) {
 
 } // namespace
 
+/**
+ * @brief 加载 glTF 模型（完整实现）
+ *
+ * @param[in]  filePath glTF / GLB 路径
+ * @param[out] outMesh  输出网格
+ * @param[out] outMaterial 主材质
+ * @param[out] outSubmeshes 子网格（可选）
+ * @param[out] outAllMaterials 所有材质（可选）
+ *
+ * @return 是否成功
+ *
+ * ============================================================
+ * 执行流程
+ * ============================================================
+ *
+ * 1. 初始化 tinygltf
+ * 2. 加载文件（ASCII / Binary）
+ * 3. 获取默认场景
+ * 4. 遍历节点树：
+ *    - 累积 world transform
+ *    - 提取 mesh
+ * 5. 构建顶点与索引缓冲
+ * 6. 构建材质：
+ *    - 单材质 or 多材质
+ *
+ * ============================================================
+ * 材质策略
+ * ============================================================
+ *
+ * - 若使用 submesh：
+ *   → 返回全部材质
+ *   → 自动选择“主材质”（最大三角面）
+ *
+ * - 若不使用：
+ *   → 使用第一个材质
+ *
+ * ============================================================
+ * 注意事项
+ * ============================================================
+ *
+ * @warning
+ * - 必须同时提供 outSubmeshes 和 outAllMaterials
+ *
+ * @warning
+ * - 未处理 tangent（法线贴图会错误）
+ *
+ * @note
+ * - glTF 已优化顶点索引（无需 OBJ 那样去重）
+ * - world transform 已 baked 进顶点
+ */
 bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
-               scene::MaterialComponent &outMaterial,
+               GltfMaterialData &outMaterial,
                std::vector<GltfSubmeshRange> *outSubmeshes,
-               std::vector<scene::MaterialComponent> *outAllMaterials) {
+               std::vector<GltfMaterialData> *outAllMaterials) {
     outMesh.vertices.clear();
     outMesh.indices.clear();
     if (outSubmeshes != nullptr) {
@@ -652,7 +885,7 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
         return false;
     }
 
-    outMaterial = scene::MaterialComponent {};
+    outMaterial = GltfMaterialData {};
     if (outSubmeshes != nullptr && outAllMaterials != nullptr) {
         outAllMaterials->clear();
         outAllMaterials->resize(model.materials.size());

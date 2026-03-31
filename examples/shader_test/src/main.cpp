@@ -8,8 +8,8 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
-#include <spirv_cross/spirv_reflect.hpp>
 #include <spirv_glsl.hpp>
+#include <spirv_reflect.hpp>
 
 std::vector<uint32_t> load_spirv_file(const std::string &path) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -33,10 +33,6 @@ std::vector<uint32_t> load_spirv_file(const std::string &path) {
 
     return buffer;
 }
-
-#include <iostream>
-#include <spirv_glsl.hpp>
-#include <vector>
 
 // ===================== 递归打印 SPIR-V Type =====================
 void dump_type_recursive(spirv_cross::CompilerGLSL &glsl, uint32_t type_id,

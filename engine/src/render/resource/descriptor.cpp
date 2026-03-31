@@ -208,6 +208,74 @@ DescriptorPool &DescriptorPool::operator=(DescriptorPool &&other) noexcept {
 // Descriptor Write Helpers
 // =====================================================
 
+void write_descriptor_set(VkDevice device, VkDescriptorSet set,
+                          std::initializer_list<DescriptorWriteBuffer> buffers,
+                          std::initializer_list<DescriptorWriteImage> images) {
+
+    const size_t nb = buffers.size();
+    const size_t ni = images.size();
+    if (nb + ni == 0) {
+        return;
+    }
+
+    std::vector<VkDescriptorBufferInfo> bufferInfos(nb);
+    {
+        size_t i = 0;
+        for (const DescriptorWriteBuffer &b : buffers) {
+            bufferInfos[i].buffer = b.buffer;
+            bufferInfos[i].offset = b.offset;
+            bufferInfos[i].range = b.range;
+            ++i;
+        }
+    }
+
+    std::vector<VkDescriptorImageInfo> imageInfos(ni);
+    {
+        size_t i = 0;
+        for (const DescriptorWriteImage &im : images) {
+            imageInfos[i].imageLayout = im.imageLayout;
+            imageInfos[i].imageView = im.imageView;
+            imageInfos[i].sampler = im.sampler;
+            ++i;
+        }
+    }
+
+    std::vector<VkWriteDescriptorSet> writes;
+    writes.reserve(nb + ni);
+
+    {
+        size_t i = 0;
+        for (const DescriptorWriteBuffer &b : buffers) {
+            VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            write.dstSet = set;
+            write.dstBinding = b.binding;
+            write.dstArrayElement = 0;
+            write.descriptorType = b.type;
+            write.descriptorCount = 1;
+            write.pBufferInfo = &bufferInfos[i];
+            writes.push_back(write);
+            ++i;
+        }
+    }
+    {
+        size_t i = 0;
+        for (const DescriptorWriteImage &im : images) {
+            VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            write.dstSet = set;
+            write.dstBinding = im.binding;
+            write.dstArrayElement = 0;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write.descriptorCount = 1;
+            write.pImageInfo = &imageInfos[i];
+            writes.push_back(write);
+            ++i;
+        }
+    }
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()),
+                           writes.data(), 0, nullptr);
+}
+
 void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
                              uint32_t binding, VkDescriptorType type,
                              VkBuffer buffer, size_t offset, size_t range) {

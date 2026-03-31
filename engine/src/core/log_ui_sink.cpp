@@ -50,11 +50,11 @@ protected:
         std::string logger(msg.logger_name.data(), msg.logger_name.size());
         std::string text(msg.payload.data(), msg.payload.size());
         std::string ts = format_msg_time(msg.time);
-        // LogViewBuffer::instance().push_line(msg.level, std::move(ts),
-                                            // std::move(logger), std::move(text));
+        LogViewBuffer::instance().push_line(msg.level, std::move(ts),
+                                            std::move(logger), std::move(text));
     }
     void flush_() override {}
-};
+}; 
 
 } // namespace
 

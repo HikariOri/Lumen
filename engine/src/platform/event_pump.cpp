@@ -60,9 +60,6 @@ bool EventPump::poll() {
         case SDL_EVENT_QUIT:
             events_.emplace_back(std::in_place_type<EventQuit>);
             dispatch_(events_);
-            if (on_quit_) {
-                on_quit_();
-            }
             return false;
 
         case SDL_EVENT_KEY_DOWN: {
@@ -137,22 +134,19 @@ bool EventPump::poll() {
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             events_.emplace_back(std::in_place_type<EventQuit>);
             dispatch_(events_);
-            if (on_quit_) {
-                on_quit_();
-            }
             return false;
 
         case SDL_EVENT_WINDOW_MINIMIZED:
             events_.emplace_back(std::in_place_type<EventWindowMinimize>);
-            dispatch_(events_);
+            break;
 
         case SDL_EVENT_WINDOW_MAXIMIZED:
             events_.emplace_back(std::in_place_type<EventWindowMaximize>);
-            dispatch_(events_);
+            break;
 
         case SDL_EVENT_WINDOW_RESTORED:
             events_.emplace_back(std::in_place_type<EventWindowRestore>);
-            dispatch_(events_);
+            break;
 
         default: break;
         }
@@ -180,35 +174,22 @@ bool EventPump::poll() {
 }
 
 void EventPump::dispatch_(const EventList &events) {
-    for (const auto &e : events) {
-        if (std::holds_alternative<EventKeyDown>(e) && on_key_down_) {
-            on_key_down_(std::get<EventKeyDown>(e));
-        } else if (std::holds_alternative<EventKeyUp>(e) && on_key_up_) {
-            on_key_up_(std::get<EventKeyUp>(e));
-        } else if (std::holds_alternative<EventMouseButtonDown>(e) &&
-                   on_mouse_button_down_) {
-            on_mouse_button_down_(std::get<EventMouseButtonDown>(e));
-        } else if (std::holds_alternative<EventMouseButtonUp>(e) &&
-                   on_mouse_button_up_) {
-            on_mouse_button_up_(std::get<EventMouseButtonUp>(e));
-        } else if (std::holds_alternative<EventMouseMove>(e) &&
-                   on_mouse_move_) {
-            on_mouse_move_(std::get<EventMouseMove>(e));
-        } else if (std::holds_alternative<EventMouseWheel>(e) &&
-                   on_mouse_wheel_) {
-            on_mouse_wheel_(std::get<EventMouseWheel>(e));
-        } else if (std::holds_alternative<EventWindowResize>(e) &&
-                   on_window_resize_) {
-            on_window_resize_(std::get<EventWindowResize>(e));
-        } else if (std::holds_alternative<EventWindowMinimize>(e) &&
-                   on_window_minimize_) {
-            on_window_minimize_(std::get<EventWindowMinimize>(e));
-        } else if (std::holds_alternative<EventWindowMaximize>(e) &&
-                   on_window_maximize_) {
-            on_window_maximize_(std::get<EventWindowMaximize>(e));
-        } else if (std::holds_alternative<EventWindowRestore>(e) &&
-                   on_window_restore_) {
-            on_window_restore_(std::get<EventWindowRestore>(e));
+    for (const auto &ev : events) {
+        DispatchableEvent de { .event = ev, .handled = false };
+        if (on_application_event_) {
+            on_application_event_(de);
+        }
+        if (de.handled) {
+            continue;
+        }
+        for (auto &fn : event_stack_) {
+            if (!fn) {
+                continue;
+            }
+            fn(de);
+            if (de.handled) {
+                break;
+            }
         }
     }
 }

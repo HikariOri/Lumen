@@ -25,195 +25,19 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/resource/buffer.hpp"
+#include "render/resource/detail/gpu_image_mipmap.hpp"
 #include "render/resource/image.hpp"
 #include "render/resource/sampler.hpp"
 
 #include <stb_image.h>
 
 #include <algorithm>
-#include <cmath>
 #include <cstring>
 #include <vector>
 
 namespace lumen::render {
 
 namespace {
-
-/**
- * @brief 计算 mipmap 层数
- *
- * @details
- * mipLevels = floor(log2(max(width, height))) + 1
- *
- * Vulkan 中完整 mip 链要求尺寸逐级减半直到 1x1。
- *
- * @note
- * - 最小尺寸为 1
- * - 用于 vkCmdBlitImage 生成 mip
- */
-uint32_t calculate_mip_levels(uint32_t width, uint32_t height) {
-    return static_cast<uint32_t>(
-               std::floor(std::log2(std::max(width, height)))) +
-           1;
-}
-
-/**
- * @brief 图像子资源 layout 转换（带 pipeline barrier）
- *
- * @param cmd 命令缓冲
- * @param image 目标图像
- * @param oldLayout 原 layout
- * @param newLayout 新 layout
- * @param baseMipLevel 起始 mip
- * @param levelCount mip 数量
- * @param baseArrayLayer 起始层
- * @param layerCount 层数
- *
- * @details
- * 封装 vkCmdPipelineBarrier，用于：
- * - 写后读同步（TRANSFER → SHADER）
- * - blit 前后同步（DST ↔ SRC）
- *
- * @note
- * 这里只处理常见路径：
- * - UNDEFINED → TRANSFER_DST
- * - TRANSFER_DST → TRANSFER_SRC
- * - TRANSFER_SRC → SHADER_READ_ONLY
- *
- * @warning
- * - 未覆盖的 layout 组合会被忽略（直接 return）
- * - 不适用于 depth/stencil
- *
- * @todo 支持更多 layout 组合
- */
-void transition_image_subresource(VkCommandBuffer cmd, VkImage image,
-                                  VkImageLayout oldLayout,
-                                  VkImageLayout newLayout,
-                                  uint32_t baseMipLevel, uint32_t levelCount,
-                                  uint32_t baseArrayLayer,
-                                  uint32_t layerCount) {
-    VkImageMemoryBarrier barrier { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-    barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = baseMipLevel;
-    barrier.subresourceRange.levelCount = levelCount;
-    barrier.subresourceRange.baseArrayLayer = baseArrayLayer;
-    barrier.subresourceRange.layerCount = layerCount;
-
-    VkPipelineStageFlags srcStage {};
-    VkPipelineStageFlags dstStage {};
-
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
-        newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
-               newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
-               newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
-               newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else {
-        return;
-    }
-
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
-                         &barrier);
-}
-
-void transition_image_layout(VkCommandBuffer cmd, VkImage image,
-                             VkImageLayout oldLayout, VkImageLayout newLayout,
-                             uint32_t baseMipLevel, uint32_t levelCount) {
-    transition_image_subresource(cmd, image, oldLayout, newLayout, baseMipLevel,
-                                 levelCount, 0, 1);
-}
-
-/**
- * @brief 生成 2D 纹理 mipmap（GPU blit）
- *
- * @param cmd 命令缓冲
- * @param image 图像
- * @param width 初始宽度
- * @param height 初始高度
- * @param mipLevels mip 层数
- *
- * @details
- * 过程：
- * 1. 将 mip[i-1] 转为 TRANSFER_SRC
- * 2. blit → mip[i]
- * 3. mip[i-1] 转为 SHADER_READ_ONLY
- *
- * 最后一层单独转 layout。
- *
- * @note
- * 使用 VK_FILTER_LINEAR 做下采样
- *
- * @warning
- * - 要求 format 支持 linear blit
- * - 否则需要使用 compute shader
- */
-void generate_mipmaps(VkCommandBuffer cmd, VkImage image, uint32_t width,
-                      uint32_t height, uint32_t mipLevels) {
-    auto mipWidth = static_cast<int32_t>(width);
-    auto mipHeight = static_cast<int32_t>(height);
-
-    for (uint32_t i = 1; i < mipLevels; ++i) {
-        // mip i-1: TRANSFER_DST -> TRANSFER_SRC
-        transition_image_layout(cmd, image,
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, i - 1, 1);
-
-        VkImageBlit blit {};
-        blit.srcOffsets[0] = { 0, 0, 0 };
-        blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
-        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.srcSubresource.mipLevel = i - 1;
-        blit.srcSubresource.baseArrayLayer = 0;
-        blit.srcSubresource.layerCount = 1;
-        blit.dstOffsets[0] = { 0, 0, 0 };
-        blit.dstOffsets[1] = { std::max(1, mipWidth / 2),
-                               std::max(1, mipHeight / 2), 1 };
-        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        blit.dstSubresource.mipLevel = i;
-        blit.dstSubresource.baseArrayLayer = 0;
-        blit.dstSubresource.layerCount = 1;
-
-        vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image,
-                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
-                       VK_FILTER_LINEAR);
-
-        // mip i-1: TRANSFER_SRC -> SHADER_READ_ONLY
-        transition_image_layout(
-            cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, i - 1, 1);
-
-        mipWidth = std::max(1, mipWidth / 2);
-        mipHeight = std::max(1, mipHeight / 2);
-    }
-
-    // 最后一层 mip: TRANSFER_DST -> SHADER_READ_ONLY
-    transition_image_layout(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                            mipLevels - 1, 1);
-}
 
 /**
  * @brief 生成 Cubemap mipmap
@@ -238,12 +62,12 @@ void generate_mipmaps_cube(VkCommandBuffer cmd, VkImage image, uint32_t dim,
         auto mipWidth = static_cast<int32_t>(dim);
         auto mipHeight = static_cast<int32_t>(dim);
         for (uint32_t i = 1; i < mipLevels; ++i) {
-            transition_image_subresource(
+            gpu_image_mipmap::transition_image_subresource(
                 cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, i - 1, 1, face, 1);
-            transition_image_subresource(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
-                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                         i, 1, face, 1);
+            gpu_image_mipmap::transition_image_subresource(
+                cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, i, 1, face, 1);
 
             VkImageBlit blit {};
             blit.srcOffsets[0] = { 0, 0, 0 };
@@ -264,17 +88,17 @@ void generate_mipmaps_cube(VkCommandBuffer cmd, VkImage image, uint32_t dim,
                            image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                            &blit, VK_FILTER_LINEAR);
 
-            transition_image_subresource(
+            gpu_image_mipmap::transition_image_subresource(
                 cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, i - 1, 1, face, 1);
 
             mipWidth = std::max(1, mipWidth / 2);
             mipHeight = std::max(1, mipHeight / 2);
         }
-        transition_image_subresource(cmd, image,
-                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                     mipLevels - 1, 1, face, 1);
+        gpu_image_mipmap::transition_image_subresource(
+            cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels - 1, 1, face,
+            1);
     }
 }
 
@@ -393,11 +217,10 @@ bool Texture::create_from_ktx_file(const Context &ctx, const char *filePath,
  * 6. 转换为 SHADER_READ_ONLY
  *
  * @note
- * 使用 one-time command buffer 提交
+ * 使用 `CommandPool::submit_one_shot` 提交并等待完成
  *
  * @warning
- * - 使用 vkQueueWaitIdle（简单但低效）
- * - 实际项目建议用 fence / async
+ * - 同步方式简单但低效；大量上传时可改为 fence / 异步
  */
 bool Texture::create_from_pixels_(const Context &ctx, const void *data,
                                   size_t imageSizeBytes, uint32_t texWidth,
@@ -409,18 +232,17 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
         return false;
     }
 
-    mipLevels_ = doMipmaps ? calculate_mip_levels(texWidth, texHeight) : 1U;
+    mipLevels_ =
+        doMipmaps ? gpu_image_mipmap::calculate_mip_levels(texWidth, texHeight)
+                  : 1U;
     format_ = format;
     width_ = texWidth;
     height_ = texHeight;
     device_ = ctx.device();
     vma_allocator_ = vma;
 
-    // Staging buffer
-    // TODO: 换成专用的 Staging buffer
-    Buffer staging;
-    BufferCreateInfo stagingInfo { imageSizeBytes, BufferUsage::Staging, true };
-    if (!staging.create(ctx, stagingInfo)) {
+    StagingBuffer staging;
+    if (!staging.create(ctx, imageSizeBytes)) {
         return false;
     }
     staging.upload(data, imageSizeBytes);
@@ -474,57 +296,40 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
         return false;
     }
 
-    // One-shot command buffer: copy + mipmaps
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-    if (buffers.empty()) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+            gpu_image_mipmap::transition_image_layout(
+                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, mipLevels_);
+
+            VkBufferImageCopy region {};
+            region.bufferOffset = 0;
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = 0;
+            region.imageSubresource.baseArrayLayer = 0;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset = { .x = 0, .y = 0, .z = 0 };
+            region.imageExtent = { .width = texWidth,
+                                   .height = texHeight,
+                                   .depth = 1 };
+
+            vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                   &region);
+
+            if (mipLevels_ > 1) {
+                gpu_image_mipmap::generate_mipmaps(cmd, image_, texWidth,
+                                                   texHeight, mipLevels_);
+            } else {
+                gpu_image_mipmap::transition_image_layout(
+                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1);
+            }
+        })) {
         destroy_();
         return false;
     }
-    VkCommandBuffer cmd = buffers[0];
-
-    VkCommandBufferBeginInfo beginInfo {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-    };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    transition_image_layout(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-                            mipLevels_);
-
-    VkBufferImageCopy region {};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = { 0, 0, 0 };
-    region.imageExtent = { texWidth, texHeight, 1 };
-
-    vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    if (mipLevels_ > 1) {
-        generate_mipmaps(cmd, image_, texWidth, texHeight, mipLevels_);
-    } else {
-        transition_image_layout(cmd, image_,
-                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1);
-    }
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(transferQueue);
-
-    cmdPool.free(buffers);
 
     return true;
 }
@@ -547,7 +352,8 @@ bool Texture::create(const Context &ctx, const ImageCreateInfo &info,
     format_ = info.format;
     mipLevels_ = info.mipLevels;
     if (info.generateMipmaps) {
-        mipLevels_ = calculate_mip_levels(info.width, info.height);
+        mipLevels_ =
+            gpu_image_mipmap::calculate_mip_levels(info.width, info.height);
     }
 
     VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -622,7 +428,7 @@ bool Texture::create_cubemap_from_rgba8_faces(
 
     const size_t face_bytes = static_cast<size_t>(faceSize) * faceSize * 4U;
     const size_t total_bytes = face_bytes * 6U;
-    mipLevels_ = calculate_mip_levels(faceSize, faceSize);
+    mipLevels_ = gpu_image_mipmap::calculate_mip_levels(faceSize, faceSize);
     format_ = format;
     width_ = faceSize;
     height_ = faceSize;
@@ -633,11 +439,8 @@ bool Texture::create_cubemap_from_rgba8_faces(
         return false;
     }
 
-    // TODO: 换成 StageBuffer
-    // 1. Upload image data to staging buffer
-    Buffer staging;
-    BufferCreateInfo stagingInfo { total_bytes, BufferUsage::Staging, true };
-    if (!staging.create(ctx, stagingInfo)) {
+    StagingBuffer staging;
+    if (!staging.create(ctx, total_bytes)) {
         return false;
     }
     std::vector<uint8_t> concat(total_bytes);
@@ -695,59 +498,41 @@ bool Texture::create_cubemap_from_rgba8_faces(
     }
 
     // 3. Copy buffer to image
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-    if (buffers.empty()) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+            gpu_image_mipmap::transition_image_subresource(
+                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0, 6);
+
+            for (uint32_t f = 0; f < 6; ++f) {
+                VkBufferImageCopy region {};
+                region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
+                region.bufferRowLength = 0;
+                region.bufferImageHeight = 0;
+                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.mipLevel = 0;
+                region.imageSubresource.baseArrayLayer = f;
+                region.imageSubresource.layerCount = 1;
+                region.imageOffset = { .x = 0, .y = 0, .z = 0 };
+                region.imageExtent = { .width = faceSize,
+                                       .height = faceSize,
+                                       .depth = 1 };
+
+                vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                       &region);
+            }
+
+            if (mipLevels_ > 1) {
+                generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
+            } else {
+                gpu_image_mipmap::transition_image_subresource(
+                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
+            }
+        })) {
         destroy_();
         return false;
     }
-    VkCommandBuffer cmd = buffers[0];
-
-    VkCommandBufferBeginInfo beginInfo {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-    };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0,
-                                 6);
-
-    for (uint32_t f = 0; f < 6; ++f) {
-        VkBufferImageCopy region {};
-        region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
-        region.bufferRowLength = 0;
-        region.bufferImageHeight = 0;
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.baseArrayLayer = f;
-        region.imageSubresource.layerCount = 1;
-        region.imageOffset = { 0, 0, 0 };
-        region.imageExtent = { faceSize, faceSize, 1 };
-
-        vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                               &region);
-    }
-
-    // 4. Need generater mipmaps?
-    if (mipLevels_ > 1) {
-        generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
-    } else {
-        transition_image_subresource(
-            cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
-    }
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(transferQueue);
-
-    cmdPool.free(buffers);
 
     if (!create_sampler_(ctx, samplerConfig)) {
         destroy_();
@@ -806,11 +591,8 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
         return false;
     }
 
-    // TODO: 使用 StageBuffer 替换
-    // Create staging buffer and upload data to buffer
-    Buffer staging;
-    BufferCreateInfo stagingInfo { staging_total, BufferUsage::Staging, true };
-    if (!staging.create(ctx, stagingInfo)) {
+    StagingBuffer staging;
+    if (!staging.create(ctx, staging_total)) {
         return false;
     }
     {
@@ -876,62 +658,44 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
         return false;
     }
 
-    // Copy buffer to image
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-    if (buffers.empty()) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+            gpu_image_mipmap::transition_image_subresource(
+                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, mipLevels_, 0, 6);
+
+            VkDeviceSize buffer_offset = 0;
+            for (uint32_t mip = 0; mip < mipLevels_; ++mip) {
+                const uint32_t fs = mip_levels[mip].face_size;
+                for (uint32_t f = 0; f < 6u; ++f) {
+                    VkBufferImageCopy region {};
+                    region.bufferOffset = buffer_offset;
+                    region.bufferRowLength = 0;
+                    region.bufferImageHeight = 0;
+                    region.imageSubresource.aspectMask =
+                        VK_IMAGE_ASPECT_COLOR_BIT;
+                    region.imageSubresource.mipLevel = mip;
+                    region.imageSubresource.baseArrayLayer = f;
+                    region.imageSubresource.layerCount = 1;
+                    region.imageOffset = { .x = 0, .y = 0, .z = 0 };
+                    region.imageExtent = { .width = fs,
+                                           .height = fs,
+                                           .depth = 1 };
+
+                    vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                           1, &region);
+                    buffer_offset += static_cast<VkDeviceSize>(fs) *
+                                     static_cast<VkDeviceSize>(fs) * 4u;
+                }
+            }
+
+            gpu_image_mipmap::transition_image_subresource(
+                cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, mipLevels_, 0, 6);
+        })) {
         destroy_();
         return false;
     }
-    VkCommandBuffer cmd = buffers[0];
-
-    VkCommandBufferBeginInfo beginInfo {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-    };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-                                 mipLevels_, 0, 6);
-
-    VkDeviceSize buffer_offset = 0;
-    for (uint32_t mip = 0; mip < mipLevels_; ++mip) {
-        const uint32_t fs = mip_levels[mip].face_size;
-        for (uint32_t f = 0; f < 6u; ++f) {
-            VkBufferImageCopy region {};
-            region.bufferOffset = buffer_offset;
-            region.bufferRowLength = 0;
-            region.bufferImageHeight = 0;
-            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            region.imageSubresource.mipLevel = mip;
-            region.imageSubresource.baseArrayLayer = f;
-            region.imageSubresource.layerCount = 1;
-            region.imageOffset = { 0, 0, 0 };
-            region.imageExtent = { fs, fs, 1 };
-
-            vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                   &region);
-            buffer_offset += static_cast<VkDeviceSize>(fs) *
-                             static_cast<VkDeviceSize>(fs) * 4u;
-        }
-    }
-
-    transition_image_subresource(
-        cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, mipLevels_, 0, 6);
-
-    vkEndCommandBuffer(cmd);
-
-    // Submit
-    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(transferQueue);
-
-    cmdPool.free(buffers);
 
     if (!create_sampler_(ctx, samplerConfig)) {
         destroy_();
@@ -959,7 +723,7 @@ bool Texture::create_cubemap_from_rgba32f_faces(
     const size_t face_bytes =
         static_cast<size_t>(faceSize) * faceSize * kBytesPerTexel;
     const size_t total_bytes = face_bytes * 6U;
-    mipLevels_ = calculate_mip_levels(faceSize, faceSize);
+    mipLevels_ = gpu_image_mipmap::calculate_mip_levels(faceSize, faceSize);
     format_ = VK_FORMAT_R32G32B32A32_SFLOAT;
     width_ = faceSize;
     height_ = faceSize;
@@ -970,9 +734,8 @@ bool Texture::create_cubemap_from_rgba32f_faces(
         return false;
     }
 
-    Buffer staging;
-    BufferCreateInfo stagingInfo { total_bytes, BufferUsage::Staging, true };
-    if (!staging.create(ctx, stagingInfo)) {
+    StagingBuffer staging;
+    if (!staging.create(ctx, total_bytes)) {
         return false;
     }
     std::vector<uint8_t> concat(total_bytes);
@@ -1027,58 +790,41 @@ bool Texture::create_cubemap_from_rgba32f_faces(
         return false;
     }
 
-    auto buffers = cmdPool.allocate(1, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-    if (buffers.empty()) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+            gpu_image_mipmap::transition_image_subresource(
+                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0, 6);
+
+            for (uint32_t f = 0; f < 6; ++f) {
+                VkBufferImageCopy region {};
+                region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
+                region.bufferRowLength = 0;
+                region.bufferImageHeight = 0;
+                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.mipLevel = 0;
+                region.imageSubresource.baseArrayLayer = f;
+                region.imageSubresource.layerCount = 1;
+                region.imageOffset = { .x = 0, .y = 0, .z = 0 };
+                region.imageExtent = { .width = faceSize,
+                                       .height = faceSize,
+                                       .depth = 1 };
+
+                vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
+                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                       &region);
+            }
+
+            if (mipLevels_ > 1) {
+                generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
+            } else {
+                gpu_image_mipmap::transition_image_subresource(
+                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
+            }
+        })) {
         destroy_();
         return false;
     }
-    VkCommandBuffer cmd = buffers[0];
-
-    VkCommandBufferBeginInfo beginInfo {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-    };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-
-    transition_image_subresource(cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0,
-                                 6);
-
-    for (uint32_t f = 0; f < 6; ++f) {
-        VkBufferImageCopy region {};
-        region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
-        region.bufferRowLength = 0;
-        region.bufferImageHeight = 0;
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.baseArrayLayer = f;
-        region.imageSubresource.layerCount = 1;
-        region.imageOffset = { 0, 0, 0 };
-        region.imageExtent = { faceSize, faceSize, 1 };
-
-        vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                               &region);
-    }
-
-    if (mipLevels_ > 1) {
-        generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
-    } else {
-        transition_image_subresource(
-            cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
-    }
-
-    vkEndCommandBuffer(cmd);
-
-    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-
-    vkQueueSubmit(transferQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(transferQueue);
-
-    cmdPool.free(buffers);
 
     if (!create_sampler_(ctx, samplerConfig)) {
         destroy_();

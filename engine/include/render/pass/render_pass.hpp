@@ -77,6 +77,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -275,7 +276,15 @@ public:
      */
     bool create_offscreen(VkDevice device, VkRenderPass renderPass,
                           uint32_t width, uint32_t height,
-                          const std::vector<VkImageView> &attachments);
+                          std::span<const VkImageView> attachments);
+
+    bool create_offscreen(VkDevice device, VkRenderPass renderPass,
+                          uint32_t width, uint32_t height,
+                          const std::vector<VkImageView> &attachments) {
+        return create_offscreen(device, renderPass, width, height,
+                                std::span<const VkImageView>(
+                                    attachments.data(), attachments.size()));
+    }
 
     /**
      * @brief 销毁 Framebuffer

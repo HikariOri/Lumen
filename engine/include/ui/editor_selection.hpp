@@ -12,8 +12,6 @@ namespace ui {
 
 struct EditorSelection {
     ::entt::entity entity { ::entt::null };
-    /// Inspector / 材质路径「应用」后由 main 重载 GPU 贴图并清回 false
-    bool material_texture_reload_requested { false };
     /// 环境面板「应用目录」或「程序化」后由 main 重载立方体并清回 false
     bool environment_cubemap_reload_requested { false };
 };

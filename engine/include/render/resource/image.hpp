@@ -37,6 +37,7 @@ namespace lumen {
 namespace render {
 
 class Context;
+class CommandPool;
 
 /**
  * @enum ImageType
@@ -175,20 +176,19 @@ public:
     bool create(const Context &ctx, const ImageCreateInfo &info);
 
     /**
-     * @brief 从文件加载纹理
+     * @brief 从文件加载 2D 纹理（RGBA8 → SRGB）
      *
      * @param ctx Vulkan 上下文
      * @param filePath 图片路径
+     * @param transferQueue 与 cmdPool 队列族一致的队列（通常为 graphics）
+     * @param cmdPool 用于录制上传与 mipmap 命令
      * @return 成功返回 true
      *
      * @details
-     * 典型流程：
-     * - CPU 加载像素数据
-     * - 创建 staging buffer
-     * - 拷贝到 VkImage
-     * - 转换 layout → SHADER_READ_ONLY_OPTIMAL
+     * Staging → copy → 生成完整 mip 链 → layout 为 SHADER_READ_ONLY_OPTIMAL。
      */
-    bool create_from_file(const Context &ctx, const char *filePath);
+    bool create_from_file(const Context &ctx, const char *filePath,
+                          VkQueue transferQueue, CommandPool &cmdPool);
 
     /**
      * @brief 创建深度附件 Image

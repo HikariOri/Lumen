@@ -13,12 +13,22 @@
 
 #include <vulkan/vulkan.h>
 
+#include "vertex_attribute_format.hpp"
+
 namespace lumen {
 namespace render {
 
 class Context;
 class DescriptorSetLayout;
 class RenderPass;
+
+/**
+ * @brief 顶点缓冲绑定步进方式（对应 VkVertexInputRate）
+ */
+enum class VertexInputRate {
+    PerVertex,   ///< 每个顶点推进一次（VK_VERTEX_INPUT_RATE_VERTEX）
+    PerInstance, ///< 每个实例推进一次（VK_VERTEX_INPUT_RATE_INSTANCE）
+};
 
 /// 着色器阶段
 struct ShaderStage {
@@ -31,20 +41,20 @@ struct ShaderStage {
 struct VertexInputBinding {
     uint32_t binding { 0 };
     uint32_t stride { 0 };
-    VkVertexInputRate inputRate { VK_VERTEX_INPUT_RATE_VERTEX };
+    VertexInputRate inputRate { VertexInputRate::PerVertex };
 };
 
-/// 顶点属性
+/// 顶点属性（`format` 决定 VkFormat；矩阵类会占用连续多个 location）
 struct VertexInputAttribute {
     uint32_t location { 0 };
     uint32_t binding { 0 };
-    VkFormat format { VK_FORMAT_R32G32B32_SFLOAT };
+    VertexAttributeFormat format { VertexAttributeFormat::F32Vec3 };
     uint32_t offset { 0 };
 };
 
 /// 图形管线配置
 struct GraphicsPipelineConfig {
-    std::vector<ShaderStage> stages {};
+    std::vector<ShaderStage> shaderStages {};
     std::vector<VertexInputBinding> vertexBindings {};
     std::vector<VertexInputAttribute> vertexAttributes {};
     VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
@@ -153,6 +163,15 @@ public:
      */
     bool create(const Context &ctx, VkPipelineLayout pipelineLayout,
                 VkRenderPass renderPass, uint32_t subpassIndex,
+                const GraphicsPipelineConfig &config,
+                VkPipelineCache cache = VK_NULL_HANDLE);
+
+    /**
+     * @brief 同 `create`（`VkPipelineLayout` /
+     * `VkRenderPass`），传入封装对象即可
+     */
+    bool create(const Context &ctx, const PipelineLayout &pipelineLayout,
+                const RenderPass &renderPass, uint32_t subpassIndex,
                 const GraphicsPipelineConfig &config,
                 VkPipelineCache cache = VK_NULL_HANDLE);
 

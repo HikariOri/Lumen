@@ -1,0 +1,11 @@
+Model Information:
+* title:	Mytrha
+* source:	https://sketchfab.com/3d-models/mytrha-c68d9dd9ceec41e0a4224466e5f3dd2e
+* author:	mega mix (https://sketchfab.com/oscar3dmodel)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Mytrha" (https://sketchfab.com/3d-models/mytrha-c68d9dd9ceec41e0a4224466e5f3dd2e) by mega mix (https://sketchfab.com/oscar3dmodel) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

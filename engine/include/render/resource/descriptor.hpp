@@ -8,10 +8,13 @@
  * - 写入函数：封装 UBO / Image 绑定更新逻辑
  *
  * 本模块是 CPU ↔ GPU 资源绑定的核心桥梁
+ *
+ * @todo 支持 buffer 和 image 写入同一个 pool
  */
 
 #pragma once
 
+#include <initializer_list>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -169,10 +172,39 @@ private:
 };
 
 /**
+ * @brief 批量更新中的一项：UBO / SSBO 等 buffer 类 binding
+ */
+struct DescriptorWriteBuffer {
+    uint32_t binding { 0 };
+    VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+    VkBuffer buffer { VK_NULL_HANDLE };
+    size_t offset { 0 };
+    size_t range { 0 };
+};
+
+/**
+ * @brief 批量更新中的一项：`COMBINED_IMAGE_SAMPLER` binding
+ */
+struct DescriptorWriteImage {
+    uint32_t binding { 0 };
+    VkImageView imageView { VK_NULL_HANDLE };
+    VkSampler sampler { VK_NULL_HANDLE };
+    VkImageLayout imageLayout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+};
+
+/**
+ * @brief 对同一 DescriptorSet 批量写入，单次 vkUpdateDescriptorSets
+ *
+ * 同一 set 上既有 buffer 又有 image 时应优先用本函数，避免多次驱动入口。
+ */
+void write_descriptor_set(VkDevice device, VkDescriptorSet set,
+                          std::initializer_list<DescriptorWriteBuffer> buffers,
+                          std::initializer_list<DescriptorWriteImage> images);
+
+/**
  * @brief 写入 Buffer（UBO / SSBO）到 DescriptorSet
  *
- * 本质：
- * vkUpdateDescriptorSets → VkWriteDescriptorSet(VkDescriptorBufferInfo)
+ * 单 binding 便捷封装；同 set 多 binding 请用 write_descriptor_set。
  */
 void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
                              uint32_t binding, VkDescriptorType type,
@@ -181,13 +213,7 @@ void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
 /**
  * @brief 写入 Image + Sampler 到 DescriptorSet
  *
- * 常用于：
- * - 2D Texture
- * - Cube Map
- * - IBL
- *
- * Vulkan API：
- * vkUpdateDescriptorSets → VkDescriptorImageInfo
+ * 单 binding 便捷封装；同 set 多 binding 请用 write_descriptor_set。
  */
 void write_descriptor_image(
     VkDevice device, VkDescriptorSet set, uint32_t binding,

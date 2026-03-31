@@ -306,10 +306,11 @@ bool Framebuffer::create(VkDevice device, VkRenderPass renderPass,
 /**
  * @brief 创建离屏 Framebuffer
  */
-bool Framebuffer::create_offscreen(
-    VkDevice device, VkRenderPass renderPass, uint32_t width, uint32_t height,
-    const std::vector<VkImageView> &attachments) {
+bool Framebuffer::create_offscreen(VkDevice device, VkRenderPass renderPass,
+                                   uint32_t width, uint32_t height,
+                                   std::span<const VkImageView> attachments) {
 
+    destroy_();
     device_ = device;
 
     VkFramebufferCreateInfo createInfo {
@@ -322,12 +323,20 @@ bool Framebuffer::create_offscreen(
     createInfo.height = height;
     createInfo.layers = 1;
 
-    framebuffers_.resize(1);
-
+    VkFramebuffer fb = VK_NULL_HANDLE;
     VkResult result =
-        vkCreateFramebuffer(device, &createInfo, nullptr, &framebuffers_[0]);
+        vkCreateFramebuffer(device, &createInfo, nullptr, &fb);
 
-    return result == VK_SUCCESS;
+    if (result != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("Framebuffer 离屏创建失败 result={}",
+                        static_cast<int>(result));
+        destroy_();
+        device_ = VK_NULL_HANDLE;
+        return false;
+    }
+
+    framebuffers_.push_back(fb);
+    return true;
 }
 
 /**

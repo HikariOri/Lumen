@@ -1,152 +1,150 @@
 # 事件与输入系统
 
-> 平台无关的事件模型 + SDL3 实现，支持 ImGui 分层输入，提供键盘、鼠标、窗口事件与输入状态查询。
+> 平台无关的事件负载（`std::variant`）+ SDL3 轮询；对齐 **Hazel** 的 `EventDispatcher`、`Handled`、Overlay / Layer 顺序与 ImGui 阻塞规则。
 
 ## 1. 架构概览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           应用层 (Application)                            │
-│  EventPump pump; imgui_setup_event_pump(pump); pump.on_key_down(...)     │
-│  while (pump.poll()) { if (!imgui_wants_any_input()) game_logic(); }     │
+│  应用层：set_on_application_event → ImGuiLayer::attach → push_layer；poll │
+│  层内：EventDispatcher d(de); d.dispatch<EventKeyDown>(...);              │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│  分层输入：SDL 事件 → [ImGui 处理] → [平台 EventPump] → 回调 + Input       │
-│  ui/input_bridge: imgui_process_sdl_event, imgui_wants_mouse/keyboard    │
+│  每条平台 Event：SDL 钩子 → 转 Event + 更新 Input → 应用回调 → Overlay 链   │
+│  若 handled，不再向后续 Overlay/Layer 传递（对齐 Hazel）                   │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│  platform: EventPump │ Input │ Event (variant)                           │
-│  add_sdl_event_handler(imgui_process_sdl_event) → 事件先给 ImGui         │
+│  ui/ImGuiLayer：SDL→ImGui、OnEvent（WantCapture → handled）                 │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────────────┐
-│  SDL3: SDL_PollEvent, SDL_GetKeyboardState, ...                          │
+│  SDL3：SDL_PollEvent、SDL_GetKeyboardState、…                              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **event.hpp**：平台无关的事件类型、KeyCode、Modifier、MouseButton
-- **input.hpp**：输入状态（按键、鼠标位置、delta）
-- **event_pump.hpp/cpp**：事件轮询、多路 SDL 回调、Input 更新、应用回调分发
-- **ui/input_bridge.hpp**：SDL→ImGui 事件转发、`imgui_wants_*` 查询
+- **event.hpp**：`Event`（variant）、KeyCode、Modifier、MouseButton
+- **event_dispatcher.hpp / .cpp**：`DispatchableEvent`、`EventDispatcher`、`EventCategory`、`event_categories`
+- **event_pump.hpp / .cpp**：`EventPump`（`poll`、`set_on_application_event`、`push_overlay`、`push_layer`、`Input`）
+- **ui/imgui_layer.hpp**：`ImGuiLayer`（`attach`、`begin_frame`、`end_frame`、`on_event`）、`imgui_wants_*`
 
 ## 2. 文件结构
 
 ```
 engine/
 ├── include/platform/
-│   ├── event.hpp       # 事件类型、KeyCode、Modifier、MouseButton
-│   ├── event_debug.hpp # 输入调试（add_input_debug_handler）
-│   ├── event_pump.hpp  # EventPump（轮询、多路 SDL 回调、分发）
-│   └── input.hpp       # Input 状态
+│   ├── event.hpp              # 事件类型、KeyCode、Modifier、MouseButton
+│   ├── event_dispatcher.hpp   # DispatchableEvent、EventDispatcher、分类掩码
+│   ├── event_debug.hpp        # add_input_debug_handler
+│   ├── event_pump.hpp         # EventPump
+│   └── input.hpp              # Input
 ├── include/ui/
-│   └── input_bridge.hpp  # ImGui 输入桥接
+│   └── imgui_layer.hpp
 └── src/
     ├── platform/
     │   ├── event_debug.cpp
+    │   ├── event_dispatcher.cpp
     │   ├── event_pump.cpp
     │   ├── event_utils.cpp
     │   └── input.cpp
     └── ui/
-        └── input_bridge.cpp
+        └── imgui_layer.cpp
 ```
 
 ## 3. 事件类型
 
 | 事件 | 结构体 | 说明 |
 |------|--------|------|
-| Quit | `EventQuit` | 退出请求（SDL_QUIT / 窗口关闭） |
+| Quit | `EventQuit` | 退出（`SDL_QUIT` / 窗口关闭请求） |
 | 键盘 | `EventKeyDown`, `EventKeyUp` | key, repeat, mods |
 | 鼠标按键 | `EventMouseButtonDown`, `EventMouseButtonUp` | button, x, y |
 | 鼠标移动 | `EventMouseMove` | x, y, deltaX, deltaY |
 | 滚轮 | `EventMouseWheel` | deltaX, deltaY |
-| 窗口 | `EventWindowResize` | width, height |
+| 窗口 | `EventWindowResize` 等 | width / height 或状态 |
 
-所有事件统一为 `std::variant<...>`，即 `Event` 类型。
+负载类型为 `Event`（`std::variant<...>`）。
 
-## 4. SDL 事件与 ImGui 分层
+## 4. Hazel 式层链与 ImGui
 
-### 4.1 处理流程
+### 4.1 `poll()` 内顺序
 
-每帧 `poll()` 内部：
+1. `SDL_PollEvent`
+2. 依次调用 `sdl_event_handlers_`（含 `ImGui_ImplSDL3_ProcessEvent`）
+3. 将 SDL 事件转为 `Event`，更新 `Input`
+4. 对每条 `Event` 构造 `DispatchableEvent`，先调用 **`set_on_application_event`**（对齐 Hazel `Application::OnEvent` 里先于 Layer 栈的 `Dispatch`）
+5. 若仍未 `handled`，再自前向后遍历 **Overlay / Layer** 栈；任一层置 `handled` 后停止向下传递
 
-1. `SDL_PollEvent` 取事件
-2. **先**调用所有 `sdl_event_handlers_`（含 ImGui）→ 事件先到 ImGui
-3. 平台转换事件、更新 Input、dispatch 应用回调
+### 4.2 Overlay / Layer 顺序
 
-因此 ImGui 与 SDL 输入系统是**分层**的：同一条 SDL 事件既给 ImGui，也用于平台 Input 和回调。
+- `push_overlay(fn)`：插在**队首**，最先收到事件（对应 Hazel **Overlay**；`ImGuiLayer::attach` 会注册 ImGui 的 Overlay）。
+- `push_layer(fn)`：追加在**队尾**（对应 **Layer**）。
 
-### 4.2 注册 ImGui 事件处理
+推荐顺序：`pump.set_on_application_event(...)`（窗口关闭、resize 等）→ `imgui_layer.attach(pump)` → `pump.push_layer(...)`（游戏输入）。
+
+### 4.3 `ImGuiLayer`（对齐 Hazel `ImGuiLayer`）
 
 ```cpp
-#include "ui/input_bridge.hpp"
+#include "ui/imgui_layer.hpp"
 
 // 在 imgui_backend_init 之后
-lumen::ui::imgui_setup_event_pump(pump);
+lumen::ui::ImGuiLayer imgui_layer;
+imgui_layer.attach(pump);
 ```
 
-等价于 `pump.add_sdl_event_handler(lumen::ui::imgui_process_sdl_event)`。
+`attach` 会：`add_sdl_event_handler(imgui_process_sdl_event)` + `push_overlay`（`on_event` 内按 `WantCapture*` 写 `handled`）。同一 `ImGuiLayer` 实例勿重复 `attach`。`set_block_events(false)` 对应 Hazel `m_BlockEvents == false`。
 
-### 4.3 游戏输入过滤（WantCapture）
+渲染帧范围（对齐 Hazel `Begin` / `End`）：
 
-ImGui 有焦点或悬停在控件上时，游戏逻辑应**忽略**对应输入。使用 `imgui_wants_*`：
+```
+imgui_layer.begin_frame();
+// 此处写 ImGui::Begin / End（等同各层 OnImGuiRender）
+imgui_layer.end_frame(cmd);  // 须在 swapchain RenderPass 内
+```
+
+### 4.4 `set_on_application_event`（对齐 Hazel `Application::OnEvent` 前缀）
 
 ```cpp
-#include "ui/input_bridge.hpp"
-
-// 仅鼠标（相机、拖拽等）
-if (!lumen::ui::imgui_wants_mouse()) {
-    if (pump.input().is_mouse_button_down(lumen::platform::MouseButton::Right))
-        orbit_camera(pump.input().mouse_delta_x(), ...);
-}
-
-// 仅键盘（WASD 等）
-if (!lumen::ui::imgui_wants_keyboard()) {
-    if (pump.input().is_key_down(lumen::platform::Key::W))
-        camera.move_forward();
-}
-
-// 任一输入
-if (!lumen::ui::imgui_wants_any_input()) {
-    // 统一跳过游戏逻辑
-}
-```
-
-**注意**：`imgui_wants_*` 在 `imgui_backend_new_frame()` 之后才有意义，且通常在渲染 ImGui 之前。主循环顺序应为：
-
-```
-poll() → imgui_backend_new_frame() → [可选 resize] → 游戏逻辑（检查 wants_*）→ 渲染 3D → 渲染 ImGui → imgui_backend_render()
-```
-
-### 4.4 多路 SDL 回调
-
-- `on_sdl_event(f)`：**替换**所有 SDL 回调（仅保留 f）
-- `add_sdl_event_handler(f)`：**追加**，不覆盖已有回调
-
-若需 ImGui + 自定义逻辑：
-
-```cpp
-lumen::ui::imgui_setup_event_pump(pump);  // 先加 ImGui
-pump.add_sdl_event_handler([](const void* ev) {
-    // 自定义 SDL 事件处理
+pump.set_on_application_event([&](lumen::platform::DispatchableEvent& de) {
+    lumen::platform::EventDispatcher d(de);
+    d.dispatch<lumen::platform::EventWindowResize>(
+        [&](lumen::platform::EventWindowResize& r) {
+            fbWidth = r.width;
+            fbHeight = r.height;
+            needRecreateSwapchain = true;
+            return false;
+        });
+    d.dispatch<lumen::platform::EventQuit>([&](lumen::platform::EventQuit&) {
+        running = false;
+        return true;
+    });
 });
 ```
 
-或手动组合：
+`dispatch` 仅在与 `de.event` 中实际类型匹配时调用处理器；处理器返回 `bool` 时会 **`|=`** 合并到 `handled`。
 
-```cpp
-pump.on_sdl_event([](const void* ev) {
-    lumen::ui::imgui_process_sdl_event(ev);
-    my_sdl_handler(ev);
-});
+### 4.5 每帧 `Input` 与 `imgui_wants_*`
+
+ImGui 占用鼠标/键盘时，Overlay 可能已将对应平台事件标为 `handled`，游戏 **Layer 可能收不到**。对直接读 `pump.input()` 的逻辑，仍可用 `imgui_wants_mouse()` 等。
+
+`imgui_wants_*` 在 **`ImGuiLayer::begin_frame()`**（内部 `NewFrame`）之后才有完整语义。主循环顺序建议对齐 Hazel `Run`：
+
 ```
+poll() → 游戏 OnUpdate（逻辑、相机）→ begin_frame() → 构建 UI → 3D 渲染 → RenderPass 内 end_frame(cmd)
+```
+
+### 4.6 多路 SDL 回调
+
+- `on_sdl_event(f)`：清空后只保留 `f`
+- `add_sdl_event_handler(f)`：追加
+
+`ImGuiLayer::attach` 已 `add_sdl_event_handler`；自定义 SDL 处理请在 **`attach` 之后** 再 `add_sdl_event_handler`。
 
 ## 5. KeyCode 与 Modifier
 
-- **KeyCode**：物理扫描码（与 SDL_Scancode 一致），与键盘布局无关
-- **Key 命名空间**：`Key::W`, `Key::A`, `Key::Escape`, `Key::Space` 等
-- **Modifier**：`Shift`, `Ctrl`, `Alt`, `Gui`，支持 `|` 组合，`has_modifier(mask, m)` 检查
+- **KeyCode**：物理扫描码（与 SDL_Scancode 一致）
+- **Key 命名空间**：`Key::W`、`Key::Escape` 等
+- **Modifier**：`Shift`、`Ctrl`、`Alt`、`Gui`，`has_modifier` 等
 
 ## 6. 基本用法（无 ImGui）
 
@@ -156,22 +154,30 @@ pump.on_sdl_event([](const void* ev) {
 lumen::platform::EventPump pump;
 bool running = true;
 
-pump.on_quit([&] { running = false; });
-pump.on_key_down([&](const lumen::platform::EventKeyDown& e) {
-    if (e.key == lumen::platform::Key::Escape)
+pump.push_layer([&](lumen::platform::DispatchableEvent& de) {
+    lumen::platform::EventDispatcher d(de);
+    d.dispatch<lumen::platform::EventQuit>([&](lumen::platform::EventQuit&) {
         running = false;
-});
-pump.on_window_resize([&](const lumen::platform::EventWindowResize& r) {
-    fbWidth = r.width;
-    fbHeight = r.height;
-    needRecreateSwapchain = true;
+        return false;
+    });
+    d.dispatch<lumen::platform::EventKeyDown>([&](lumen::platform::EventKeyDown& e) {
+        if (e.key == lumen::platform::Key::Escape)
+            running = false;
+        return false;
+    });
+    d.dispatch<lumen::platform::EventWindowResize>(
+        [&](lumen::platform::EventWindowResize& r) {
+            fbWidth = r.width;
+            fbHeight = r.height;
+            needRecreateSwapchain = true;
+            return false;
+        });
 });
 
 while (running && pump.poll()) {
     const auto& input = pump.input();
     if (input.is_key_down(lumen::platform::Key::W))
         camera.move_forward();
-    // 渲染...
 }
 ```
 
@@ -180,29 +186,36 @@ while (running && pump.poll()) {
 ```cpp
 #include "platform/event_pump.hpp"
 #include "ui/imgui_backend.hpp"
-#include "ui/input_bridge.hpp"
+#include "ui/imgui_layer.hpp"
 
-// ImGui 初始化
 lumen::ui::imgui_backend_init(imguiInfo);
-lumen::ui::imgui_setup_event_pump(pump);
 
-pump.on_quit([&] { running = false; });
-pump.on_mouse_wheel([&](const lumen::platform::EventMouseWheel& e) {
-    if (!lumen::ui::imgui_wants_mouse())
-        zoom(e.deltaY);
+lumen::ui::ImGuiLayer imgui_layer;
+imgui_layer.attach(pump);
+
+pump.set_on_application_event([&](lumen::platform::DispatchableEvent& de) {
+    lumen::platform::EventDispatcher d(de);
+    d.dispatch<lumen::platform::EventQuit>([&](lumen::platform::EventQuit&) {
+        running = false;
+        return true;
+    });
+});
+
+pump.push_layer([&](lumen::platform::DispatchableEvent& de) {
+    lumen::platform::EventDispatcher d(de);
+    d.dispatch<lumen::platform::EventMouseWheel>(
+        [&](lumen::platform::EventMouseWheel& e) {
+            if (!lumen::ui::imgui_wants_mouse())
+                zoom(e.deltaY);
+            return false;
+        });
 });
 
 while (running && pump.poll()) {
-    lumen::ui::imgui_backend_new_frame();
-    // ...
-    const auto& inp = pump.input();
-    if (!lumen::ui::imgui_wants_any_input()) {
-        if (inp.is_key_down(lumen::platform::Key::W)) move_forward();
-        if (inp.is_mouse_button_down(lumen::platform::MouseButton::Right))
-            orbit(inp.mouse_delta_x(), inp.mouse_delta_y());
-    }
-    // 渲染 3D + ImGui
-    lumen::ui::imgui_backend_render(cmd);
+    // 与 Hazel 一致：Update 之后再 Begin
+    imgui_layer.begin_frame();
+    // ImGui::Begin / End …
+    imgui_layer.end_frame(cmd);
 }
 ```
 
@@ -211,13 +224,12 @@ while (running && pump.poll()) {
 | 方法 | 说明 |
 |------|------|
 | `is_key_down(KeyCode)` | 按键是否按下 |
-| `mouse_x()`, `mouse_y()` | 鼠标位置（窗口坐标） |
-| `mouse_delta_x()`, `mouse_delta_y()` | 本帧鼠标位移 |
-| `is_mouse_button_down(MouseButton)` | 鼠标按钮是否按下 |
-| `modifiers()` | 当前修饰键 |
-| `has_shift()`, `has_ctrl()`, `has_alt()` | 修饰键快捷检查 |
+| `mouse_x()`, `mouse_y()` | 鼠标位置 |
+| `mouse_delta_x()`, `mouse_delta_y()` | 本帧位移 |
+| `is_mouse_button_down(MouseButton)` | 鼠标键 |
+| `modifiers()`、`has_shift()` 等 | 修饰键 |
 
-**注意**：Input 仅在 `poll()` 之后有效，每帧由 EventPump 更新。
+`Input` 在每次 `poll()` 末尾更新。
 
 ## 9. 名称查询
 
@@ -232,52 +244,39 @@ lumen::platform::modifier_name(Modifier::Shift);
 
 ### 10.1 调用顺序
 
-- **必须在 Window 创建之后** 调用 `poll()`
-- 每帧**只调用一次** `poll()`，在渲染逻辑之前
+- 在 Window 创建且 `SDL_Init` 已执行后使用 `poll()`
+- 每帧通常调用一次 `poll()`，放在帧逻辑最前
 
-### 10.2 回调执行时机
+### 10.2 退出
 
-- `on_quit`：收到 Quit 时立即调用，随后 `poll()` 返回 false
-- 其余回调：在 `poll()` 内部、事件处理完成后统一 `dispatch_` 调用
+- `EventQuit` 经层链分发后，`poll()` 返回 `false`。应在 `push_layer` 内 `dispatch<EventQuit>` 设置 `running = false` 等资源清理（引擎不再提供 `on_quit`）。
 
 ### 10.3 线程安全
 
-- EventPump 非线程安全，应在主线程使用
+- `EventPump` 非线程安全，主线程使用
 
-### 10.4 键重复 (Key Repeat)
+### 10.4 键重复
 
-- `EventKeyDown` 的 `repeat` 为 true 表示系统按键重复，非首次按下
+- `EventKeyDown::repeat == true` 表示系统重复键
 
 ### 10.5 相对鼠标模式
 
-启用 `SDL_SetWindowRelativeMouseMode` 前，应先检查 `imgui_wants_mouse()`，避免在 ImGui 控件上拖拽时误启相对模式。详见 [../design/imgui-integration.md](../design/imgui-integration.md)。
+相对鼠标模式请用 `Window::set_relative_mouse_mode`；启用前结合 `imgui_wants_mouse()`，见 [../design/imgui-integration.md](../design/imgui-integration.md)。
 
-## 11. Window::poll_events 兼容
+## 11. `Window::poll_events`
 
-`Window::poll_events()` 内部创建临时 EventPump 并调用 `poll()`，仅用于“轮询直到退出”的简单场景。需要回调或 Input 查询时，应直接使用 EventPump。
+内部临时 `EventPump::poll()`，无层回调。需要 `EventDispatcher` / `Input` 时请自建 `EventPump`。
 
 ## 12. 输入调试
-
-需要观察鼠标键盘事件及 ImGui 捕获状态时，可使用 `event_debug.hpp`：
 
 ```cpp
 #include "platform/event_debug.hpp"
 
-// 需在 imgui_setup_event_pump 之后调用（若使用 ImGui）
+// 若使用 ImGui，在 ImGuiLayer::attach 之后
 lumen::platform::add_input_debug_handler(pump);
 ```
 
-输出示例：
-
-- `Input KeyDown: W repeat=0 [ImGui: game]` — 键盘事件，由游戏处理
-- `Input MouseButtonDown: Left at (120.0, 340.0) [ImGui: capture]` — 鼠标在 ImGui 控件上，被 ImGui 捕获
-- `Input MouseWheel: delta=(0.0, 1.0) [ImGui: game]` — 滚轮在 3D 视口，由游戏处理
-
-`[ImGui: capture]` 表示该帧 WantCapture 为 true，游戏逻辑应忽略该输入；`[ImGui: game]` 表示由游戏处理。日志输出到 `logs/engine.log`，Release 下无输出。
-
 ## 13. 扩展
 
-- 新增事件类型：在 `event.hpp` 增加结构体，并加入 `Event` variant、`dispatch_` 和 `event_type_name`
-- 新增回调：在 EventPump 增加 `on_xxx` 与对应 `xxxFn` 类型
-- 多后端：若需支持其他窗口库，可新增对应 `event_pump_xxx.cpp`
-
+- 新事件类型：改 `event.hpp` 的 variant、`event_pump.cpp` 的转换、`event_dispatcher.cpp` 的 `event_categories`、`event_type_name` 等
+- 多窗口库：可另做 `event_pump_*.cpp`，保持 `Event` + `DispatchableEvent` 接口
