@@ -138,12 +138,12 @@ enum class LightType : std::uint8_t {
  * `light.cpp`）。
  */
 struct DirectionalLightComponent {
-    glm::vec3 radiance { 1.0f, 1.0f, 1.0f }; ///< 线性空间颜色
-    float intensity { 1.0f };                ///< 与 `radiance` 相乘的能量缩放
+    glm::vec3 radiance { 1.0F, 1.0F, 1.0F }; ///< 线性空间颜色
+    float intensity { 1.0F };                ///< 与 `radiance` 相乘的能量缩放
     bool castShadows { true };
     bool softShadows { true };
-    float lightSize { 0.5f };    ///< PCSS 等软阴影：光源面尺寸
-    float shadowAmount { 1.0f }; ///< 阴影贡献权重（1 为全强度）
+    float lightSize { 0.5F };    ///< PCSS 等软阴影：光源面尺寸
+    float shadowAmount { 1.0F }; ///< 阴影贡献权重（1 为全强度）
 };
 
 /**
@@ -153,14 +153,14 @@ struct DirectionalLightComponent {
  * 供衰减与打包 UBO 使用。
  */
 struct PointLightComponent {
-    glm::vec3 radiance { 1.0f, 1.0f, 1.0f };
-    float intensity { 1.0f };
-    float lightSize { 0.5f }; ///< 面光源近似尺寸（阴影滤波等）
-    float minRadius { 1.0f }; ///< 内球半径，缓解过近时的奇异衰减
-    float radius { 10.0f };   ///< 有效影响距离（打包进 `GPULight.params.x`）
+    glm::vec3 radiance { 1.0F, 1.0F, 1.0F };
+    float intensity { 1.0F };
+    float lightSize { 0.5F }; ///< 面光源近似尺寸（阴影滤波等）
+    float minRadius { 1.0F }; ///< 内球半径，缓解过近时的奇异衰减
+    float radius { 10.0F };   ///< 有效影响距离（打包进 `GPULight.params.x`）
     bool castShadows { true };
     bool softShadows { true };
-    float falloff { 1.0f }; ///< 距离衰减形状系数（着色器侧需配合使用）
+    float falloff { 1.0F }; ///< 距离衰减形状系数（着色器侧需配合使用）
 };
 
 /**
@@ -170,16 +170,16 @@ struct PointLightComponent {
  * `pack_lights_for_ubo`。
  */
 struct SpotLightComponent {
-    glm::vec3 radiance { 1.0f, 1.0f, 1.0f };
-    float intensity { 1.0f };
-    float range { 10.0f }; ///< 沿锥轴最大距离
-    float angle { 60.0f }; ///< 完整锥角（度），外半角为 `angle * 0.5`
+    glm::vec3 radiance { 1.0F, 1.0F, 1.0F };
+    float intensity { 1.0F };
+    float range { 10.0F }; ///< 沿锥轴最大距离
+    float angle { 60.0F }; ///< 完整锥角（度），外半角为 `angle * 0.5`
     float angleAttenuation {
-        5.0f
+        5.0F
     }; ///< 内外锥过渡锐度（越大越硬边，映射见 `light.cpp`）
     bool castShadows { false };
     bool softShadows { false };
-    float falloff { 1.0f }; ///< 距离衰减系数（着色器侧需配合使用）
+    float falloff { 1.0F }; ///< 距离衰减系数（着色器侧需配合使用）
 };
 
 /**
@@ -200,6 +200,12 @@ struct SkyLightComponent {
     /// 太阳方位与仰角（弧度或度由宿主约定）
     glm::vec3 turbidityAzimuthInclination { 2.0F, 0.0F, 0.0F };
 };
+
+struct MaterialComponent {};
+
+struct MeshComponent {};
+
+struct CameraCompoent {};
 
 } // namespace scene
 } // namespace lumen
