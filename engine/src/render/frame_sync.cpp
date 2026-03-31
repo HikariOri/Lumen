@@ -69,11 +69,7 @@ bool FrameSync::wait_fence(uint32_t frameIndex, uint64_t timeoutNs) {
     VkResult result = vkWaitForFences(device_, 1, &inFlightFences_[frameIndex],
                                       VK_TRUE, timeoutNs);
 
-    if (result == VK_TIMEOUT) {
-        LUMEN_LOG_DEBUG("Fence 等待超时");
-        return false;
-    }
-
+    // 有限超时用于轮询事件时，VK_TIMEOUT 是预期情况，勿刷日志。
     return result == VK_SUCCESS;
 }
 
@@ -83,6 +79,17 @@ bool FrameSync::reset_fence(uint32_t frameIndex) {
     }
     return vkResetFences(device_, 1, &inFlightFences_[frameIndex]) ==
            VK_SUCCESS;
+}
+
+bool FrameSync::recreate_in_flight_fence_signaled(uint32_t frameIndex) {
+    if (frameIndex >= inFlightFences_.size() || device_ == VK_NULL_HANDLE) {
+        return false;
+    }
+    vkDestroyFence(device_, inFlightFences_[frameIndex], nullptr);
+    VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    return vkCreateFence(device_, &fenceInfo, nullptr,
+                         &inFlightFences_[frameIndex]) == VK_SUCCESS;
 }
 
 VkSemaphore FrameSync::image_available(uint32_t imageIndex) const {

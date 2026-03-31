@@ -1,6 +1,7 @@
 /**
  * @file scene.hpp
- * @brief EnTT 场景封装：创建/销毁实体、父子关系（无环）、`IDComponent`（`core::ID`）
+ * @brief EnTT
+ * 场景封装：创建/销毁实体、父子关系（无环）、`IDComponent`（`core::ID`）
  */
 
 #pragma once
@@ -21,7 +22,8 @@ public:
     [[nodiscard]] const ::entt::registry &registry() const { return reg_; }
 
     /**
-     * @brief 创建实体并附加 IDComponent、Transform、TagComponent（默认单位矩阵）
+     * @brief 创建实体并附加
+     * IDComponent、Transform、TagComponent（默认单位矩阵）
      */
     [[nodiscard]] ::entt::entity
     create_entity(std::string_view name = "Entity");

@@ -15,20 +15,13 @@ namespace {
 
 ImVec4 level_color(spdlog::level::level_enum lvl) {
     switch (lvl) {
-    case spdlog::level::trace:
-        return ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
-    case spdlog::level::debug:
-        return ImVec4(0.65f, 0.75f, 0.95f, 1.0f);
-    case spdlog::level::info:
-        return ImVec4(0.90f, 0.90f, 0.90f, 1.0f);
-    case spdlog::level::warn:
-        return ImVec4(0.95f, 0.85f, 0.40f, 1.0f);
-    case spdlog::level::err:
-        return ImVec4(0.95f, 0.45f, 0.45f, 1.0f);
-    case spdlog::level::critical:
-        return ImVec4(0.98f, 0.35f, 0.65f, 1.0f);
-    default:
-        return ImVec4(0.80f, 0.80f, 0.80f, 1.0f);
+    case spdlog::level::trace: return ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
+    case spdlog::level::debug: return ImVec4(0.65f, 0.75f, 0.95f, 1.0f);
+    case spdlog::level::info: return ImVec4(0.90f, 0.90f, 0.90f, 1.0f);
+    case spdlog::level::warn: return ImVec4(0.95f, 0.85f, 0.40f, 1.0f);
+    case spdlog::level::err: return ImVec4(0.95f, 0.45f, 0.45f, 1.0f);
+    case spdlog::level::critical: return ImVec4(0.98f, 0.35f, 0.65f, 1.0f);
+    default: return ImVec4(0.80f, 0.80f, 0.80f, 1.0f);
     }
 }
 
@@ -49,8 +42,7 @@ spdlog::level::level_enum index_to_min_level(int idx) {
 LogPanel::LogPanel() = default;
 
 void LogPanel::on_imgui_render() {
-    ImGui::SetNextWindowSize(ImVec2(560.0f, 320.0f),
-                             ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 320.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Log")) {
         ImGui::End();
         return;
@@ -67,7 +59,7 @@ void LogPanel::on_imgui_render() {
         "Trace+", "Debug+", "Info+", "Warn+", "Error+", "Critical",
     };
     ImGui::Combo("Min level", &filter_min_level_, k_level_items,
-                  IM_ARRAYSIZE(k_level_items));
+                 IM_ARRAYSIZE(k_level_items));
 
     const spdlog::level::level_enum min_level =
         index_to_min_level(filter_min_level_);
@@ -76,7 +68,8 @@ void LogPanel::on_imgui_render() {
 
     ImGui::Separator();
     const float footer = ImGui::GetFrameHeightWithSpacing();
-    ImGui::BeginChild("log_scroller", ImVec2(0, -footer), ImGuiChildFlags_Border,
+    ImGui::BeginChild("log_scroller", ImVec2(0, -footer),
+                      ImGuiChildFlags_Border,
                       ImGuiWindowFlags_HorizontalScrollbar);
 
     for (const auto &line : lines) {

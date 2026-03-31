@@ -191,14 +191,14 @@ struct SpotLightComponent {
 struct SkyLightComponent {
     /// 环境资源路径（立方体贴图目录、HDR 等；空则回退全局或默认）
     std::string sceneEnvironment;
-    float intensity { 1.0f }; ///< 环境采样强度倍增
-    float lod { 0.0f };       ///< 环境贴图 mip 偏置或 LOD 选择
+    float intensity { 1.0F }; ///< 环境采样强度倍增
+    float lod { 0.0F };       ///< 环境贴图 mip 偏置或 LOD 选择
     bool dynamicSky {
         false
     }; ///< true 时使用 `turbidityAzimuthInclination` 驱动程序化天空
     /// `dynamicSky == true` 时：x 浑浊度，y/z
     /// 太阳方位与仰角（弧度或度由宿主约定）
-    glm::vec3 turbidityAzimuthInclination { 2.0f, 0.0f, 0.0f };
+    glm::vec3 turbidityAzimuthInclination { 2.0F, 0.0F, 0.0F };
 };
 
 } // namespace scene

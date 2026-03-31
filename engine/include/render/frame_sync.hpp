@@ -64,17 +64,27 @@ public:
      * @param timeoutNs 超时，UINT64_MAX 表示无限等待
      * @return true 表示已等到 signal
      *
-     * @note 不在此处 vkResetFences。若在随后路径中未执行 vkQueueSubmit（例如最小化后
-     * swapchain 不可呈现），围栏应保持已信号，否则下一帧同 frameIndex 会永久等超时。
+     * @note 不在此处 vkResetFences。若在随后路径中未执行
+     * vkQueueSubmit（例如最小化后 swapchain
+     * 不可呈现），围栏应保持已信号，否则下一帧同 frameIndex 会永久等超时。
      * 仅在即将提交队列前调用 reset_fence()。
      */
     bool wait_fence(uint32_t frameIndex, uint64_t timeoutNs = UINT64_MAX);
 
     /**
      * @brief 将 fence 复位为未信号，供下一次 vkQueueSubmit 使用
-     * @details 须在 wait_fence 成功之后、且本条路径会调用 vkQueueSubmit 时再调用。
+     * @details 须在 wait_fence 成功之后、且本条路径会调用 vkQueueSubmit
+     * 时再调用。
      */
     bool reset_fence(uint32_t frameIndex);
+
+    /**
+     * @brief 在 vkQueueSubmit 失败等异常后恢复 fence（须先 ctx.wait_idle）
+     *
+     * reset_fence 已成功但 submit 未执行时，fence 未信号，下一帧 wait 会卡死。
+     * 本函数销毁并以已信号样式重建该槽位 fence。
+     */
+    bool recreate_in_flight_fence_signaled(uint32_t frameIndex);
 
     /**
      * @brief 获取按 imageIndex 的 imageAvailable Semaphore
