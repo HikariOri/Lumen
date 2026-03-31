@@ -4,6 +4,7 @@ layout(location = 0) in vec3 vLocalDir;
 
 layout(set = 0, binding = 0) uniform samplerCube envMap;
 
+// rough_pad: x = roughness, y = 环境 cubemap 单面分辨率（用于 solid angle → mip）
 layout(push_constant) uniform Push {
     mat4 projView;
     vec4 rough_pad;
@@ -55,7 +56,7 @@ void main() {
     float r = clamp(pc.rough_pad.x, 0.04, 1.0);
     vec3 prefiltered = vec3(0.0);
     float weight = 0.0;
-    const uint SAMPLE_COUNT = 128u;
+    const uint SAMPLE_COUNT = 256u;
     for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
         vec2 xi = hammersley(i, SAMPLE_COUNT);
         vec3 H = importanceSampleGGX(xi, N, r);
@@ -67,7 +68,8 @@ void main() {
             float D = distributionGGX(N, H, r);
             float pdf =
                 (D * NdotH / (4.0 * HdotV)) + 1e-5;
-            float saTexel = 4.0 * PI / (6.0 * 512.0 * 512.0);
+            float envFace = max(pc.rough_pad.y, 1.0);
+            float saTexel = 4.0 * PI / (6.0 * envFace * envFace);
             float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 1e-5);
             float mip =
                 0.5 * log2(saSample / saTexel + 1.0);

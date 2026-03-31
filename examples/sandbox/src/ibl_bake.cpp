@@ -33,7 +33,7 @@ namespace pbr {
 namespace {
 
 constexpr uint32_t kEnvFace { 512 };
-constexpr uint32_t kIrradianceFace { 32 };
+constexpr uint32_t kIrradianceFace { 64 };
 constexpr uint32_t kPrefilterFace { 128 };
 constexpr uint32_t kBrdfLutSize { 512 };
 constexpr VkFormat kIblFormat { VK_FORMAT_R32G32B32A32_SFLOAT };
@@ -547,7 +547,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
                 glm::vec4 rough_pad;
             } push {};
             push.projView = vp;
-            push.rough_pad = glm::vec4(roughness, 0.0F, 0.0F, 0.0F);
+            push.rough_pad = glm::vec4(
+                roughness, static_cast<float>(kEnvFace), 0.0F, 0.0F);
             vkCmdPushConstants(cb, pl_pre.handle(),
                                VK_SHADER_STAGE_VERTEX_BIT |
                                    VK_SHADER_STAGE_FRAGMENT_BIT,

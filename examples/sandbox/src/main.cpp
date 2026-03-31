@@ -65,11 +65,12 @@
 
 namespace {
 
-constexpr const char *kHdrRelPath { "assets/environment_maps/HDR_111_Parking_Lot_2_Ref.hdr" };
+constexpr const char *kHdrRelPath { "assets/environment_maps/meadow_2_2k.hdr" };
 
 constexpr const char *kSponzaGltfRel {
     // "assets/models/Sponza/glTF/Sponza.gltf"
     // "assets/models/rex_master/scene.gltf"
+    // "assets/models/chisa_wuthering_waves/scene.gltf"
     "assets/models/chisa_wuthering_waves/scene.gltf"
 };
 
