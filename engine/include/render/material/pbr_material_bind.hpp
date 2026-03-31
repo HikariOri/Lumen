@@ -1,6 +1,6 @@
 /**
  * @file pbr_material_bind.hpp
- * @brief PBR forward：场景 IBL（set=0）与材质贴图（set=1）描述符布局与写入
+ * @brief Forward PBR：`note/forward_shader.md` 四组 set 的描述符布局与写入
  */
 
 #pragma once
@@ -8,11 +8,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include <vulkan/vulkan.h>
-
-#include <glm/mat4x4.hpp>
 
 #include "render/resource/descriptor.hpp"
 #include "render/resource/pbr_placeholder_textures.hpp"
@@ -24,45 +23,74 @@ namespace lumen::render {
 class Context;
 class CommandPool;
 
-/**
- * @brief 与 `helmet_pbr.*` push_constant 块对齐（std430 规则）
- */
-struct PbrForwardPushConstants {
-    glm::mat4 model { 1.0F };
-    glm::vec4 base_color_factor { 1.0F, 1.0F, 1.0F, 1.0F };
-    /// rgb：emissiveFactor；w：额外倍率（编辑器）
-    glm::vec4 emissive_factor_and_scale { 0.0F, 0.0F, 0.0F, 1.0F };
-    float metallic_factor { 1.0F };
-    float roughness_factor { 1.0F };
-    std::int32_t debug_view {};
-    std::array<std::int32_t, 3> pad { { 0, 0, 0 } };
+inline constexpr std::string_view k_pbr_forward_vert_spv_relative {
+    "shaders/pbr_forward.vert.spv"
+};
+inline constexpr std::string_view k_pbr_forward_frag_spv_relative {
+    "shaders/pbr_forward.frag.spv"
 };
 
 /**
- * @brief set=0：SceneUBO + irradianceCube + prefilterCube + brdfLUT
+ * @brief 与 `pbr_forward.frag` push_constant 块对齐（std430，仅片元阶段）
  */
-[[nodiscard]] std::vector<DescriptorBinding> pbr_scene_ibl_descriptor_bindings();
+struct PbrForwardPushConstants {
+    std::int32_t debug_view {};
+    std::array<std::int32_t, 3> pad {};
+};
 
-/**
- * @brief set=1：baseColor、metallicRoughness、normal、occlusion、emissive
- */
+/** Set 0：FrameUBO + IBL（irradiance / prefilter / BRDF LUT） */
+[[nodiscard]] std::vector<DescriptorBinding> pbr_frame_ibl_descriptor_bindings();
+
+/** Set 1：MaterialUBO + 五张贴图 */
 [[nodiscard]] std::vector<DescriptorBinding>
-pbr_material_texture_descriptor_bindings();
+pbr_material_descriptor_bindings();
 
-void write_pbr_scene_ibl_descriptor_set(
-    VkDevice device, VkDescriptorSet set, VkBuffer scene_ubo,
+/** @deprecated 使用 pbr_material_descriptor_bindings */
+[[nodiscard]] inline std::vector<DescriptorBinding>
+pbr_material_texture_descriptor_bindings() {
+    return pbr_material_descriptor_bindings();
+}
+
+/** Set 2：ObjectUBO（动态 UBO，每 draw 变偏移） */
+[[nodiscard]] std::vector<DescriptorBinding> pbr_object_descriptor_bindings();
+
+/** Set 3：LightUBO */
+[[nodiscard]] std::vector<DescriptorBinding> pbr_light_descriptor_bindings();
+
+void write_pbr_frame_ibl_descriptor_set(
+    VkDevice device, VkDescriptorSet set, VkBuffer frame_ubo,
     std::size_t ubo_range, const Texture &irradiance_cube,
     const Texture &prefilter_cube, const Texture &brdf_lut);
 
 void write_pbr_material_descriptor_set(
-    VkDevice device, VkDescriptorSet set,
-    const lumen::scene::PBRMaterial &material,
+    VkDevice device, VkDescriptorSet set, VkBuffer material_ubo,
+    std::size_t material_ubo_range, const lumen::scene::PBRMaterial &material,
     const PbrPlaceholderTextures &placeholders);
 
-/**
- * @brief 将两张灰度（R 通道）金属度/粗糙度贴图合并为 glTF 式 RGBA8 UNORM（G=
- * roughness，B=metallic）
- */
+void write_pbr_object_descriptor_set_dynamic(
+    VkDevice device, VkDescriptorSet set, VkBuffer object_ubo,
+    std::size_t range_one_object);
+
+void write_pbr_light_descriptor_set(VkDevice device, VkDescriptorSet set,
+                                    VkBuffer light_ubo,
+                                    std::size_t light_ubo_range);
+
+/** 旧名兼容（等同 Frame + IBL） */
+[[nodiscard]] inline std::vector<DescriptorBinding>
+pbr_scene_ibl_descriptor_bindings() {
+    return pbr_frame_ibl_descriptor_bindings();
+}
+
+/** @deprecated 使用 pbr_frame_ibl_descriptor_set */
+inline void write_pbr_scene_ibl_descriptor_set(
+    VkDevice device, VkDescriptorSet set, VkBuffer frame_ubo,
+    std::size_t ubo_range, const Texture &irradiance_cube,
+    const Texture &prefilter_cube, const Texture &brdf_lut) {
+    write_pbr_frame_ibl_descriptor_set(device, set, frame_ubo, ubo_range,
+                                       irradiance_cube, prefilter_cube,
+                                       brdf_lut);
+}
+
 bool create_metallic_roughness_texture_from_grayscale_files(
     Texture &out_texture, const Context &ctx, const char *metallic_image_path,
     const char *roughness_image_path, VkQueue transfer_queue,

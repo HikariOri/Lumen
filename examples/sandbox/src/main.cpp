@@ -15,6 +15,7 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/frame_sync.hpp"
+#include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
@@ -71,7 +72,9 @@ constexpr const char *kSponzaGltfRel {
     // "assets/models/Sponza/glTF/Sponza.gltf"
     // "assets/models/rex_master/scene.gltf"
     // "assets/models/chisa_wuthering_waves/scene.gltf"
-    "assets/models/chisa_wuthering_waves/scene.gltf"
+    // "assets/models/chisa_wuthering_waves/scene.gltf"
+    // "assets/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf"
+    "assets/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf"
 };
 
 // 单位立方体（与 ibl_bake 天空捕获一致）
@@ -99,60 +102,6 @@ struct SkyPush {
     glm::mat4 sky_mvp {};
     glm::vec4 params {}; // x: exposure
 };
-
-constexpr int k_scene_point_light_cap { 4 };
-
-/// std140，与 helmet_pbr.{vert,frag} 中 SceneUBO 一致
-struct PointLightGpu {
-    glm::vec4 position_radius {};
-    glm::vec4 color_intensity {};
-};
-
-struct SceneUbo {
-    glm::mat4 view { 1.0F };
-    glm::mat4 proj { 1.0F };
-    glm::vec4 camera_world { 0.0F, 0.0F, 0.0F, 1.0F };
-    glm::vec4 env_params { 0.0F }; // exposure, maxMip, diffMip, iblStrength
-    /// x: 生效数量 0…4；y: 全局强度倍率；zw 保留
-    glm::vec4 point_light_params { 0.0F };
-    std::array<PointLightGpu, k_scene_point_light_cap> point_lights {};
-};
-static_assert(sizeof(PointLightGpu) == 32U);
-static_assert(sizeof(SceneUbo) == 304U);
-
-struct PointLightInit {
-    glm::vec3 pos {};
-    float range { 5.0F };
-    glm::vec3 color { 1.0F };
-    float intensity { 2.0F };
-};
-
-constexpr std::array<PointLightInit, k_scene_point_light_cap>
-    k_default_point_lights {
-        PointLightInit { glm::vec3 { 1.5F, 2.0F, 1.2F }, 5.0F,
-                         glm::vec3 { 1.0F, 0.92F, 0.82F }, 3.0F },
-        PointLightInit { glm::vec3 { -2.0F, 1.2F, 0.8F }, 5.5F,
-                         glm::vec3 { 0.55F, 0.72F, 1.0F }, 2.4F },
-        PointLightInit { glm::vec3 { 0.0F, 0.45F, -2.2F }, 6.0F,
-                         glm::vec3 { 1.0F, 0.85F, 0.68F }, 2.0F },
-        PointLightInit { glm::vec3 { -0.9F, -0.4F, 1.7F }, 4.5F,
-                         glm::vec3 { 0.48F, 0.52F, 0.58F }, 1.9F },
-    };
-
-void fill_scene_point_lights(SceneUbo &su, int active_count,
-                             float strength_scale) {
-    const int n = std::clamp(active_count, 0, k_scene_point_light_cap);
-    su.point_light_params =
-        glm::vec4(static_cast<float>(n), strength_scale, 0.0F, 0.0F);
-    for (int i = 0; i < k_scene_point_light_cap; ++i) {
-        const PointLightInit &L =
-            k_default_point_lights[static_cast<size_t>(i)];
-        su.point_lights[static_cast<size_t>(i)].position_radius =
-            glm::vec4(L.pos, L.range);
-        su.point_lights[static_cast<size_t>(i)].color_intensity =
-            glm::vec4(L.color, L.intensity);
-    }
-}
 
 struct HelmVertex {
     glm::vec3 position {};
@@ -561,6 +510,7 @@ static int run_pbr(int, char **) {
         dst.metallic_factor = src.metallic_factor;
         dst.roughness_factor = src.roughness_factor;
         dst.emissive_factor = src.emissive_factor;
+        dst.occlusion_strength = src.ao_factor;
         dst.double_sided = src.double_sided;
         dst.alpha_mode = static_cast<lumen::scene::MaterialAlphaMode>(
             static_cast<
@@ -614,6 +564,20 @@ static int run_pbr(int, char **) {
             .material = &pbr_materials[static_cast<size_t>(mi)],
         });
     }
+
+    uint32_t sponza_draw_slots = 0;
+    for (const lumen::scene::Primitive &sp : sponza_mesh.primitives) {
+        if (sp.is_drawable()) {
+            ++sponza_draw_slots;
+        }
+    }
+    const std::size_t helmet_obj_stride =
+        lumen::render::pbr_object_ubo_dynamic_stride(static_cast<std::size_t>(
+            ctx.physical_device_properties()
+                .limits.minUniformBufferOffsetAlignment));
+    const VkDeviceSize helmet_object_ubo_bytes =
+        static_cast<VkDeviceSize>(helmet_obj_stride) *
+        static_cast<VkDeviceSize>((std::max)(sponza_draw_slots, 1u));
 
     LUMEN_APP_LOG_INFO(
         "Sponza: 顶点={} 索引={} 三角≈{} primitive={} 材质={} GPU 贴图实例={}",
@@ -767,10 +731,10 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const std::string helmet_vs_path =
-        lumen::core::get_resource_path("shaders/helmet_pbr.vert.spv");
-    const std::string helmet_fs_path =
-        lumen::core::get_resource_path("shaders/helmet_pbr.frag.spv");
+    const std::string helmet_vs_path = lumen::core::get_resource_path(
+        std::string(lumen::render::k_pbr_forward_vert_spv_relative));
+    const std::string helmet_fs_path = lumen::core::get_resource_path(
+        std::string(lumen::render::k_pbr_forward_frag_spv_relative));
     lumen::render::ShaderModule sm_helmet_vs;
     lumen::render::ShaderModule sm_helmet_fs;
     if (!sm_helmet_vs.create_from_file(dev, helmet_vs_path.c_str())) {
@@ -782,35 +746,60 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::render::DescriptorSetLayout helmet_scene_dsl;
-    if (!helmet_scene_dsl.create(
-            ctx, lumen::render::pbr_scene_ibl_descriptor_bindings())) {
-        LUMEN_APP_LOG_ERROR("头盔场景 DescriptorSetLayout 失败");
+    lumen::render::DescriptorSetLayout helmet_frame_dsl;
+    if (!helmet_frame_dsl.create(
+            ctx, lumen::render::pbr_frame_ibl_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("PBR Frame DescriptorSetLayout 失败");
         return -1;
     }
     lumen::render::DescriptorSetLayout helmet_material_dsl;
     if (!helmet_material_dsl.create(
-            ctx, lumen::render::pbr_material_texture_descriptor_bindings())) {
-        LUMEN_APP_LOG_ERROR("头盔材质 DescriptorSetLayout 失败");
+            ctx, lumen::render::pbr_material_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("PBR 材质 DescriptorSetLayout 失败");
+        return -1;
+    }
+    lumen::render::DescriptorSetLayout helmet_object_dsl;
+    if (!helmet_object_dsl.create(
+            ctx, lumen::render::pbr_object_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("PBR Object DescriptorSetLayout 失败");
+        return -1;
+    }
+    lumen::render::DescriptorSetLayout helmet_light_dsl;
+    if (!helmet_light_dsl.create(
+            ctx, lumen::render::pbr_light_descriptor_bindings())) {
+        LUMEN_APP_LOG_ERROR("PBR Light DescriptorSetLayout 失败");
         return -1;
     }
 
     const uint32_t sponza_mat_count =
         static_cast<uint32_t>(pbr_materials.size());
+    const uint32_t pbr_ubo_static = 3u + sponza_mat_count + 3u;
+    const uint32_t pbr_set_count = 3u + sponza_mat_count + 1u + 3u;
     const uint32_t pbr_combined_for_materials = sponza_mat_count * 5u;
     const uint32_t pbr_combined_total = 9u + pbr_combined_for_materials;
-    const uint32_t pbr_max_sets = 3u + sponza_mat_count;
 
     lumen::render::DescriptorPool pbr_dpool;
     if (!pbr_dpool.create(
             ctx,
-            { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .count = 3 },
+            { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .count = pbr_ubo_static },
+              { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .count = 1 },
               { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 .count = pbr_combined_total } },
-            pbr_max_sets)) {
+            pbr_set_count)) {
         LUMEN_APP_LOG_ERROR("PBR DescriptorPool 失败 (材质数={})",
                             sponza_mat_count);
         return -1;
+    }
+
+    std::vector<lumen::render::UniformBuffer> sponza_material_ubos(
+        sponza_mat_count);
+    for (uint32_t mi = 0; mi < sponza_mat_count; ++mi) {
+        if (!sponza_material_ubos[mi].create_persistent(
+                ctx, sizeof(lumen::render::PbrMaterialUbo))) {
+            LUMEN_APP_LOG_ERROR("材质 UniformBuffer 失败 mi={}", mi);
+            return -1;
+        }
     }
 
     std::vector<VkDescriptorSet> sponza_material_ds(sponza_mat_count);
@@ -820,44 +809,87 @@ static int run_pbr(int, char **) {
             LUMEN_APP_LOG_ERROR("材质 DescriptorSet 分配失败 mi={}", mi);
             return -1;
         }
+        lumen::render::PbrMaterialUbo mu {};
+        lumen::render::pack_pbr_material_ubo(mu, pbr_materials[mi], 3.0F);
+        sponza_material_ubos[mi].update(mu);
         lumen::render::write_pbr_material_descriptor_set(
-            dev, sponza_material_ds[mi], pbr_materials[mi], pbr_placeholders);
+            dev, sponza_material_ds[mi], sponza_material_ubos[mi].handle(),
+            sizeof(lumen::render::PbrMaterialUbo), pbr_materials[mi],
+            pbr_placeholders);
     }
 
-    std::array<VkDescriptorSet, 3> helmet_scene_ds {};
-    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
-        if (!pbr_dpool.allocate(dev, helmet_scene_dsl.handle(),
-                                helmet_scene_ds[i])) {
-            LUMEN_APP_LOG_ERROR("场景 DescriptorSet 分配失败");
+    std::array<VkDescriptorSet, 3> helmet_frame_ds {};
+    for (uint32_t i = 0; i < helmet_frame_ds.size(); ++i) {
+        if (!pbr_dpool.allocate(dev, helmet_frame_dsl.handle(),
+                                helmet_frame_ds[i])) {
+            LUMEN_APP_LOG_ERROR("PBR Frame DescriptorSet 分配失败");
             return -1;
         }
     }
 
-    std::array<lumen::render::UniformBuffer, 3> helmet_ubos {};
-    for (uint32_t i = 0; i < helmet_ubos.size(); ++i) {
-        if (!helmet_ubos[i].create_persistent(ctx, sizeof(SceneUbo))) {
-            LUMEN_APP_LOG_ERROR("头盔 UniformBuffer 失败");
+    std::array<lumen::render::UniformBuffer, 3> helmet_frame_ubos {};
+    for (uint32_t i = 0; i < helmet_frame_ubos.size(); ++i) {
+        if (!helmet_frame_ubos[i].create_persistent(
+                ctx, sizeof(lumen::render::PbrFrameUbo))) {
+            LUMEN_APP_LOG_ERROR("PBR Frame UniformBuffer 失败");
             return -1;
         }
     }
 
-    for (uint32_t i = 0; i < helmet_scene_ds.size(); ++i) {
-        lumen::render::write_pbr_scene_ibl_descriptor_set(
-            dev, helmet_scene_ds[i], helmet_ubos[i].handle(), sizeof(SceneUbo),
-            ibl.irradiance, ibl.prefilter, ibl.brdf_lut);
+    for (uint32_t i = 0; i < helmet_frame_ds.size(); ++i) {
+        lumen::render::write_pbr_frame_ibl_descriptor_set(
+            dev, helmet_frame_ds[i], helmet_frame_ubos[i].handle(),
+            sizeof(lumen::render::PbrFrameUbo), ibl.irradiance, ibl.prefilter,
+            ibl.brdf_lut);
+    }
+
+    VkDescriptorSet helmet_object_ds { VK_NULL_HANDLE };
+    if (!pbr_dpool.allocate(dev, helmet_object_dsl.handle(),
+                            helmet_object_ds)) {
+        LUMEN_APP_LOG_ERROR("PBR Object DescriptorSet 分配失败");
+        return -1;
+    }
+    lumen::render::UniformBuffer helmet_object_ubo;
+    if (!helmet_object_ubo.create_persistent(
+            ctx, static_cast<size_t>(helmet_object_ubo_bytes))) {
+        LUMEN_APP_LOG_ERROR("PBR Object UniformBuffer 失败");
+        return -1;
+    }
+    lumen::render::write_pbr_object_descriptor_set_dynamic(
+        dev, helmet_object_ds, helmet_object_ubo.handle(),
+        sizeof(lumen::render::PbrObjectUbo));
+
+    std::array<VkDescriptorSet, 3> helmet_light_ds {};
+    std::array<lumen::render::UniformBuffer, 3> helmet_light_ubos {};
+    for (uint32_t i = 0; i < helmet_light_ds.size(); ++i) {
+        if (!pbr_dpool.allocate(dev, helmet_light_dsl.handle(),
+                                helmet_light_ds[i])) {
+            LUMEN_APP_LOG_ERROR("PBR Light DescriptorSet 分配失败");
+            return -1;
+        }
+        if (!helmet_light_ubos[i].create_persistent(
+                ctx, sizeof(lumen::render::PbrLightUbo))) {
+            LUMEN_APP_LOG_ERROR("PBR Light UniformBuffer 失败");
+            return -1;
+        }
+        lumen::render::write_pbr_light_descriptor_set(
+            dev, helmet_light_ds[i], helmet_light_ubos[i].handle(),
+            sizeof(lumen::render::PbrLightUbo));
     }
 
     VkPushConstantRange helmet_pc {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
         .size = static_cast<uint32_t>(
             sizeof(lumen::render::PbrForwardPushConstants)),
     };
     lumen::render::PipelineLayout helmet_pl;
     if (!helmet_pl.create(
-            ctx, { helmet_scene_dsl.handle(), helmet_material_dsl.handle() },
+            ctx,
+            { helmet_frame_dsl.handle(), helmet_material_dsl.handle(),
+              helmet_object_dsl.handle(), helmet_light_dsl.handle() },
             { helmet_pc })) {
-        LUMEN_APP_LOG_ERROR("头盔 PipelineLayout 失败");
+        LUMEN_APP_LOG_ERROR("PBR PipelineLayout 失败");
         return -1;
     }
 
@@ -907,7 +939,7 @@ static int run_pbr(int, char **) {
     float skyExposure { 4.0F };
     float iblStrength { 3.0F };
     float emissiveScale { 3.0F };
-    int pointlightCount { k_scene_point_light_cap };
+    int pointlightCount { lumen::render::k_pbr_legacy_point_light_cap };
     float pointDirectStrength { 1.15F };
     int helmetDebugView { 0 };
     bool pbrDebugTileGrid { false };
@@ -1196,7 +1228,7 @@ static int run_pbr(int, char **) {
             ImGui::TextUnformatted(
                 "点光源（GGX 直射；分屏首格与「Scene」完整 PBR 一致）");
             ImGui::SliderInt("点光数量", &pointlightCount, 0,
-                             k_scene_point_light_cap);
+                             lumen::render::k_pbr_forward_max_lights);
             ImGui::SliderFloat("点光强度", &pointDirectStrength, 0.0F, 6.0F,
                                "%.2f");
         }
@@ -1304,14 +1336,23 @@ static int run_pbr(int, char **) {
             VkCommandBuffer cb = cmd_buf.handle();
             const glm::mat4 helmet_model { 1.0F };
 
-            SceneUbo su {};
-            su.view = view;
-            su.proj = proj;
-            su.camera_world = glm::vec4(eye, 1.0F);
-            su.env_params =
-                glm::vec4(skyExposure, k_prefilter_max_lod, 0.0F, iblStrength);
-            fill_scene_point_lights(su, pointlightCount, pointDirectStrength);
-            helmet_ubos[frameIdx].update(su);
+            for (uint32_t mi = 0; mi < sponza_mat_count; ++mi) {
+                lumen::render::PbrMaterialUbo mu {};
+                lumen::render::pack_pbr_material_ubo(mu, pbr_materials[mi],
+                                                     emissiveScale);
+                sponza_material_ubos[mi].update(mu);
+            }
+
+            lumen::render::PbrFrameUbo frame_u {};
+            lumen::render::pack_pbr_frame_ubo(frame_u, view, proj, eye,
+                                              skyExposure, iblStrength,
+                                              k_prefilter_max_lod, 0.0F);
+            helmet_frame_ubos[frameIdx].update(frame_u);
+
+            lumen::render::PbrLightUbo light_u {};
+            lumen::render::fill_pbr_light_ubo_default_points(
+                light_u, pointlightCount, pointDirectStrength);
+            helmet_light_ubos[frameIdx].update(light_u);
 
             VkViewport vp { 0.0F, 0.0F, wf, hf, 0.0F, 1.0F };
             vkCmdSetViewport(cb, 0, 1, &vp);
@@ -1337,6 +1378,7 @@ static int run_pbr(int, char **) {
 
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               helmet_pipe.handle());
+            uint32_t draw_slot = 0;
             for (const lumen::scene::Primitive &prim : sponza_mesh.primitives) {
                 if (!prim.is_drawable()) {
                     continue;
@@ -1346,26 +1388,28 @@ static int run_pbr(int, char **) {
                                              : &pbr_materials[0];
                 VkDescriptorSet mat_ds = vk_descriptor_for_pbr_material(
                     prim_mat, pbr_materials, sponza_material_ds);
-                std::array<VkDescriptorSet, 2> pbr_sets {
-                    helmet_scene_ds[frameIdx], mat_ds
+                lumen::render::PbrObjectUbo ou {};
+                ou.model = helmet_model;
+                const glm::mat3 n3 = glm::mat3(helmet_model);
+                ou.normal_matrix = glm::mat4(glm::transpose(glm::inverse(n3)));
+                helmet_object_ubo.update(ou, draw_slot * helmet_obj_stride);
+                std::array<VkDescriptorSet, 4> pbr_sets {
+                    helmet_frame_ds[frameIdx], mat_ds, helmet_object_ds,
+                    helmet_light_ds[frameIdx]
                 };
+                const uint32_t dyn_off =
+                    static_cast<uint32_t>(draw_slot * helmet_obj_stride);
                 vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         helmet_pl.handle(), 0,
                                         static_cast<uint32_t>(pbr_sets.size()),
-                                        pbr_sets.data(), 0, nullptr);
+                                        pbr_sets.data(), 1, &dyn_off);
                 lumen::render::PbrForwardPushConstants hp {};
-                hp.model = helmet_model;
-                hp.base_color_factor = prim_mat->base_color_factor;
-                hp.emissive_factor_and_scale =
-                    glm::vec4(prim_mat->emissive_factor, emissiveScale);
-                hp.metallic_factor = prim_mat->metallic_factor;
-                hp.roughness_factor = prim_mat->roughness_factor;
                 hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
                 hp.pad = { { 0, 0, 0 } };
                 vkCmdPushConstants(cb, helmet_pl.handle(),
-                                   VK_SHADER_STAGE_VERTEX_BIT |
-                                       VK_SHADER_STAGE_FRAGMENT_BIT,
-                                   0, static_cast<uint32_t>(sizeof(hp)), &hp);
+                                   VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   static_cast<uint32_t>(sizeof(hp)), &hp);
+                ++draw_slot;
                 VkDeviceSize voff =
                     static_cast<VkDeviceSize>(prim.vertex_byte_offset);
                 VkBuffer vb = prim.vertex_buffer->handle();
@@ -1415,15 +1459,23 @@ static int run_pbr(int, char **) {
                                                       aspect, 0.05F, 120.0F);
                     proj[1][1] *= -1.0F;
 
-                    SceneUbo su {};
-                    su.view = view;
-                    su.proj = proj;
-                    su.camera_world = glm::vec4(eye, 1.0F);
-                    su.env_params = glm::vec4(skyExposure, k_prefilter_max_lod,
-                                              0.0F, iblStrength);
-                    fill_scene_point_lights(su, pointlightCount,
-                                            pointDirectStrength);
-                    helmet_ubos[frameIdx].update(su);
+                    for (uint32_t mi = 0; mi < sponza_mat_count; ++mi) {
+                        lumen::render::PbrMaterialUbo mu {};
+                        lumen::render::pack_pbr_material_ubo(
+                            mu, pbr_materials[mi], emissiveScale);
+                        sponza_material_ubos[mi].update(mu);
+                    }
+
+                    lumen::render::PbrFrameUbo frame_u_tile {};
+                    lumen::render::pack_pbr_frame_ubo(
+                        frame_u_tile, view, proj, eye, skyExposure, iblStrength,
+                        k_prefilter_max_lod, 0.0F);
+                    helmet_frame_ubos[frameIdx].update(frame_u_tile);
+
+                    lumen::render::PbrLightUbo light_u_tile {};
+                    lumen::render::fill_pbr_light_ubo_default_points(
+                        light_u_tile, pointlightCount, pointDirectStrength);
+                    helmet_light_ubos[frameIdx].update(light_u_tile);
 
                     VkViewport vp_tile {};
                     vp_tile.x = static_cast<float>(col) * cw;
@@ -1447,6 +1499,7 @@ static int run_pbr(int, char **) {
 
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmet_pipe.handle());
+                    uint32_t draw_slot_dbg = 0;
                     for (const lumen::scene::Primitive &prim :
                          sponza_mesh.primitives) {
                         if (!prim.is_drawable()) {
@@ -1458,28 +1511,32 @@ static int run_pbr(int, char **) {
                         VkDescriptorSet mat_ds_dbg =
                             vk_descriptor_for_pbr_material(
                                 prim_mat, pbr_materials, sponza_material_ds);
-                        std::array<VkDescriptorSet, 2> sets_dbg {
-                            helmet_scene_ds[frameIdx], mat_ds_dbg
+                        lumen::render::PbrObjectUbo ou_dbg {};
+                        ou_dbg.model = helmet_model;
+                        const glm::mat3 n3d = glm::mat3(helmet_model);
+                        ou_dbg.normal_matrix =
+                            glm::mat4(glm::transpose(glm::inverse(n3d)));
+                        helmet_object_ubo.update(ou_dbg, draw_slot_dbg *
+                                                             helmet_obj_stride);
+                        std::array<VkDescriptorSet, 4> sets_dbg {
+                            helmet_frame_ds[frameIdx], mat_ds_dbg,
+                            helmet_object_ds, helmet_light_ds[frameIdx]
                         };
+                        const uint32_t dyn_dbg = static_cast<uint32_t>(
+                            draw_slot_dbg * helmet_obj_stride);
                         vkCmdBindDescriptorSets(
                             cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             helmet_pl.handle(), 0,
                             static_cast<uint32_t>(sets_dbg.size()),
-                            sets_dbg.data(), 0, nullptr);
+                            sets_dbg.data(), 1, &dyn_dbg);
                         lumen::render::PbrForwardPushConstants hp {};
-                        hp.model = helmet_model;
-                        hp.base_color_factor = prim_mat->base_color_factor;
-                        hp.emissive_factor_and_scale =
-                            glm::vec4(prim_mat->emissive_factor, emissiveScale);
-                        hp.metallic_factor = prim_mat->metallic_factor;
-                        hp.roughness_factor = prim_mat->roughness_factor;
                         hp.debug_view = ti;
                         hp.pad = { { 0, 0, 0 } };
                         vkCmdPushConstants(cb, helmet_pl.handle(),
-                                           VK_SHADER_STAGE_VERTEX_BIT |
-                                               VK_SHADER_STAGE_FRAGMENT_BIT,
-                                           0, static_cast<uint32_t>(sizeof(hp)),
+                                           VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                           static_cast<uint32_t>(sizeof(hp)),
                                            &hp);
+                        ++draw_slot_dbg;
                         VkDeviceSize voff =
                             static_cast<VkDeviceSize>(prim.vertex_byte_offset);
                         VkBuffer vbd = prim.vertex_buffer->handle();

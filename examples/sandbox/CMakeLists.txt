@@ -7,6 +7,8 @@ target_link_libraries(sandbox PRIVATE engine)
 
 target_precompile_headers(sandbox REUSE_FROM engine)
 
+add_dependencies(sandbox engine)
+
 set(SANDBOX_SPV_DIR "$<TARGET_FILE_DIR:sandbox>/shaders")
 foreach(_shader
   ibl_cube.vert
@@ -17,8 +19,6 @@ foreach(_shader
   ibl_brdf.frag
   skybox.vert
   skybox.frag
-  helmet_pbr.vert
-  helmet_pbr.frag
 )
   add_custom_command(
     TARGET sandbox
@@ -31,6 +31,20 @@ foreach(_shader
     VERBATIM
   )
 endforeach()
+
+add_custom_command(
+  TARGET sandbox
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${SANDBOX_SPV_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pbr_forward.vert.spv"
+          "${SANDBOX_SPV_DIR}/pbr_forward.vert.spv"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pbr_forward.frag.spv"
+          "${SANDBOX_SPV_DIR}/pbr_forward.frag.spv"
+  COMMENT "Copy engine pbr_forward SPIR-V into sandbox"
+  VERBATIM
+)
 
 add_custom_command(
   TARGET sandbox

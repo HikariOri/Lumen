@@ -37,6 +37,7 @@ struct PBRMaterial {
     float metallic_factor { 1.0F };
     float roughness_factor { 1.0F };
     glm::vec3 emissive_factor { 0.0F, 0.0F, 0.0F };
+    float occlusion_strength { 1.0F };
 
     const render::Texture *base_color_tex {};
     /// glTF metallicRoughness：G=roughness，B=metallic
@@ -52,13 +53,13 @@ struct PBRMaterial {
 /**
  * @brief 紧凑 GPU 材质记录（供后续 bindless / SSBO 表等扩展）
  */
-struct MaterialGpuCompact {
-    glm::vec4 base_color_factor {};
-    float metallic_factor {};
-    float roughness_factor {};
-    std::int32_t base_color_tex_index {};
-    std::int32_t mr_tex_index {};
-    std::int32_t normal_tex_index {};
-};
+// struct MaterialGpuCompact {
+//     glm::vec4 base_color_factor {};
+//     float metallic_factor {};
+//     float roughness_factor {};
+//     std::int32_t base_color_tex_index {};
+//     std::int32_t mr_tex_index {};
+//     std::int32_t normal_tex_index {};
+// };
 
 } // namespace lumen::scene
