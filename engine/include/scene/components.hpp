@@ -1,6 +1,6 @@
 /**
  * @file components.hpp
- * @brief EnTT 场景组件：对象 ID、标签、变换、父子关系、光源与天光
+ * @brief EnTT 场景组件：对象 ID、标签、变换、父子关系、网格渲染、光源与天光
  */
 
 #pragma once
@@ -27,6 +27,8 @@
 
 namespace lumen {
 namespace scene {
+
+struct Mesh;
 
 /**
  * @brief 实体身份：`Scene::create_entity` 时 `core::generate_random_id()`
@@ -119,6 +121,26 @@ public:
             rotationEuler.z = original_euler.z;
         }
     }
+};
+
+/**
+ * @brief ECS 组件：引用共享的 `Mesh` 资源
+ *
+ * @details
+ * **不在此组件上挂 `Material`**：多 primitive / 多材质由 `Mesh::primitives[]` 各自持有。
+ * 世界矩阵由 `TransformComponent` 与父链（若存在）计算后，与资源侧的
+ * `MeshBuffer` 一并传入 `append_mesh_render_items`。
+ *
+ * @note
+ * 指针不拥有 `Mesh`；生命周期须长于注册表中的实体。
+ *
+ * @see `scene/render_item.hpp`
+ * @see `scene/mesh.hpp`
+ *
+ * @ingroup lumen_scene_mesh
+ */
+struct MeshRendererComponent {
+    const Mesh *mesh {}; ///< 可为空；渲染前应判空
 };
 
 /**

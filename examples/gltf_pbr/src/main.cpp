@@ -5,7 +5,6 @@
 
 #include "ibl_bake.hpp"
 
-#include "core/gltf_loader.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
@@ -14,6 +13,7 @@
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/frame_sync.hpp"
+#include "render/material/material.hpp"
 #include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
 #include "render/pass/render_pass.hpp"
@@ -27,7 +27,9 @@
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
-#include "render/material/material.hpp"
+#include "scene/gltf_scene_mesh.hpp"
+#include "scene/mesh.hpp"
+#include "scene/render_item.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/imgui_layer.hpp"
 
@@ -37,16 +39,15 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -61,7 +62,9 @@ namespace {
 
 constexpr const char *kHdrRelPath { "assets/environment_maps/meadow_2_2k.hdr" };
 
-constexpr const char *kSponzaGltfRel { "assets/models/Sponza/glTF/Sponza.gltf" };
+constexpr const char *kSponzaGltfRel {
+    "assets/models/Sponza/glTF/Sponza.gltf"
+};
 /// 居中后按包围盒最长边缩放到该世界单位长度（越大场景在画面里越大）
 constexpr float k_sponza_fit_max_extent { 9.0F };
 
@@ -151,67 +154,6 @@ struct HelmVertex {
     glm::vec2 uv {};
     glm::vec4 tangent { 1.0F, 0.0F, 0.0F, 1.0F };
 };
-
-void center_and_scale_mesh(lumen::core::CpuMesh &mesh,
-                           float target_max_extent = 1.8F) {
-    if (mesh.vertices.empty()) {
-        return;
-    }
-    glm::vec3 bmin(std::numeric_limits<float>::max());
-    glm::vec3 bmax(std::numeric_limits<float>::lowest());
-    for (const auto &v : mesh.vertices) {
-        bmin = glm::min(bmin, v.position);
-        bmax = glm::max(bmax, v.position);
-    }
-    const glm::vec3 center { 0.5F * (bmin + bmax) };
-    for (auto &v : mesh.vertices) {
-        v.position -= center;
-    }
-    const glm::vec3 ext { bmax - bmin };
-    const float mx = (std::max)(ext.x, (std::max)(ext.y, ext.z));
-    const float s =
-        mx > 1e-8F ? (target_max_extent / mx) : 1.0F;
-    for (auto &v : mesh.vertices) {
-        v.position *= s;
-    }
-}
-
-void compute_mesh_tangents(std::vector<HelmVertex> &verts,
-                           const std::vector<uint32_t> &indices) {
-    std::vector<glm::vec3> tan1(verts.size(), glm::vec3(0.0F));
-    std::vector<glm::vec3> tan2(verts.size(), glm::vec3(0.0F));
-    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
-        const uint32_t i0 = indices[i];
-        const uint32_t i1 = indices[i + 1];
-        const uint32_t i2 = indices[i + 2];
-        const HelmVertex &v0 = verts[i0];
-        const HelmVertex &v1 = verts[i1];
-        const HelmVertex &v2 = verts[i2];
-        const glm::vec3 edge1 = v1.position - v0.position;
-        const glm::vec3 edge2 = v2.position - v0.position;
-        const glm::vec2 duv1 = v1.uv - v0.uv;
-        const glm::vec2 duv2 = v2.uv - v0.uv;
-        const float denom = duv1.x * duv2.y - duv2.x * duv1.y + 1e-8F;
-        const float f = 1.0F / denom;
-        const glm::vec3 t = f * (edge1 * duv2.y - edge2 * duv1.y);
-        const glm::vec3 b = f * (edge2 * duv1.x - edge1 * duv2.x);
-        tan1[i0] += t;
-        tan1[i1] += t;
-        tan1[i2] += t;
-        tan2[i0] += b;
-        tan2[i1] += b;
-        tan2[i2] += b;
-    }
-    for (size_t i = 0; i < verts.size(); ++i) {
-        const glm::vec3 &n = verts[i].normal;
-        glm::vec3 t = tan1[i];
-        t = glm::normalize(t - n * glm::dot(n, t));
-        const float w =
-            glm::dot(glm::cross(n, t), glm::normalize(tan2[i])) < 0.0F ? -1.0F
-                                                                       : 1.0F;
-        verts[i].tangent = glm::vec4(t, w);
-    }
-}
 
 [[nodiscard]] VkImageView
 create_cubemap_plus_x_face_view(VkDevice dev, VkImage img, VkFormat fmt,
@@ -324,10 +266,10 @@ static int run_pbr(int, char **) {
     lumen::render::OffscreenRenderTarget scene_target;
     {
         lumen::render::OffscreenRenderTargetConfig scene_cfg;
-        scene_cfg.width = static_cast<uint32_t>(
-            (std::max)(2, window_width * 3 / 4));
-        scene_cfg.height = static_cast<uint32_t>(
-            (std::max)(2, window_height * 3 / 4));
+        scene_cfg.width =
+            static_cast<uint32_t>((std::max)(2, window_width * 3 / 4));
+        scene_cfg.height =
+            static_cast<uint32_t>((std::max)(2, window_height * 3 / 4));
         scene_cfg.format = swapchain.image_format();
         scene_cfg.useDepth = true;
         scene_cfg.colorFinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -380,146 +322,12 @@ static int run_pbr(int, char **) {
     const std::string scene_gltf_path =
         lumen::core::get_resource_path(kSponzaGltfRel);
     if (!std::filesystem::exists(scene_gltf_path)) {
-        LUMEN_APP_LOG_ERROR(
-            "未找到 Sponza: {}（需同目录 Sponza.bin 与纹理）", scene_gltf_path);
+        LUMEN_APP_LOG_ERROR("未找到 Sponza: {}（需同目录 Sponza.bin 与纹理）",
+                            scene_gltf_path);
         return -1;
     }
-
-    lumen::core::CpuMesh sponza_cpu_mesh {};
-    lumen::render::MaterialLoadDesc sponza_main_mat {};
-    std::vector<lumen::core::PrimitiveSlice> sponza_submeshes;
-    std::vector<lumen::render::MaterialLoadDesc> sponza_materials;
-    if (!lumen::core::load_gltf(scene_gltf_path, sponza_cpu_mesh,
-                                &sponza_main_mat, &sponza_submeshes,
-                                &sponza_materials)) {
-        LUMEN_APP_LOG_ERROR("glTF 解析失败: {}", scene_gltf_path);
-        return -1;
-    }
-    if (sponza_cpu_mesh.vertices.empty() || sponza_cpu_mesh.indices.empty()) {
-        LUMEN_APP_LOG_ERROR("Sponza 网格为空: {}", scene_gltf_path);
-        return -1;
-    }
-    if (sponza_submeshes.empty()) {
-        LUMEN_APP_LOG_ERROR("Sponza 无子网格: {}", scene_gltf_path);
-        return -1;
-    }
-    if (sponza_materials.empty()) {
-        LUMEN_APP_LOG_ERROR("Sponza 无材质: {}", scene_gltf_path);
-        return -1;
-    }
-
-    LUMEN_APP_LOG_INFO(
-        "glTF 已加载: 顶点={} 索引={} 三角≈{} 子网格={} 材质={} 路径={}",
-        sponza_cpu_mesh.vertices.size(), sponza_cpu_mesh.indices.size(),
-        sponza_cpu_mesh.indices.size() / 3U, sponza_submeshes.size(),
-        sponza_materials.size(), scene_gltf_path);
-
-    center_and_scale_mesh(sponza_cpu_mesh, k_sponza_fit_max_extent);
-
-    std::vector<HelmVertex> helm_verts;
-    helm_verts.reserve(sponza_cpu_mesh.vertices.size());
-    for (const auto &ov : sponza_cpu_mesh.vertices) {
-        helm_verts.push_back(
-            HelmVertex { .position = ov.position,
-                         .normal = ov.normal,
-                         .uv = ov.uv,
-                         .tangent = { 1.0F, 0.0F, 0.0F, 1.0F } });
-    }
-    compute_mesh_tangents(helm_verts, sponza_cpu_mesh.indices);
 
     VkQueue gq = ctx.graphics_queue();
-
-    std::vector<std::unique_ptr<lumen::render::Texture>> scene_tex_pool;
-    std::unordered_map<std::string, size_t> scene_tex_by_key;
-
-    auto fallback_key = [](VkFormat fmt, const std::array<uint8_t, 4> &rgba) {
-        return std::string("fb:") + std::to_string(static_cast<int>(fmt)) +
-               ':' + std::to_string(rgba[0]) + ',' +
-               std::to_string(rgba[1]) + ',' + std::to_string(rgba[2]) + ',' +
-               std::to_string(rgba[3]);
-    };
-
-    auto acquire_tex =
-        [&](const std::string &path, VkFormat fmt,
-            const std::array<uint8_t, 4> &fallback_rgba) -> size_t {
-            const std::string key =
-                path.empty()
-                    ? fallback_key(fmt, fallback_rgba)
-                    : std::filesystem::absolute(
-                          lumen::core::get_resource_path(path))
-                          .generic_string();
-            if (const auto it = scene_tex_by_key.find(key);
-                it != scene_tex_by_key.end()) {
-                return it->second;
-            }
-            auto tex = std::make_unique<lumen::render::Texture>();
-            bool ok = false;
-            if (path.empty()) {
-                ok = tex->create_from_memory(ctx, fallback_rgba.data(), 4, 1, 1,
-                                             gq, cmdPool, fmt, {}, false);
-            } else {
-                const std::string full =
-                    lumen::core::get_resource_path(path);
-                ok = tex->create_from_file(ctx, full.c_str(), gq, cmdPool, {},
-                                           fmt);
-            }
-            if (!ok) {
-                LUMEN_APP_LOG_ERROR("贴图失败: {}",
-                                    path.empty() ? key : path);
-                return std::numeric_limits<size_t>::max();
-            }
-            const size_t ix = scene_tex_pool.size();
-            scene_tex_by_key.emplace(key, ix);
-            scene_tex_pool.push_back(std::move(tex));
-            return ix;
-        };
-
-    constexpr std::array<uint8_t, 4> k_rgba_white { { 255, 255, 255, 255 } };
-    constexpr std::array<uint8_t, 4> k_rgba_black { { 0, 0, 0, 255 } };
-    constexpr std::array<uint8_t, 4> k_rgba_normal { { 128, 128, 255, 255 } };
-
-    struct MatTexIdx {
-        size_t albedo {};
-        size_t normal {};
-        size_t mr {};
-        size_t ao {};
-        size_t emissive {};
-    };
-    std::vector<MatTexIdx> mat_tex_idx(sponza_materials.size());
-    for (size_t mi = 0; mi < sponza_materials.size(); ++mi) {
-        const lumen::render::MaterialLoadDesc &gm = sponza_materials[mi];
-        mat_tex_idx[mi].albedo =
-            acquire_tex(gm.albedo_path, VK_FORMAT_R8G8B8A8_SRGB, k_rgba_white);
-        mat_tex_idx[mi].normal = acquire_tex(
-            gm.normal_path, VK_FORMAT_R8G8B8A8_UNORM, k_rgba_normal);
-        if (mat_tex_idx[mi].albedo == std::numeric_limits<size_t>::max() ||
-            mat_tex_idx[mi].normal == std::numeric_limits<size_t>::max()) {
-            return -1;
-        }
-
-        if (gm.metallic_roughness_path.empty()) {
-            const uint8_t bv = static_cast<uint8_t>(
-                std::round(std::clamp(gm.metallic_factor, 0.0F, 1.0F) * 255.0F));
-            const uint8_t gv = static_cast<uint8_t>(std::round(
-                std::clamp(gm.roughness_factor, 0.0F, 1.0F) * 255.0F));
-            const std::array<uint8_t, 4> mr_px { { 255, gv, bv, 255 } };
-            mat_tex_idx[mi].mr =
-                acquire_tex("", VK_FORMAT_R8G8B8A8_UNORM, mr_px);
-        } else {
-            mat_tex_idx[mi].mr = acquire_tex(gm.metallic_roughness_path,
-                                             VK_FORMAT_R8G8B8A8_UNORM,
-                                             k_rgba_white);
-        }
-        mat_tex_idx[mi].ao =
-            acquire_tex(gm.ao_path, VK_FORMAT_R8G8B8A8_UNORM, k_rgba_white);
-        mat_tex_idx[mi].emissive =
-            acquire_tex(gm.emissive_path, VK_FORMAT_R8G8B8A8_SRGB, k_rgba_black);
-        if (mat_tex_idx[mi].mr == std::numeric_limits<size_t>::max() ||
-            mat_tex_idx[mi].ao == std::numeric_limits<size_t>::max() ||
-            mat_tex_idx[mi].emissive == std::numeric_limits<size_t>::max()) {
-            return -1;
-        }
-    }
 
     lumen::render::PbrPlaceholderTextures pbr_placeholders;
     if (!pbr_placeholders.create(ctx, gq, cmdPool) ||
@@ -528,41 +336,32 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    std::vector<lumen::render::Material> pbr_materials(
-        sponza_materials.size());
-    for (size_t mi = 0; mi < sponza_materials.size(); ++mi) {
-        const lumen::render::MaterialLoadDesc &gm = sponza_materials[mi];
-        const MatTexIdx &ix = mat_tex_idx[mi];
-        lumen::render::Material &pm = pbr_materials[mi];
-        pm.baseColorFactor = gm.base_color_factor;
-        pm.metallicFactor = gm.metallic_factor;
-        pm.roughnessFactor = gm.roughness_factor;
-        pm.emissiveFactor = gm.emissive_factor;
-        pm.occlusionStrength = gm.ao_factor;
-        pm.doubleSided = gm.double_sided;
-        pm.alphaMode = gm.alpha_mode;
-        pm.baseColorTex = scene_tex_pool[ix.albedo].get();
-        pm.normalTex = scene_tex_pool[ix.normal].get();
-        pm.metallicRoughnessTex = scene_tex_pool[ix.mr].get();
-        pm.occlusionTex = scene_tex_pool[ix.ao].get();
-        pm.emissiveTex = scene_tex_pool[ix.emissive].get();
+    lumen::scene::GltfSceneMesh scene_asset {};
+    lumen::scene::GltfSceneMeshLoadOptions scene_load_opts {};
+    scene_load_opts.recenter_to_origin = true;
+    scene_load_opts.uniform_scale_max_axis = k_sponza_fit_max_extent;
+    std::string scene_load_err;
+    if (!lumen::scene::load_gltf_scene_mesh(ctx, gq, cmdPool, scene_gltf_path,
+                                            scene_asset, scene_load_opts,
+                                            &scene_load_err)) {
+        LUMEN_APP_LOG_ERROR("glTF 场景加载失败: {}", scene_load_err.empty()
+                                                         ? "unknown"
+                                                         : scene_load_err);
+        return -1;
+    }
+    if (scene_asset.materials.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 无材质: {}", scene_gltf_path);
+        return -1;
     }
 
-    lumen::render::VertexBuffer helmet_vbuf;
-    if (!helmet_vbuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, helm_verts.data(),
-            helm_verts.size() * sizeof(HelmVertex))) {
-        LUMEN_APP_LOG_ERROR("场景顶点缓冲失败");
-        return -1;
-    }
-    lumen::render::IndexBuffer helmet_ibuf;
-    helmet_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
-    if (!helmet_ibuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, sponza_cpu_mesh.indices.data(),
-            sponza_cpu_mesh.indices.size() * sizeof(uint32_t))) {
-        LUMEN_APP_LOG_ERROR("场景索引缓冲失败");
-        return -1;
-    }
+    LUMEN_APP_LOG_INFO(
+        "glTF 已加载: 顶点={} 索引={} 三角≈{} primitive={} 材质={} 路径={}",
+        scene_asset.stats_vertex_count, scene_asset.stats_index_count,
+        scene_asset.stats_index_count / 3U, scene_asset.model.front().primitives.size(),
+        scene_asset.materials.size(), scene_gltf_path);
+
+    std::vector<lumen::render::Material> &pbr_materials = scene_asset.materials;
+    lumen::scene::Mesh &sponza_mesh = scene_asset.model.front();
 
     auto cmd_buffers = cmdPool.allocate(3);
     if (cmd_buffers.size() != 3) {
@@ -608,8 +407,8 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    ImTextureID scene_tex_id = reinterpret_cast<ImTextureID>(
-        lumen::ui::imgui_backend_add_texture(
+    ImTextureID scene_tex_id =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             scene_sampler.handle(), scene_target.color_view(),
             scene_target.color_sample_layout()));
 
@@ -707,12 +506,11 @@ static int run_pbr(int, char **) {
     }
 
     const std::size_t helmet_obj_stride =
-        lumen::render::pbr_object_ubo_dynamic_stride(
-            static_cast<std::size_t>(
-                ctx.physical_device_properties()
-                    .limits.minUniformBufferOffsetAlignment));
+        lumen::render::pbr_object_ubo_dynamic_stride(static_cast<std::size_t>(
+            ctx.physical_device_properties()
+                .limits.minUniformBufferOffsetAlignment));
     const uint32_t gltf_draw_slots = static_cast<uint32_t>(
-        (std::max)(sponza_submeshes.size(), size_t { 1 }));
+        (std::max)(sponza_mesh.primitives.size(), size_t { 1 }));
     const VkDeviceSize helmet_object_ubo_bytes =
         static_cast<VkDeviceSize>(helmet_obj_stride) *
         static_cast<VkDeviceSize>(gltf_draw_slots);
@@ -757,8 +555,7 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const uint32_t mat_count_u32 =
-        static_cast<uint32_t>(sponza_materials.size());
+    const auto mat_count_u32 = static_cast<uint32_t>(pbr_materials.size());
     const uint32_t pbr_ubo_static = 3u + mat_count_u32 + 3u;
     const uint32_t pbr_set_count = 3u + mat_count_u32 + 1u + 3u;
     const uint32_t pbr_combined_for_materials = mat_count_u32 * 5U;
@@ -915,8 +712,8 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "pbr 资源就绪: 顶点={} 索引={} 三角≈{} 材质={} 着色器 {} | {}",
-        sponza_cpu_mesh.vertices.size(), sponza_cpu_mesh.indices.size(),
-        sponza_cpu_mesh.indices.size() / 3U, sponza_materials.size(),
+        scene_asset.stats_vertex_count, scene_asset.stats_index_count,
+        scene_asset.stats_index_count / 3U, pbr_materials.size(),
         helmet_vs_path, helmet_fs_path);
 
     float sky_exposure { 0.35F };
@@ -963,28 +760,25 @@ static int run_pbr(int, char **) {
             uiSampler.handle(), v_brdf,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
 
-    const MatTexIdx &preview_ix = mat_tex_idx[0];
+    auto im_tex_or_ph = [&](const lumen::render::Texture *tex,
+                            const lumen::render::Texture &ph) {
+        const lumen::render::Texture &use = tex != nullptr ? *tex : ph;
+        return reinterpret_cast<ImTextureID>(
+            lumen::ui::imgui_backend_add_texture(
+                uiSampler.handle(), use.view(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    };
+    const lumen::render::Material &preview_mat = pbr_materials[0];
     auto img_albedo =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), scene_tex_pool[preview_ix.albedo]->view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+        im_tex_or_ph(preview_mat.baseColorTex, pbr_placeholders.albedo());
     auto img_normal =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), scene_tex_pool[preview_ix.normal]->view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
-    auto img_metallic =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), scene_tex_pool[preview_ix.mr]->view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+        im_tex_or_ph(preview_mat.normalTex, pbr_placeholders.normal());
+    auto img_metallic = im_tex_or_ph(preview_mat.metallicRoughnessTex,
+                                     pbr_placeholders.metallic_roughness());
     auto img_roughness = img_metallic;
-    auto img_ao =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), scene_tex_pool[preview_ix.ao]->view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+    auto img_ao = im_tex_or_ph(preview_mat.occlusionTex, pbr_placeholders.ao());
     auto img_emissive =
-        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
-            uiSampler.handle(), scene_tex_pool[preview_ix.emissive]->view(),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL));
+        im_tex_or_ph(preview_mat.emissiveTex, pbr_placeholders.emissive());
 
     lumen::platform::EventPump pump;
     uint32_t frameIdx { 0 };
@@ -1045,7 +839,8 @@ static int run_pbr(int, char **) {
                 constexpr float k_pan_scale { 0.0035F };
                 constexpr float k_zoom_drag { 0.008F };
                 const bool alt = sdl_alt_down();
-                const glm::vec3 f = cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
+                const glm::vec3 f =
+                    cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
                 const glm::vec3 world_up { 0.0F, 1.0F, 0.0F };
                 glm::vec3 right = glm::normalize(glm::cross(f, world_up));
                 if (glm::length(right) < 1e-5F) {
@@ -1059,7 +854,8 @@ static int run_pbr(int, char **) {
                     cam.pitch = std::clamp(cam.pitch, -89.0F, 89.0F);
                     float d = glm::length(cam.pivot - cam.eye);
                     d = (std::max)(d, 0.05F);
-                    const glm::vec3 fn = cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
+                    const glm::vec3 fn =
+                        cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
                     cam.eye = cam.pivot - fn * d;
                     cam.orbit_distance = d;
                 } else if (alt && cam.mmb_down) {
@@ -1073,7 +869,8 @@ static int run_pbr(int, char **) {
                     d = (std::max)(d, 0.05F);
                     d *= 1.0F + e.deltaY * k_zoom_drag;
                     d = std::clamp(d, 0.45F, 200.0F);
-                    const glm::vec3 fn = cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
+                    const glm::vec3 fn =
+                        cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
                     cam.eye = cam.pivot - fn * d;
                     cam.orbit_distance = d;
                 } else if (cam.rmb_down && !alt) {
@@ -1180,15 +977,16 @@ static int run_pbr(int, char **) {
         if (ImGui::Begin("3D 视口")) {
             const ImVec2 vp_avail = ImGui::GetContentRegionAvail();
             pending_scene_w =
-                (std::max)(2U, static_cast<uint32_t>((std::max)(1.0F, vp_avail.x)));
+                (std::max)(2U,
+                           static_cast<uint32_t>((std::max)(1.0F, vp_avail.x)));
             pending_scene_h =
-                (std::max)(2U, static_cast<uint32_t>((std::max)(1.0F, vp_avail.y)));
+                (std::max)(2U,
+                           static_cast<uint32_t>((std::max)(1.0F, vp_avail.y)));
             if (scene_tex_id != static_cast<ImTextureID>(0)) {
-                ImGui::Image(scene_tex_id,
-                             ImVec2(static_cast<float>(scene_w),
-                                    static_cast<float>(scene_h)));
-                // 指针在画面上时滚轮缩放（悬停 Image 时 WantCaptureMouse 为 true，
-                // 若在 SDL 事件里用 imgui_wants_mouse 过滤会永远进不来）
+                ImGui::Image(scene_tex_id, ImVec2(static_cast<float>(scene_w),
+                                                  static_cast<float>(scene_h)));
+                // 指针在画面上时滚轮缩放（悬停 Image 时 WantCaptureMouse 为
+                // true， 若在 SDL 事件里用 imgui_wants_mouse 过滤会永远进不来）
                 if (ImGui::IsItemHovered()) {
                     constexpr float k_orbit_min { 0.45F };
                     constexpr float k_orbit_max { 80.0F };
@@ -1208,18 +1006,20 @@ static int run_pbr(int, char **) {
             }
             last_scene_view_hovered =
                 ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-            if (pbr_debug_tile_grid && scene_tex_id != static_cast<ImTextureID>(0)) {
+            if (pbr_debug_tile_grid &&
+                scene_tex_id != static_cast<ImTextureID>(0)) {
                 constexpr int k_dbg_cols = 4;
                 constexpr int k_dbg_rows = 4;
                 ImDrawList *const dl = ImGui::GetWindowDrawList();
                 const ImU32 lab_col = IM_COL32(255, 255, 120, 255);
                 const ImU32 sh_col = IM_COL32(0, 0, 0, 180);
-                static constexpr const char *k_dbg_zh[k_dbg_cols * k_dbg_rows] = {
-                    "PBR 完整",    "几何法线",   "法线贴图",   "反照率",
-                    "金属度",      "粗糙度",     "AO",         "漫反射 IBL",
-                    "镜面 IBL",    "Irradiance", "Prefilter",  "N·V",
-                    "F0",          "BRDF LUT",   "自发光",     "Base Color",
-                };
+                static constexpr const char
+                    *k_dbg_zh[k_dbg_cols * k_dbg_rows] = {
+                        "PBR 完整", "几何法线",   "法线贴图",  "反照率",
+                        "金属度",   "粗糙度",     "AO",        "漫反射 IBL",
+                        "镜面 IBL", "Irradiance", "Prefilter", "N·V",
+                        "F0",       "BRDF LUT",   "自发光",    "Base Color",
+                    };
                 const ImVec2 p0 = ImGui::GetItemRectMin();
                 const ImVec2 p1 = ImGui::GetItemRectMax();
                 const float disp_w = p1.x - p0.x;
@@ -1227,10 +1027,12 @@ static int run_pbr(int, char **) {
                 for (int ti = 0; ti < k_dbg_cols * k_dbg_rows; ++ti) {
                     const int col = ti % k_dbg_cols;
                     const int row = ti / k_dbg_cols;
-                    const float x = p0.x + (disp_w / static_cast<float>(k_dbg_cols)) *
-                                            static_cast<float>(col);
-                    const float y = p0.y + (disp_h / static_cast<float>(k_dbg_rows)) *
-                                            static_cast<float>(row);
+                    const float x =
+                        p0.x + (disp_w / static_cast<float>(k_dbg_cols)) *
+                                   static_cast<float>(col);
+                    const float y =
+                        p0.y + (disp_h / static_cast<float>(k_dbg_rows)) *
+                                   static_cast<float>(row);
                     ImVec2 a(x + 3.0F, y + 4.0F);
                     ImVec2 b(x + 2.0F, y + 3.0F);
                     dl->AddText(b, sh_col, k_dbg_zh[ti]);
@@ -1244,10 +1046,12 @@ static int run_pbr(int, char **) {
 
         if (ImGui::Begin("IBL 预览")) {
             ImGui::TextUnformatted(
-                "与 Unity Scene 类似：Alt+左键环绕、Alt+中键平移、Alt+右键缩放；"
-                "视口内滚轮缩放；右键拖拽环视；右键按住时 WASD 飞行，E 上升 Q 下降");
-            if (ImGui::SliderFloat("视距（枢轴—相机）", &cam.orbit_distance, 0.45F,
-                                   80.0F, "%.2f")) {
+                "与 Unity Scene "
+                "类似：Alt+左键环绕、Alt+中键平移、Alt+右键缩放；"
+                "视口内滚轮缩放；右键拖拽环视；右键按住时 WASD 飞行，E 上升 Q "
+                "下降");
+            if (ImGui::SliderFloat("视距（枢轴—相机）", &cam.orbit_distance,
+                                   0.45F, 80.0F, "%.2f")) {
                 const glm::vec3 fn =
                     cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
                 cam.eye = cam.pivot - fn * cam.orbit_distance;
@@ -1257,7 +1061,8 @@ static int run_pbr(int, char **) {
             ImGui::SliderFloat("自发光倍率", &emissive_scale, 0.0F, 12.0F,
                                "%.1f");
             ImGui::Separator();
-            ImGui::TextUnformatted("点光源（GGX 直射，仅「PBR 完整 / 分屏首格」）");
+            ImGui::TextUnformatted(
+                "点光源（GGX 直射，仅「PBR 完整 / 分屏首格」）");
             ImGui::SliderInt("点光数量", &point_light_count, 0,
                              lumen::render::PBR_FORWARD_MAX_LIGHTS);
             ImGui::SliderFloat("点光强度", &point_direct_strength, 0.0F, 6.0F,
@@ -1357,7 +1162,9 @@ static int run_pbr(int, char **) {
         scene_clears[0].color = { { 0.08F, 0.08F, 0.1F, 1.0F } };
         scene_clears[1].depthStencil = { 1.0F, 0 };
 
-        VkRenderPassBeginInfo scene_rp { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        VkRenderPassBeginInfo scene_rp {
+            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        };
         scene_rp.renderPass = scene_target.render_pass();
         scene_rp.framebuffer = scene_target.framebuffer();
         scene_rp.renderArea.offset = { 0, 0 };
@@ -1376,12 +1183,24 @@ static int run_pbr(int, char **) {
             const glm::vec3 forward =
                 cam_forward_yaw_pitch_deg(cam.yaw, cam.pitch);
             const glm::vec3 eye = cam.eye;
-            const glm::mat4 view = glm::lookAt(
-                eye, eye + forward, glm::vec3(0.0F, 1.0F, 0.0F));
+            const glm::mat4 view =
+                glm::lookAt(eye, eye + forward, glm::vec3(0.0F, 1.0F, 0.0F));
             const glm::mat4 sky_v = glm::mat4(glm::mat3(view));
 
             VkCommandBuffer cb = cmd_buf.handle();
             const glm::mat4 helmet_model { 1.0F };
+            const auto material_ds_index =
+                [&](const lumen::render::Material *m) -> uint32_t {
+                if (m == nullptr || pbr_materials.empty()) {
+                    return 0U;
+                }
+                const std::ptrdiff_t d = m - pbr_materials.data();
+                if (d >= 0 &&
+                    static_cast<std::size_t>(d) < pbr_materials.size()) {
+                    return static_cast<uint32_t>(d);
+                }
+                return 0U;
+            };
 
             if (!pbr_debug_tile_grid) {
                 const float aspect =
@@ -1424,8 +1243,8 @@ static int run_pbr(int, char **) {
                                         nullptr);
                 vkCmdPushConstants(
                     cb, sky_pl.handle(),
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                    static_cast<uint32_t>(sizeof(SkyPush)), &sky_push);
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    0, static_cast<uint32_t>(sizeof(SkyPush)), &sky_push);
                 VkDeviceSize sky_off { 0 };
                 VkBuffer sky_vbh = sky_vbuf.handle();
                 vkCmdBindVertexBuffers(cb, 0, 1, &sky_vbh, &sky_off);
@@ -1434,21 +1253,25 @@ static int run_pbr(int, char **) {
                 vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   helmet_pipe.handle());
                 VkDeviceSize hv_off { 0 };
-                VkBuffer hvb = helmet_vbuf.handle();
+                VkBuffer hvb = scene_asset.vertex_buffer->handle();
                 vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off);
-                vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
-                                     helmet_ibuf.vk_index_type());
+                vkCmdBindIndexBuffer(cb, scene_asset.index_buffer->handle(), 0,
+                                     scene_asset.index_buffer->vk_index_type());
+                std::vector<lumen::scene::RenderItem> sponza_render_items;
+                lumen::scene::append_mesh_render_items(
+                    scene_asset.geometry(), sponza_mesh, helmet_model, 0,
+                    sponza_render_items);
                 uint32_t draw_slot = 0;
-                for (const lumen::core::PrimitiveSlice &sub :
-                     sponza_submeshes) {
-                    int mid = sub.material_index;
-                    if (mid < 0 || mid >= static_cast<int>(mat_count_u32)) {
-                        mid = 0;
+                for (const lumen::scene::RenderItem &item :
+                     sponza_render_items) {
+                    if (!item.is_valid_for_draw()) {
+                        continue;
                     }
-                    const uint32_t mids = static_cast<uint32_t>(mid);
+                    const lumen::scene::Primitive *prim = item.primitive;
+                    const uint32_t mids = material_ds_index(item.material);
                     lumen::render::PbrObjectUbo ou {};
-                    ou.model = helmet_model;
-                    const glm::mat3 n3 = glm::mat3(helmet_model);
+                    ou.model = item.model;
+                    const glm::mat3 n3 = glm::mat3(item.model);
                     ou.normalMatrix =
                         glm::mat4(glm::transpose(glm::inverse(n3)));
                     helmet_object_ubo.update(ou, draw_slot * helmet_obj_stride);
@@ -1463,8 +1286,8 @@ static int run_pbr(int, char **) {
                         0, static_cast<uint32_t>(pbr_sets.size()),
                         pbr_sets.data(), 1, &dyn_off);
                     ++draw_slot;
-                    vkCmdDrawIndexed(cb, sub.index_count, 1, sub.first_index,
-                                     0, 0);
+                    vkCmdDrawIndexed(cb, prim->index_count, 1,
+                                     prim->first_index, prim->base_vertex, 0);
                 }
             } else {
                 constexpr int k_dbg_tile_cols = 4;
@@ -1473,7 +1296,7 @@ static int run_pbr(int, char **) {
                     k_dbg_tile_cols * k_dbg_tile_rows;
                 const float cw = wf / static_cast<float>(k_dbg_tile_cols);
                 const float ch = hf / static_cast<float>(k_dbg_tile_rows);
-                VkBuffer hvb = helmet_vbuf.handle();
+                VkBuffer hvb = scene_asset.vertex_buffer->handle();
                 VkDeviceSize hv_off_zero { 0 };
 
                 for (int ti = 0; ti < k_dbg_tile_count; ++ti) {
@@ -1481,8 +1304,8 @@ static int run_pbr(int, char **) {
                     const int row = ti / k_dbg_tile_cols;
                     const float aspect =
                         cw / static_cast<float>((std::max)(1.0F, ch));
-                    glm::mat4 proj = glm::perspective(
-                        glm::radians(55.0F), aspect, 0.05F, 120.0F);
+                    glm::mat4 proj = glm::perspective(glm::radians(55.0F),
+                                                      aspect, 0.05F, 120.0F);
                     proj[1][1] *= -1.0F;
 
                     for (uint32_t mi = 0; mi < mat_count_u32; ++mi) {
@@ -1507,8 +1330,9 @@ static int run_pbr(int, char **) {
 
                     VkViewport vp {};
                     vp.x = static_cast<float>(col) * cw;
-                    // 与「3D 视口」里 ImGui 角标自上而下（row 0 在上）一致；勿用 (rows-1-row)，否则常见
-                    // ImGui Vulkan 纹理取向下整网与文字会上下对不齐。
+                    // 与「3D 视口」里 ImGui 角标自上而下（row 0
+                    // 在上）一致；勿用 (rows-1-row)，否则常见 ImGui Vulkan
+                    // 纹理取向下整网与文字会上下对不齐。
                     vp.y = static_cast<float>(row) * ch;
                     vp.width = cw;
                     vp.height = ch;
@@ -1527,23 +1351,31 @@ static int run_pbr(int, char **) {
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmet_pipe.handle());
                     vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off_zero);
-                    vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
-                                         helmet_ibuf.vk_index_type());
+                    vkCmdBindIndexBuffer(
+                        cb, scene_asset.index_buffer->handle(), 0,
+                        scene_asset.index_buffer->vk_index_type());
+                    std::vector<lumen::scene::RenderItem>
+                        sponza_render_items_dbg;
+                    lumen::scene::append_mesh_render_items(
+                        scene_asset.geometry(), sponza_mesh, helmet_model, 0,
+                        sponza_render_items_dbg);
                     uint32_t draw_slot_dbg = 0;
-                    for (const lumen::core::PrimitiveSlice &sub :
-                         sponza_submeshes) {
-                        int mid = sub.material_index;
-                        if (mid < 0 || mid >= static_cast<int>(mat_count_u32)) {
-                            mid = 0;
+                    for (const lumen::scene::RenderItem &item_dbg :
+                         sponza_render_items_dbg) {
+                        if (!item_dbg.is_valid_for_draw()) {
+                            continue;
                         }
-                        const uint32_t mids = static_cast<uint32_t>(mid);
+                        const lumen::scene::Primitive *prim =
+                            item_dbg.primitive;
+                        const uint32_t mids =
+                            material_ds_index(item_dbg.material);
                         lumen::render::PbrObjectUbo ou_tile {};
-                        ou_tile.model = helmet_model;
-                        const glm::mat3 n3d = glm::mat3(helmet_model);
+                        ou_tile.model = item_dbg.model;
+                        const glm::mat3 n3d = glm::mat3(item_dbg.model);
                         ou_tile.normalMatrix =
                             glm::mat4(glm::transpose(glm::inverse(n3d)));
-                        helmet_object_ubo.update(ou_tile,
-                                                 draw_slot_dbg * helmet_obj_stride);
+                        helmet_object_ubo.update(
+                            ou_tile, draw_slot_dbg * helmet_obj_stride);
                         std::array<VkDescriptorSet, 4> pbr_sets_tile {
                             helmet_frame_ds[frameIdx], sponza_material_ds[mids],
                             helmet_object_ds, helmet_light_ds[frameIdx]
@@ -1556,8 +1388,9 @@ static int run_pbr(int, char **) {
                             static_cast<uint32_t>(pbr_sets_tile.size()),
                             pbr_sets_tile.data(), 1, &dyn_d);
                         ++draw_slot_dbg;
-                        vkCmdDrawIndexed(cb, sub.index_count, 1,
-                                         sub.first_index, 0, 0);
+                        vkCmdDrawIndexed(cb, prim->index_count, 1,
+                                         prim->first_index, prim->base_vertex,
+                                         0);
                     }
                 }
             }
@@ -1567,7 +1400,9 @@ static int run_pbr(int, char **) {
 
         VkClearValue swap_clear {};
         swap_clear.color = { { 0.07F, 0.08F, 0.11F, 1.0F } };
-        VkRenderPassBeginInfo swap_rp { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        VkRenderPassBeginInfo swap_rp {
+            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        };
         swap_rp.renderPass = renderPass.handle();
         swap_rp.framebuffer = framebuffers.get(img_index);
         swap_rp.renderArea.offset = { 0, 0 };

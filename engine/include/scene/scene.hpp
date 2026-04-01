@@ -18,15 +18,14 @@ namespace scene {
 
 class Scene {
 public:
-[[nodiscard]] entt::registry &registry() { return reg_; }
+    [[nodiscard]] entt::registry &registry() { return reg_; }
     [[nodiscard]] const entt::registry &registry() const { return reg_; }
 
     /**
      * @brief 创建实体并附加
      * IDComponent、Transform、TagComponent（默认单位矩阵）
      */
-    [[nodiscard]] entt::entity
-    create_entity(std::string_view name = "Entity");
+    [[nodiscard]] entt::entity create_entity(std::string_view name = "Entity");
 
     /**
      * @brief 设置父节点；parent 为 null 则解除父子关系

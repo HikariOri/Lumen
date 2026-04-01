@@ -25,7 +25,11 @@
  *   - 独立材质
  *   - 独立 index range
  *
- * CPU 侧推荐的网格载体见 `scene/mesh.hpp`（`Mesh` / `Primitive` / `Model`）。
+ * **推荐**：一步得到可绘制 `scene::Model`（当前为合并后的单 `Mesh`）请用
+ * `scene/gltf_scene_mesh.hpp` 的
+ * `load_gltf_scene_mesh`（含 GPU 缓冲、PBR 贴图与 `Primitive` 分段）。
+ *
+ * 本文件的 `CpuMesh` / `PrimitiveSlice` 供底层解析或自定义上传管线使用。
  */
 
 #pragma once
