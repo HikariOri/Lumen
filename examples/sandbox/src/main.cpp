@@ -29,7 +29,7 @@
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
 #include "scene/mesh.hpp"
-#include "scene/pbr_material.hpp"
+#include "render/material/material.hpp"
 #include "scene/scene_camera.hpp"
 #include "scene/scene_orbit_controller.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
@@ -170,8 +170,8 @@ void compute_mesh_tangents(std::vector<HelmVertex> &verts,
 }
 
 [[nodiscard]] VkDescriptorSet vk_descriptor_for_pbr_material(
-    const lumen::scene::PBRMaterial *material,
-    const std::vector<lumen::scene::PBRMaterial> &materials_storage,
+    const lumen::render::Material *material,
+    const std::vector<lumen::render::Material> &materials_storage,
     const std::vector<VkDescriptorSet> &material_sets) {
     if (material_sets.empty()) {
         return VK_NULL_HANDLE;
@@ -471,7 +471,7 @@ static int run_pbr(int, char **) {
 
     std::unordered_map<std::string, size_t> tex_key_to_index;
     /// unique_ptr：vector 扩容时堆上 Texture 地址不变；vector<Texture> 会令
-    /// PBRMaterial 内指针全部悬垂并污染 descriptor 写入。
+    /// Material 内指针全部悬垂并污染 descriptor 写入。
     std::vector<std::unique_ptr<lumen::render::Texture>> sponza_texture_storage;
 
     auto acquire_texture = [&](const std::string &rel_path,
@@ -501,30 +501,30 @@ static int run_pbr(int, char **) {
         return sponza_texture_storage[new_ix].get();
     };
 
-    std::vector<lumen::scene::PBRMaterial> pbr_materials(
+    std::vector<lumen::render::Material> pbr_materials(
         sponza_gltf_materials.size());
     for (size_t i = 0; i < sponza_gltf_materials.size(); ++i) {
         const lumen::core::GltfMaterialData &src = sponza_gltf_materials[i];
-        lumen::scene::PBRMaterial &dst = pbr_materials[i];
-        dst.base_color_factor = src.base_color_factor;
-        dst.metallic_factor = src.metallic_factor;
-        dst.roughness_factor = src.roughness_factor;
-        dst.emissive_factor = src.emissive_factor;
-        dst.occlusion_strength = src.ao_factor;
-        dst.double_sided = src.double_sided;
-        dst.alpha_mode = static_cast<lumen::scene::MaterialAlphaMode>(
+        lumen::render::Material &dst = pbr_materials[i];
+        dst.baseColorFactor = src.base_color_factor;
+        dst.metallicFactor = src.metallic_factor;
+        dst.roughnessFactor = src.roughness_factor;
+        dst.emissiveFactor = src.emissive_factor;
+        dst.occlusionStrength = src.ao_factor;
+        dst.doubleSided = src.double_sided;
+        dst.alphaMode = static_cast<lumen::render::MaterialAlphaMode>(
             static_cast<
                 std::underlying_type_t<lumen::core::GltfMaterialAlphaMode>>(
                 src.alpha_mode));
-        dst.base_color_tex =
+        dst.baseColorTex =
             acquire_texture(src.albedo_path, VK_FORMAT_R8G8B8A8_SRGB);
-        dst.normal_tex =
+        dst.normalTex =
             acquire_texture(src.normal_path, VK_FORMAT_R8G8B8A8_UNORM);
-        dst.metallic_roughness_tex = acquire_texture(
+        dst.metallicRoughnessTex = acquire_texture(
             src.metallic_roughness_path, VK_FORMAT_R8G8B8A8_UNORM);
-        dst.occlusion_tex =
+        dst.occlusionTex =
             acquire_texture(src.ao_path, VK_FORMAT_R8G8B8A8_UNORM);
-        dst.emissive_tex =
+        dst.emissiveTex =
             acquire_texture(src.emissive_path, VK_FORMAT_R8G8B8A8_SRGB);
     }
     if (pbr_materials.empty()) {
@@ -551,7 +551,7 @@ static int run_pbr(int, char **) {
     lumen::scene::Mesh sponza_mesh {};
     sponza_mesh.primitives.reserve(sponza_submeshes.size());
     for (const lumen::core::GltfSubmeshRange &r : sponza_submeshes) {
-        int mi = r.material_index;
+        int mi = r.materialIndex;
         if (mi < 0 || mi >= static_cast<int>(pbr_materials.size())) {
             mi = 0;
         }
@@ -559,8 +559,8 @@ static int run_pbr(int, char **) {
             .vertex_buffer = &sponza_vbuf,
             .index_buffer = &sponza_ibuf,
             .vertex_byte_offset = 0,
-            .first_index = r.first_index,
-            .index_count = r.index_count,
+            .first_index = r.firstIndex,
+            .index_count = r.indexCount,
             .material = &pbr_materials[static_cast<size_t>(mi)],
         });
     }
@@ -732,9 +732,9 @@ static int run_pbr(int, char **) {
     }
 
     const std::string helmet_vs_path = lumen::core::get_resource_path(
-        std::string(lumen::render::k_pbr_forward_vert_spv_relative));
+        std::string(lumen::render::PBR_FORWARD_VERT_SPV_RELATIVE));
     const std::string helmet_fs_path = lumen::core::get_resource_path(
-        std::string(lumen::render::k_pbr_forward_frag_spv_relative));
+        std::string(lumen::render::PBR_FORWARD_FRAG_SPV_RELATIVE));
     lumen::render::ShaderModule sm_helmet_vs;
     lumen::render::ShaderModule sm_helmet_fs;
     if (!sm_helmet_vs.create_from_file(dev, helmet_vs_path.c_str())) {
@@ -877,18 +877,12 @@ static int run_pbr(int, char **) {
             sizeof(lumen::render::PbrLightUbo));
     }
 
-    VkPushConstantRange helmet_pc {
-        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset = 0,
-        .size = static_cast<uint32_t>(
-            sizeof(lumen::render::PbrForwardPushConstants)),
-    };
     lumen::render::PipelineLayout helmet_pl;
     if (!helmet_pl.create(
             ctx,
             { helmet_frame_dsl.handle(), helmet_material_dsl.handle(),
               helmet_object_dsl.handle(), helmet_light_dsl.handle() },
-            { helmet_pc })) {
+            {})) {
         LUMEN_APP_LOG_ERROR("PBR PipelineLayout 失败");
         return -1;
     }
@@ -939,7 +933,7 @@ static int run_pbr(int, char **) {
     float skyExposure { 4.0F };
     float iblStrength { 3.0F };
     float emissiveScale { 3.0F };
-    int pointlightCount { lumen::render::k_pbr_legacy_point_light_cap };
+    int pointlightCount { lumen::render::PBR_LEGACY_POINT_LIGHT_CAP };
     float pointDirectStrength { 1.15F };
     int helmetDebugView { 0 };
     bool pbrDebugTileGrid { false };
@@ -1228,7 +1222,7 @@ static int run_pbr(int, char **) {
             ImGui::TextUnformatted(
                 "点光源（GGX 直射；分屏首格与「Scene」完整 PBR 一致）");
             ImGui::SliderInt("点光数量", &pointlightCount, 0,
-                             lumen::render::k_pbr_forward_max_lights);
+                             lumen::render::PBR_FORWARD_MAX_LIGHTS);
             ImGui::SliderFloat("点光强度", &pointDirectStrength, 0.0F, 6.0F,
                                "%.2f");
         }
@@ -1241,23 +1235,42 @@ static int run_pbr(int, char **) {
                             &pbrDebugTileGrid);
             ImGui::TextUnformatted("关闭分屏后可用单项模式：");
             ImGui::BeginDisabled(pbrDebugTileGrid);
-            ImGui::RadioButton("PBR 光照", &helmetDebugView, 0);
-            ImGui::RadioButton("世界空间几何法线 (顶点法线)", &helmetDebugView,
-                               1);
-            ImGui::RadioButton("扰动后法线 (法线贴图)", &helmetDebugView, 2);
-            ImGui::RadioButton("反照率", &helmetDebugView, 3);
-            ImGui::RadioButton("金属度", &helmetDebugView, 4);
-            ImGui::RadioButton("粗糙度", &helmetDebugView, 5);
-            ImGui::RadioButton("AO", &helmetDebugView, 6);
-            ImGui::RadioButton("漫反射 IBL", &helmetDebugView, 7);
-            ImGui::RadioButton("镜面 IBL", &helmetDebugView, 8);
-            ImGui::RadioButton("Irradiance 采样", &helmetDebugView, 9);
-            ImGui::RadioButton("Prefilter 采样", &helmetDebugView, 10);
-            ImGui::RadioButton("N·V", &helmetDebugView, 11);
-            ImGui::RadioButton("F0", &helmetDebugView, 12);
-            ImGui::RadioButton("BRDF LUT (RG)", &helmetDebugView, 13);
-            ImGui::RadioButton("自发光", &helmetDebugView, 14);
-            ImGui::RadioButton("Base Color", &helmetDebugView, 15);
+            ImGui::RadioButton("PBR（最终）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_NONE);
+            ImGui::RadioButton("法线（世界空间，着色）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_NORMAL_WS);
+            ImGui::RadioButton("法线（切线空间，贴图）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_NORMAL_TS);
+            ImGui::RadioButton("深度（距相机归一化）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_DEPTH);
+            ImGui::RadioButton("反照率", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_ALBEDO);
+            ImGui::RadioButton("金属度", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_METALLIC);
+            ImGui::RadioButton("粗糙度", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_ROUGHNESS);
+            ImGui::RadioButton("AO", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_AO);
+            ImGui::RadioButton("直射漫反射", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_DIRECT_DIFFUSE);
+            ImGui::RadioButton("直射镜面", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_DIRECT_SPECULAR);
+            ImGui::RadioButton("IBL 漫反射", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_IBL_DIFFUSE);
+            ImGui::RadioButton("IBL 镜面", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_IBL_SPECULAR);
+            ImGui::RadioButton("自发光", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_EMISSIVE);
+            ImGui::RadioButton("合成（无 IBL）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_FINAL_NO_IBL);
+            ImGui::RadioButton("合成（无直射）", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_FINAL_NO_DIRECT);
+            ImGui::RadioButton("热力：直射能量", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_HEAT_LIGHT_INTENSITY);
+            ImGui::RadioButton("热力：N·L 最大", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_HEAT_NDOTL);
+            ImGui::RadioButton("热力：光源数量", &helmetDebugView,
+                               lumen::render::PBR_DEBUG_HEAT_LIGHT_COUNT);
             char dbg_line[64];
             std::snprintf(dbg_line, sizeof dbg_line, "当前模式号: %d",
                           helmetDebugView);
@@ -1344,9 +1357,11 @@ static int run_pbr(int, char **) {
             }
 
             lumen::render::PbrFrameUbo frame_u {};
-            lumen::render::pack_pbr_frame_ubo(frame_u, view, proj, eye,
-                                              skyExposure, iblStrength,
-                                              k_prefilter_max_lod, 0.0F);
+            lumen::render::pack_pbr_frame_ubo(
+                frame_u, view, proj, eye, skyExposure, iblStrength,
+                k_prefilter_max_lod, 0.0F,
+                pbrDebugTileGrid ? lumen::render::PBR_DEBUG_NONE
+                                 : helmetDebugView);
             helmet_frame_ubos[frameIdx].update(frame_u);
 
             lumen::render::PbrLightUbo light_u {};
@@ -1383,7 +1398,7 @@ static int run_pbr(int, char **) {
                 if (!prim.is_drawable()) {
                     continue;
                 }
-                const lumen::scene::PBRMaterial *prim_mat =
+                const lumen::render::Material *prim_mat =
                     prim.material != nullptr ? prim.material
                                              : &pbr_materials[0];
                 VkDescriptorSet mat_ds = vk_descriptor_for_pbr_material(
@@ -1391,7 +1406,7 @@ static int run_pbr(int, char **) {
                 lumen::render::PbrObjectUbo ou {};
                 ou.model = helmet_model;
                 const glm::mat3 n3 = glm::mat3(helmet_model);
-                ou.normal_matrix = glm::mat4(glm::transpose(glm::inverse(n3)));
+                ou.normalMatrix = glm::mat4(glm::transpose(glm::inverse(n3)));
                 helmet_object_ubo.update(ou, draw_slot * helmet_obj_stride);
                 std::array<VkDescriptorSet, 4> pbr_sets {
                     helmet_frame_ds[frameIdx], mat_ds, helmet_object_ds,
@@ -1403,12 +1418,6 @@ static int run_pbr(int, char **) {
                                         helmet_pl.handle(), 0,
                                         static_cast<uint32_t>(pbr_sets.size()),
                                         pbr_sets.data(), 1, &dyn_off);
-                lumen::render::PbrForwardPushConstants hp {};
-                hp.debug_view = pbrDebugTileGrid ? 0 : helmetDebugView;
-                hp.pad = { { 0, 0, 0 } };
-                vkCmdPushConstants(cb, helmet_pl.handle(),
-                                   VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   static_cast<uint32_t>(sizeof(hp)), &hp);
                 ++draw_slot;
                 VkDeviceSize voff =
                     static_cast<VkDeviceSize>(prim.vertex_byte_offset);
@@ -1469,7 +1478,9 @@ static int run_pbr(int, char **) {
                     lumen::render::PbrFrameUbo frame_u_tile {};
                     lumen::render::pack_pbr_frame_ubo(
                         frame_u_tile, view, proj, eye, skyExposure, iblStrength,
-                        k_prefilter_max_lod, 0.0F);
+                        k_prefilter_max_lod, 0.0F,
+                        lumen::render::PBR_FORWARD_DEBUG_TILE_MODES.at(
+                            static_cast<std::size_t>(ti)));
                     helmet_frame_ubos[frameIdx].update(frame_u_tile);
 
                     lumen::render::PbrLightUbo light_u_tile {};
@@ -1505,7 +1516,7 @@ static int run_pbr(int, char **) {
                         if (!prim.is_drawable()) {
                             continue;
                         }
-                        const lumen::scene::PBRMaterial *prim_mat =
+                        const lumen::render::Material *prim_mat =
                             prim.material != nullptr ? prim.material
                                                      : &pbr_materials[0];
                         VkDescriptorSet mat_ds_dbg =
@@ -1514,7 +1525,7 @@ static int run_pbr(int, char **) {
                         lumen::render::PbrObjectUbo ou_dbg {};
                         ou_dbg.model = helmet_model;
                         const glm::mat3 n3d = glm::mat3(helmet_model);
-                        ou_dbg.normal_matrix =
+                        ou_dbg.normalMatrix =
                             glm::mat4(glm::transpose(glm::inverse(n3d)));
                         helmet_object_ubo.update(ou_dbg, draw_slot_dbg *
                                                              helmet_obj_stride);
@@ -1529,13 +1540,6 @@ static int run_pbr(int, char **) {
                             helmet_pl.handle(), 0,
                             static_cast<uint32_t>(sets_dbg.size()),
                             sets_dbg.data(), 1, &dyn_dbg);
-                        lumen::render::PbrForwardPushConstants hp {};
-                        hp.debug_view = ti;
-                        hp.pad = { { 0, 0, 0 } };
-                        vkCmdPushConstants(cb, helmet_pl.handle(),
-                                           VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                           static_cast<uint32_t>(sizeof(hp)),
-                                           &hp);
                         ++draw_slot_dbg;
                         VkDeviceSize voff =
                             static_cast<VkDeviceSize>(prim.vertex_byte_offset);

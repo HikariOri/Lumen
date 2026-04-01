@@ -23,7 +23,7 @@
 
 #include "core/id.hpp"
 
-#include "scene/pbr_material.hpp"
+#include "render/material/material.hpp"
 
 namespace lumen {
 namespace scene {
@@ -204,11 +204,11 @@ struct SkyLightComponent {
 };
 
 /**
- * @brief EnTT 材质组件：glTF 风格 PBR 参数与贴图指针（与 `PBRMaterial` /
+ * @brief EnTT 材质组件：glTF 风格 PBR 参数与贴图指针（与 `render::Material` /
  * `Primitive::material` 同源模型）
  */
 struct MaterialComponent {
-    PBRMaterial pbr {};
+    lumen::render::Material pbr {};
 };
 
 struct MeshComponent {};

@@ -16,11 +16,10 @@
 namespace lumen::render {
 class VertexBuffer;
 class IndexBuffer;
+struct Material;
 } // namespace lumen::render
 
 namespace lumen::scene {
-
-struct PBRMaterial;
 
 /**
  * @brief 最小可绘制单元（≈ glTF primitive）：一次 `vkCmdDrawIndexed`
@@ -39,10 +38,10 @@ struct Primitive {
     /**
      * 本 primitive 使用的材质；空则由渲染路径决定默认材质。
      *
-     * @note 与 Vulkan 一致：不同 `PBRMaterial` 通常需切换 pipeline / descriptor
+     * @note 与 Vulkan 一致：不同 `Material` 通常需切换 pipeline / descriptor
      * set（或 bindless 索引）；仅几何循环不够时要在渲染器中按材质绑定。
      */
-    const PBRMaterial *material {};
+    const render::Material *material {};
 
     [[nodiscard]] bool is_drawable() const {
         return vertex_buffer != nullptr && index_buffer != nullptr &&

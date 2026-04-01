@@ -443,9 +443,11 @@ void append_primitive(const tinygltf::Model &model,
         const std::uint32_t total =
             static_cast<std::uint32_t>(out.indices.size());
         if (total > submesh_first_index) {
-            ranges->push_back(GltfSubmeshRange { submesh_first_index,
-                                                 total - submesh_first_index,
-                                                 prim.material });
+            ranges->push_back(GltfSubmeshRange { .firstIndex = submesh_first_index,
+                                                 .indexCount =
+                                                     total - submesh_first_index,
+                                                 .materialIndex =
+                                                     prim.material });
         }
     }
 }
@@ -897,10 +899,10 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
         size_t best_tri = 0;
         std::vector<size_t> tri_per_mat(model.materials.size(), 0);
         for (const auto &r : *outSubmeshes) {
-            if (r.material_index >= 0 &&
-                r.material_index < static_cast<int>(model.materials.size())) {
-                tri_per_mat[static_cast<size_t>(r.material_index)] +=
-                    static_cast<size_t>(r.index_count) / 3u;
+            if (r.materialIndex >= 0 &&
+                r.materialIndex < static_cast<int>(model.materials.size())) {
+                tri_per_mat[static_cast<size_t>(r.materialIndex)] +=
+                    static_cast<size_t>(r.indexCount) / 3u;
             }
         }
         for (size_t i = 0; i < tri_per_mat.size(); ++i) {
