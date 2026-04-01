@@ -42,7 +42,19 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "$<TARGET_FILE_DIR:engine>/shaders/pbr_forward.frag.spv"
           "${SANDBOX_SPV_DIR}/pbr_forward.frag.spv"
-  COMMENT "Copy engine pbr_forward SPIR-V into sandbox"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pick_id.vert.spv"
+          "${SANDBOX_SPV_DIR}/pick_id.vert.spv"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pick_id.frag.spv"
+          "${SANDBOX_SPV_DIR}/pick_id.frag.spv"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pick_id_visualize.vert.spv"
+          "${SANDBOX_SPV_DIR}/pick_id_visualize.vert.spv"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pick_id_visualize.frag.spv"
+          "${SANDBOX_SPV_DIR}/pick_id_visualize.frag.spv"
+  COMMENT "Copy engine pbr_forward + pick_id SPIR-V into sandbox"
   VERBATIM
 )
 

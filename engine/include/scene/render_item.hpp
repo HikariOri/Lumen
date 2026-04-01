@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <entt/entt.hpp>
 #include <glm/mat4x4.hpp>
 
 #include "render/material/material.hpp"
@@ -43,6 +44,9 @@ struct RenderItem {
 
     std::uint64_t pipelineKey {}; ///< 排序 / 哈希用；`0` 表示调用方不使用
 
+    /// ID Map 拾取：子实体写入自身；`entt::null` 表示不参与 ID Pass
+    entt::entity pick_entity { entt::null };
+
     [[nodiscard]] bool is_valid_for_draw() const {
         return primitive != nullptr && primitive->is_drawable() && vertexBuffer != nullptr &&
                indexBuffer != nullptr;
@@ -53,6 +57,7 @@ struct RenderItem {
  * @brief 将单条可绘制 `Primitive` 追加为 `RenderItem`
  *
  * @param[in] materialOverride 非空时覆盖 `primitive.material`
+ * @param[in] pick_entity      ID Map 用；`entt::null` 则跳过 ID Pass 绘制
  *
  * @note
  * `meshBuffer` 无效或 `!primitive.is_drawable()` 时直接返回。
@@ -62,7 +67,8 @@ inline void append_primitive_render_item(const MeshBuffer &meshBuffer,
                                          const glm::mat4 &model,
                                          std::uint64_t pipelineKey,
                                          const render::Material *materialOverride,
-                                         std::vector<RenderItem> &outItems) {
+                                         std::vector<RenderItem> &outItems,
+                                         entt::entity pick_entity = entt::null) {
     if (!meshBuffer.valid() || !primitive.is_drawable()) {
         return;
     }
@@ -74,6 +80,7 @@ inline void append_primitive_render_item(const MeshBuffer &meshBuffer,
         materialOverride != nullptr ? materialOverride : primitive.material;
     item.model = model;
     item.pipelineKey = pipelineKey;
+    item.pick_entity = pick_entity;
     outItems.push_back(item);
 }
 
@@ -92,14 +99,15 @@ inline void append_primitive_render_item(const MeshBuffer &meshBuffer,
 inline void append_mesh_render_items(const MeshBuffer &meshBuffer, const Mesh &mesh,
                                      const glm::mat4 &model,
                                      std::uint64_t pipelineKey,
-                                     std::vector<RenderItem> &outItems) {
+                                     std::vector<RenderItem> &outItems,
+                                     entt::entity pick_entity = entt::null) {
     if (!meshBuffer.valid()) {
         return;
     }
     outItems.reserve(outItems.size() + mesh.primitives.size());
     for (const auto &primitive : mesh.primitives) {
         append_primitive_render_item(meshBuffer, primitive, model, pipelineKey,
-                                   nullptr, outItems);
+                                   nullptr, outItems, pick_entity);
     }
 }
 
@@ -109,10 +117,11 @@ inline void append_mesh_render_items(const MeshBuffer &meshBuffer, const Mesh &m
 inline void append_model_render_items(const MeshBuffer &meshBuffer,
                                       const Model &model, const glm::mat4 &world,
                                       std::uint64_t pipelineKey,
-                                      std::vector<RenderItem> &outItems) {
+                                      std::vector<RenderItem> &outItems,
+                                      entt::entity pick_entity = entt::null) {
     for (const Mesh &meshPart : model) {
         append_mesh_render_items(meshBuffer, meshPart, world, pipelineKey,
-                                 outItems);
+                                 outItems, pick_entity);
     }
 }
 

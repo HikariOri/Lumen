@@ -52,7 +52,8 @@ inline void append_submesh_render_items(const MeshBuffer &meshBuffer,
             subMeshRenderer.mesh->primitives[subMeshRenderer.primitiveIndex];
         const glm::mat4 world = world_matrix(registry, entity);
         append_primitive_render_item(meshBuffer, primitive, world, pipelineKey,
-                                     subMeshRenderer.materialOverride, outItems);
+                                     subMeshRenderer.materialOverride, outItems,
+                                     entity);
     }
 }
 

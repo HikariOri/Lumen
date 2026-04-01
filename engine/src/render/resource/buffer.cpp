@@ -73,8 +73,9 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &createInfo) {
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
     if (createInfo.hostVisible) {
-        allocCreate.flags =
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        allocCreate.flags = createInfo.hostRandomAccess
+                                ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT
+                                : VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
     }
     if (createInfo.persistentlyMapped) {
         allocCreate.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -175,6 +176,21 @@ void Buffer::unmap() {
     }
     if (vmaAllocation != nullptr && vmaAllocator != nullptr) {
         vmaUnmapMemory(vmaAllocator, vmaAllocation);
+    }
+}
+
+void Buffer::invalidate_mapped_range(const size_t byte_offset,
+                                     const size_t byte_count) {
+    if (vmaAllocation == nullptr || vmaAllocator == nullptr ||
+        byte_count == 0) {
+        return;
+    }
+    const VkResult r = vmaInvalidateAllocation(
+        vmaAllocator, vmaAllocation, static_cast<VkDeviceSize>(byte_offset),
+        static_cast<VkDeviceSize>(byte_count));
+    if (r != VK_SUCCESS) {
+        LUMEN_LOG_ERROR("Buffer::invalidate_mapped_range 失败: {}",
+                        static_cast<int>(r));
     }
 }
 

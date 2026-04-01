@@ -17,12 +17,14 @@
 #include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
 #include "render/pass/render_pass.hpp"
+#include "render/pass/pick_id_render_target.hpp"
 #include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/buffer.hpp"
 #include "render/resource/descriptor.hpp"
 #include "render/resource/image.hpp"
 #include "render/resource/pbr_placeholder_textures.hpp"
+#include "render/resource/sampler.hpp"
 #include "render/resource/texture.hpp"
 #include "render/shader.hpp"
 #include "render/surface.hpp"
@@ -36,6 +38,7 @@
 #include "scene/scene_orbit_controller.hpp"
 #include "scene/transform.hpp"
 #include "scene/id_lookup.hpp"
+#include "scene/pick.hpp"
 #include "ui/editor_selection.hpp"
 #include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
@@ -292,6 +295,12 @@ static int run_pbr(int, char **) {
         }
     }
 
+    lumen::render::PickIdRenderTarget pickIdTarget;
+    if (!pickIdTarget.create(ctx, sceneTarget.width(), sceneTarget.height())) {
+        LUMEN_APP_LOG_ERROR("PickIdRenderTarget 创建失败");
+        return -1;
+    }
+
     lumen::render::OffscreenRenderTarget debugTileTarget;
     {
         lumen::render::OffscreenRenderTargetConfig debugTargetCfg;
@@ -306,6 +315,23 @@ static int run_pbr(int, char **) {
         if (!debugTileTarget.create(ctx, debugTargetCfg,
                                     &offscreenRenderPass)) {
             LUMEN_APP_LOG_ERROR("分屏调试用离屏目标创建失败");
+            return -1;
+        }
+    }
+
+    lumen::render::OffscreenRenderTarget idMapVizTarget;
+    {
+        lumen::render::OffscreenRenderTargetConfig vizCfg;
+        vizCfg.width =
+            static_cast<uint32_t>((std::max)(2, windowWidth * 3 / 4));
+        vizCfg.height =
+            static_cast<uint32_t>((std::max)(2, windowHeight * 3 / 4));
+        vizCfg.format = swapchain.image_format();
+        vizCfg.useDepth = true;
+        vizCfg.colorFinalLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (!idMapVizTarget.create(ctx, vizCfg, &offscreenRenderPass)) {
+            LUMEN_APP_LOG_ERROR("ID Map 可视化离屏目标创建失败");
             return -1;
         }
     }
@@ -516,6 +542,26 @@ static int run_pbr(int, char **) {
             sceneSampler.handle(), debugTileTarget.color_view(),
             debugTileTarget.color_sample_layout()));
 
+    auto idMapVizTexId =
+        reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
+            sceneSampler.handle(), idMapVizTarget.color_view(),
+            idMapVizTarget.color_sample_layout()));
+
+    lumen::render::Sampler pickIdNearestSampler;
+    {
+        lumen::render::SamplerConfig sc {};
+        sc.magFilter = VK_FILTER_NEAREST;
+        sc.minFilter = VK_FILTER_NEAREST;
+        sc.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sc.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sc.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sc.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        if (!pickIdNearestSampler.create(ctx, sc)) {
+            LUMEN_APP_LOG_ERROR("Pick ID 最近邻 Sampler 创建失败");
+            return -1;
+        }
+    }
+
     const std::string skyVsPath =
         lumen::core::get_resource_path("shaders/skybox.vert.spv");
     const std::string skyFsPath =
@@ -621,6 +667,21 @@ static int run_pbr(int, char **) {
     }
     if (!smHelmetFs.create_from_file(dev, helmetFsPath.c_str())) {
         LUMEN_APP_LOG_ERROR("头盔片元着色器加载失败: {}", helmetFsPath);
+        return -1;
+    }
+
+    const std::string pickIdVsPath = lumen::core::get_resource_path(
+        std::string(lumen::render::PICK_ID_VERT_SPV_RELATIVE));
+    const std::string pickIdFsPath = lumen::core::get_resource_path(
+        std::string(lumen::render::PICK_ID_FRAG_SPV_RELATIVE));
+    lumen::render::ShaderModule smPickIdVs;
+    lumen::render::ShaderModule smPickIdFs;
+    if (!smPickIdVs.create_from_file(dev, pickIdVsPath.c_str())) {
+        LUMEN_APP_LOG_ERROR("pick_id 顶点着色器加载失败: {}", pickIdVsPath);
+        return -1;
+    }
+    if (!smPickIdFs.create_from_file(dev, pickIdFsPath.c_str())) {
+        LUMEN_APP_LOG_ERROR("pick_id 片元着色器加载失败: {}", pickIdFsPath);
         return -1;
     }
 
@@ -801,6 +862,119 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
+    lumen::render::PipelineLayout pickIdPl;
+    {
+        VkPushConstantRange pcRange {};
+        pcRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        pcRange.offset = 0;
+        pcRange.size = sizeof(std::uint32_t);
+        if (!pickIdPl.create(ctx,
+                             { helmetFrameDsl.handle(),
+                               helmetObjectDsl.handle() },
+                             { pcRange })) {
+            LUMEN_APP_LOG_ERROR("Pick ID PipelineLayout 失败");
+            return -1;
+        }
+    }
+    lumen::render::GraphicsPipelineConfig pickIdCfg {};
+    pickIdCfg.shaderStages.push_back(
+        { smPickIdVs.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    pickIdCfg.shaderStages.push_back(
+        { smPickIdFs.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    pickIdCfg.vertexBindings = helmetCfg.vertexBindings;
+    pickIdCfg.vertexAttributes = helmetCfg.vertexAttributes;
+    pickIdCfg.cullMode = VK_CULL_MODE_NONE;
+    pickIdCfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    pickIdCfg.depthTest = true;
+    pickIdCfg.depthWrite = true;
+    pickIdCfg.alphaBlend = false;
+    lumen::render::GraphicsPipeline pickIdPipe;
+    if (!pickIdPipe.create(ctx, pickIdPl, pickIdTarget.render_pass_ref(), 0,
+                           pickIdCfg)) {
+        LUMEN_APP_LOG_ERROR("Pick ID GraphicsPipeline 失败");
+        return -1;
+    }
+
+    lumen::render::Buffer pickReadbackBuffer;
+    {
+        lumen::render::BufferCreateInfo bi {};
+        bi.size = sizeof(std::uint32_t);
+        bi.usage = lumen::render::BufferUsage::TransferDst;
+        bi.hostVisible = true;
+        bi.hostRandomAccess = true;
+        if (!pickReadbackBuffer.create(ctx, bi)) {
+            LUMEN_APP_LOG_ERROR("Pick 读回缓冲创建失败");
+            return -1;
+        }
+    }
+
+    const std::string pickVizVsPath = lumen::core::get_resource_path(
+        std::string(lumen::render::PICK_ID_VISUALIZE_VERT_SPV_RELATIVE));
+    const std::string pickVizFsPath = lumen::core::get_resource_path(
+        std::string(lumen::render::PICK_ID_VISUALIZE_FRAG_SPV_RELATIVE));
+    lumen::render::ShaderModule smPickVizVs;
+    lumen::render::ShaderModule smPickVizFs;
+    if (!smPickVizVs.create_from_file(dev, pickVizVsPath.c_str())) {
+        LUMEN_APP_LOG_ERROR("pick_id_visualize 顶点着色器加载失败: {}",
+                            pickVizVsPath);
+        return -1;
+    }
+    if (!smPickVizFs.create_from_file(dev, pickVizFsPath.c_str())) {
+        LUMEN_APP_LOG_ERROR("pick_id_visualize 片元着色器加载失败: {}",
+                            pickVizFsPath);
+        return -1;
+    }
+
+    lumen::render::DescriptorSetLayout idMapVizDsl;
+    if (!idMapVizDsl.create(
+            ctx,
+            { { .binding = 0,
+                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .count = 1,
+                .stages = VK_SHADER_STAGE_FRAGMENT_BIT } })) {
+        LUMEN_APP_LOG_ERROR("ID Map 可视化 DescriptorSetLayout 失败");
+        return -1;
+    }
+    lumen::render::DescriptorPool idMapVizDpool;
+    if (!idMapVizDpool.create(
+            ctx,
+            { { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .count = 1 } },
+            1)) {
+        LUMEN_APP_LOG_ERROR("ID Map 可视化 DescriptorPool 失败");
+        return -1;
+    }
+    VkDescriptorSet idMapVizDs { VK_NULL_HANDLE };
+    if (!idMapVizDpool.allocate(dev, idMapVizDsl.handle(), idMapVizDs)) {
+        LUMEN_APP_LOG_ERROR("ID Map 可视化 DescriptorSet 分配失败");
+        return -1;
+    }
+    lumen::render::write_descriptor_image(
+        dev, idMapVizDs, 0, pickIdTarget.color_image().view(),
+        pickIdNearestSampler.handle(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    lumen::render::PipelineLayout pickVizPl;
+    if (!pickVizPl.create(ctx, { idMapVizDsl.handle() }, {})) {
+        LUMEN_APP_LOG_ERROR("ID Map 可视化 PipelineLayout 失败");
+        return -1;
+    }
+    lumen::render::GraphicsPipelineConfig pickVizCfg {};
+    pickVizCfg.shaderStages.push_back(
+        { smPickVizVs.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
+    pickVizCfg.shaderStages.push_back(
+        { smPickVizFs.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    pickVizCfg.cullMode = VK_CULL_MODE_NONE;
+    pickVizCfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    pickVizCfg.depthTest = false;
+    pickVizCfg.depthWrite = false;
+    pickVizCfg.alphaBlend = false;
+    lumen::render::GraphicsPipeline pickVizPipe;
+    if (!pickVizPipe.create(ctx, pickVizPl, offscreenRenderPass, 0,
+                            pickVizCfg)) {
+        LUMEN_APP_LOG_ERROR("ID Map 可视化 GraphicsPipeline 失败");
+        return -1;
+    }
+
     LUMEN_APP_LOG_INFO("PBR 场景资源就绪，着色器 {} | {}", helmetVsPath,
                        helmetFsPath);
 
@@ -811,6 +985,7 @@ static int run_pbr(int, char **) {
     float pointDirectStrength { 1.15F };
     int helmetDebugView { 0 };
     bool pbrDebugTileGrid { false };
+    bool show_id_map_viz { false };
 
     lumen::scene::SceneCamera sceneCamera;
     lumen::scene::SceneOrbitController orbit;
@@ -904,6 +1079,10 @@ static int run_pbr(int, char **) {
     bool scene_viewport_gizmo_rect_valid { false };
     ImGuiWindow *scene_viewport_imgui_window_for_gizmo { nullptr };
     bool prev_key_f_down { false };
+    bool prev_scene_pick_lmb_down { false };
+    bool scene_pick_pending { false };
+    std::uint32_t scene_pick_fb_x { 0 };
+    std::uint32_t scene_pick_fb_y { 0 };
 
     while (running) {
         if (!pump.poll()) {
@@ -958,10 +1137,18 @@ static int run_pbr(int, char **) {
                 reinterpret_cast<void *>(sceneTexId));
             lumen::ui::imgui_backend_remove_texture(
                 reinterpret_cast<void *>(debugSceneTexId));
+            lumen::ui::imgui_backend_remove_texture(
+                reinterpret_cast<void *>(idMapVizTexId));
             sceneTexId = static_cast<ImTextureID>(0);
             debugSceneTexId = static_cast<ImTextureID>(0);
+            idMapVizTexId = static_cast<ImTextureID>(0);
             if (!sceneTarget.resize(pendingSceneWidth, pendingSceneHeight)) {
                 LUMEN_APP_LOG_ERROR("场景离屏目标 resize 失败");
+                running = false;
+                break;
+            }
+            if (!pickIdTarget.resize(pendingSceneWidth, pendingSceneHeight)) {
+                LUMEN_APP_LOG_ERROR("PickIdRenderTarget resize 失败");
                 running = false;
                 break;
             }
@@ -971,6 +1158,15 @@ static int run_pbr(int, char **) {
                 running = false;
                 break;
             }
+            if (!idMapVizTarget.resize(pendingSceneWidth, pendingSceneHeight)) {
+                LUMEN_APP_LOG_ERROR("ID Map 可视化离屏目标 resize 失败");
+                running = false;
+                break;
+            }
+            lumen::render::write_descriptor_image(
+                dev, idMapVizDs, 0, pickIdTarget.color_image().view(),
+                pickIdNearestSampler.handle(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             sceneTexId = reinterpret_cast<ImTextureID>(
                 lumen::ui::imgui_backend_add_texture(
                     sceneSampler.handle(), sceneTarget.color_view(),
@@ -979,6 +1175,10 @@ static int run_pbr(int, char **) {
                 lumen::ui::imgui_backend_add_texture(
                     sceneSampler.handle(), debugTileTarget.color_view(),
                     debugTileTarget.color_sample_layout()));
+            idMapVizTexId = reinterpret_cast<ImTextureID>(
+                lumen::ui::imgui_backend_add_texture(
+                    sceneSampler.handle(), idMapVizTarget.color_view(),
+                    idMapVizTarget.color_sample_layout()));
         }
 
         if (swapchain.extent().width == 0 || swapchain.extent().height == 0) {
@@ -1016,9 +1216,9 @@ static int run_pbr(int, char **) {
 
         if (ImGui::Begin("场景 Gizmo")) {
             ImGui::TextUnformatted(
-                "在「Scene」视口内选中实体（层级）后拖动手柄；局部/父链与检视器一致。"
-                "未在输入文字时按 F 将轨道相机对准选中网格（鼠标在 Scene 图像上或"
-                "该视口已记为悬停）。");
+                "在「Scene」视口内左键点选 SubMesh / 根网格（ID Map）；层级与检视器"
+                "一致。选中后可拖 Gizmo。未在输入文字且非 Alt 时按 F 平滑对焦（鼠标在"
+                " Scene 图像上或该视口已记为悬停）。");
             ImGui::RadioButton(
                 "平移", &scene_gizmo_operation,
                 static_cast<int>(ImGuizmo::TRANSLATE));
@@ -1030,6 +1230,18 @@ static int run_pbr(int, char **) {
             ImGui::RadioButton(
                 "缩放", &scene_gizmo_operation,
                 static_cast<int>(ImGuizmo::SCALE));
+        }
+        ImGui::End();
+
+        if (ImGui::Begin("ID Map 可视化")) {
+            ImGui::Checkbox("启用（每帧渲染 ID Pass + 伪彩色）", &show_id_map_viz);
+            ImGui::TextUnformatted(
+                "与 Scene 同分辨率；深色为 ID 0（背景），其余为编码后的实体哈希色。");
+            if (show_id_map_viz &&
+                idMapVizTexId != static_cast<ImTextureID>(0)) {
+                const ImVec2 avail = ImGui::GetContentRegionAvail();
+                ImGui::Image(idMapVizTexId, avail);
+            }
         }
         ImGui::End();
 
@@ -1126,8 +1338,8 @@ static int run_pbr(int, char **) {
         if (ImGui::Begin("IBL 预览")) {
             ImGui::TextUnformatted(
                 "右键拖拽旋转（「Scene」或「PBR 分屏调试」画面内、非 Alt）；"
-                "Alt+左/中键 轨道/平移/缩放；WASD+EQ 平移；在上述画面上滚轮缩放"
-                "（绕枢轴）；鼠标在 Scene 图像上且未在输入文字时按 F 聚焦选中物体");
+                "Alt+左/中键 轨道/平移/缩放；WASD+EQ 平移；滚轮绕枢轴缩放；"
+                "Scene 图像上左键点选实体（非 Alt、非 Gizmo 悬停）；未在输入文字时按 F 对焦");
             ImGui::TextUnformatted("天空曝光与 IBL 强度见「环境光贴图」。");
             float orbitR = orbit.radius();
             ImGui::SliderFloat("轨道距离（缩放）", &orbitR, 0.08F, 28.0F,
@@ -1420,6 +1632,46 @@ static int run_pbr(int, char **) {
             lumen::ui::imguizmo_reset_interaction_state();
         }
 
+        {
+            const bool lmb_down = pump.input().is_mouse_button_down(
+                lumen::platform::MouseButton::Left);
+            const bool lmb_click = lmb_down && !prev_scene_pick_lmb_down;
+            prev_scene_pick_lmb_down = lmb_down;
+            if (lmb_click && scene_viewport_gizmo_rect_valid &&
+                mouse_over_scene_image_rect && !pump.input().has_alt() &&
+                !ImGui::GetIO().WantTextInput &&
+                !lumen::ui::imguizmo_is_over() &&
+                !lumen::ui::imguizmo_is_using()) {
+                const lumen::ui::ViewportMouseState vms =
+                    lumen::ui::viewport_mouse_state(
+                        scene_viewport_rect_for_gizmo, scene_hotkey_mouse_x,
+                        scene_hotkey_mouse_y);
+                const VkExtent2D pe = sceneTarget.extent();
+                const float rw = scene_viewport_rect_for_gizmo.width();
+                const float rh = scene_viewport_rect_for_gizmo.height();
+                if (vms.inViewport && rw > 0.0F && rh > 0.0F && pe.width >= 1U &&
+                    pe.height >= 1U) {
+                    // ImGui 矩形：localY 自上而下增大；离屏与 Vulkan 附件 (0,0) 在
+                    // 左上角，行 y 向下递增，勿再翻转。
+                    const float nx = vms.localX / rw;
+                    const float ny = vms.localY / rh;
+                    scene_pick_fb_x = (std::min)(
+                        pe.width - 1U,
+                        static_cast<std::uint32_t>(
+                            nx * static_cast<float>(pe.width)));
+                    scene_pick_fb_y = (std::min)(
+                        pe.height - 1U,
+                        static_cast<std::uint32_t>(
+                            ny * static_cast<float>(pe.height)));
+                    if (pickIdTarget.is_valid()) {
+                        scene_pick_pending = true;
+                    }
+                }
+            }
+        }
+
+        const bool record_scene_pick = scene_pick_pending;
+
         auto &commandBuffer = commandBuffers[frameIndex];
         if (!commandBuffer.reset()) {
             LUMEN_APP_LOG_ERROR("CommandBuffer::reset 失败 frameIndex={}",
@@ -1445,9 +1697,6 @@ static int run_pbr(int, char **) {
         sceneRpInfo.renderArea.extent = sceneTarget.extent();
         sceneRpInfo.clearValueCount = static_cast<uint32_t>(sceneClears.size());
         sceneRpInfo.pClearValues = sceneClears.data();
-
-        vkCmdBeginRenderPass(commandBuffer.handle(), &sceneRpInfo,
-                             VK_SUBPASS_CONTENTS_INLINE);
 
         {
             const VkExtent2D ext = sceneTarget.extent();
@@ -1486,12 +1735,12 @@ static int run_pbr(int, char **) {
                     }
                     lumen::scene::append_mesh_render_items(
                         sponzaAsset.geometry(), mesh_part, sponza_root_world, 0,
-                        pbrRenderItems);
+                        pbrRenderItems, sponzaRootEntity);
                 }
             } else {
                 lumen::scene::append_model_render_items(
                     sponzaAsset.geometry(), sponzaAsset.model, sponza_root_world,
-                    0, pbrRenderItems);
+                    0, pbrRenderItems, sponzaRootEntity);
             }
 
             for (uint32_t mi = 0; mi < sponzaMatCount; ++mi) {
@@ -1513,6 +1762,9 @@ static int run_pbr(int, char **) {
             lumen::render::fill_pbr_light_ubo_default_points(
                 lightU, pointLightCount, pointDirectStrength);
             helmetLightUbos[frameIndex].update(lightU);
+
+            vkCmdBeginRenderPass(commandBuffer.handle(), &sceneRpInfo,
+                                 VK_SUBPASS_CONTENTS_INLINE);
 
             VkViewport vp { 0.0F, 0.0F, wf, hf, 0.0F, 1.0F };
             vkCmdSetViewport(cb, 0, 1, &vp);
@@ -1574,9 +1826,159 @@ static int run_pbr(int, char **) {
                 vkCmdDrawIndexed(cb, prim->index_count, 1, prim->first_index,
                                  prim->base_vertex, 0);
             }
-        }
 
-        vkCmdEndRenderPass(commandBuffer.handle());
+            vkCmdEndRenderPass(commandBuffer.handle());
+
+            if ((scene_pick_pending || show_id_map_viz) &&
+                pickIdTarget.is_valid()) {
+                std::array<VkClearValue, 2> pickClears {};
+                pickClears[0].color.uint32[0] = 0U;
+                pickClears[0].color.uint32[1] = 0U;
+                pickClears[0].color.uint32[2] = 0U;
+                pickClears[0].color.uint32[3] = 0U;
+                pickClears[1].depthStencil = { 1.0F, 0 };
+                VkRenderPassBeginInfo pickRp {
+                    VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+                };
+                pickRp.renderPass = pickIdTarget.render_pass();
+                pickRp.framebuffer = pickIdTarget.framebuffer();
+                pickRp.renderArea.offset = { 0, 0 };
+                pickRp.renderArea.extent = pickIdTarget.extent();
+                pickRp.clearValueCount =
+                    static_cast<uint32_t>(pickClears.size());
+                pickRp.pClearValues = pickClears.data();
+                vkCmdBeginRenderPass(commandBuffer.handle(), &pickRp,
+                                     VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdSetViewport(cb, 0, 1, &vp);
+                vkCmdSetScissor(cb, 0, 1, &scissor);
+                vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  pickIdPipe.handle());
+                uint32_t pickDrawSlot = 0;
+                for (const lumen::scene::RenderItem &item : pbrRenderItems) {
+                    if (!item.is_valid_for_draw()) {
+                        continue;
+                    }
+                    const std::uint32_t pid =
+                        lumen::scene::encode_pick_entity_id(item.pick_entity);
+                    if (pid != 0U) {
+                        lumen::render::PbrObjectUbo ou {};
+                        ou.model = item.model;
+                        const glm::mat3 n3 = glm::mat3(item.model);
+                        ou.normalMatrix =
+                            glm::mat4(glm::transpose(glm::inverse(n3)));
+                        helmetObjectUbo.update(ou, pickDrawSlot * helmetObjStride);
+                        std::array<VkDescriptorSet, 2> pickSets {
+                            helmetFrameDs[frameIndex], helmetObjectDs
+                        };
+                        const uint32_t dynOff =
+                            static_cast<uint32_t>(pickDrawSlot * helmetObjStride);
+                        vkCmdBindDescriptorSets(
+                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pickIdPl.handle(), 0,
+                            static_cast<uint32_t>(pickSets.size()),
+                            pickSets.data(), 1, &dynOff);
+                        vkCmdPushConstants(cb, pickIdPl.handle(),
+                                           VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                           sizeof(std::uint32_t), &pid);
+                        const lumen::scene::Primitive *prim = item.primitive;
+                        VkDeviceSize voff =
+                            static_cast<VkDeviceSize>(prim->vertex_byte_offset);
+                        VkBuffer vb = item.vertexBuffer->handle();
+                        vkCmdBindVertexBuffers(cb, 0, 1, &vb, &voff);
+                        vkCmdBindIndexBuffer(cb, item.indexBuffer->handle(), 0,
+                                             item.indexBuffer->vk_index_type());
+                        vkCmdDrawIndexed(cb, prim->index_count, 1,
+                                         prim->first_index, prim->base_vertex,
+                                         0);
+                    }
+                    ++pickDrawSlot;
+                }
+                vkCmdEndRenderPass(commandBuffer.handle());
+
+                if (scene_pick_pending) {
+                    VkBufferImageCopy copyRegion {};
+                    copyRegion.bufferOffset = 0;
+                    copyRegion.bufferRowLength = 0;
+                    copyRegion.bufferImageHeight = 0;
+                    copyRegion.imageSubresource.aspectMask =
+                        VK_IMAGE_ASPECT_COLOR_BIT;
+                    copyRegion.imageSubresource.mipLevel = 0;
+                    copyRegion.imageSubresource.baseArrayLayer = 0;
+                    copyRegion.imageSubresource.layerCount = 1;
+                    copyRegion.imageOffset = {
+                        static_cast<std::int32_t>(scene_pick_fb_x),
+                        static_cast<std::int32_t>(scene_pick_fb_y), 0
+                    };
+                    copyRegion.imageExtent = { 1, 1, 1 };
+                    vkCmdCopyImageToBuffer(
+                        cb, pickIdTarget.color_image_vk(),
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        pickReadbackBuffer.handle(), 1, &copyRegion);
+
+                    VkBufferMemoryBarrier bufBar {
+                        VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+                    };
+                    bufBar.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                    bufBar.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+                    bufBar.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    bufBar.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    bufBar.buffer = pickReadbackBuffer.handle();
+                    bufBar.offset = 0;
+                    bufBar.size = sizeof(std::uint32_t);
+                    vkCmdPipelineBarrier(
+                        cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &bufBar,
+                        0, nullptr);
+                }
+
+                if (show_id_map_viz) {
+                    lumen::render::PickIdRenderTarget::
+                        record_color_barrier_transfer_src_to_shader_read(
+                            cb, pickIdTarget.color_image_vk());
+
+                    std::array<VkClearValue, 2> vizClears {};
+                    vizClears[0].color = { { 0.0F, 0.0F, 0.0F, 1.0F } };
+                    vizClears[1].depthStencil = { 1.0F, 0 };
+                    VkRenderPassBeginInfo vizRp {
+                        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+                    };
+                    vizRp.renderPass = offscreenRenderPass.handle();
+                    vizRp.framebuffer = idMapVizTarget.framebuffer();
+                    vizRp.renderArea.offset = { 0, 0 };
+                    vizRp.renderArea.extent = idMapVizTarget.extent();
+                    vizRp.clearValueCount =
+                        static_cast<uint32_t>(vizClears.size());
+                    vizRp.pClearValues = vizClears.data();
+                    vkCmdBeginRenderPass(commandBuffer.handle(), &vizRp,
+                                         VK_SUBPASS_CONTENTS_INLINE);
+                    const VkExtent2D vizExt = idMapVizTarget.extent();
+                    const float vw = static_cast<float>(vizExt.width);
+                    const float vh = static_cast<float>(vizExt.height);
+                    VkViewport vizVp { 0.0F, 0.0F, vw, vh, 0.0F, 1.0F };
+                    vkCmdSetViewport(cb, 0, 1, &vizVp);
+                    VkRect2D vizSc {
+                        { 0, 0 },
+                        vizExt
+                    };
+                    vkCmdSetScissor(cb, 0, 1, &vizSc);
+                    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      pickVizPipe.handle());
+                    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            pickVizPl.handle(), 0, 1,
+                                            &idMapVizDs, 0, nullptr);
+                    vkCmdDraw(cb, 3, 1, 0, 0);
+                    vkCmdEndRenderPass(commandBuffer.handle());
+
+                    lumen::render::PickIdRenderTarget::
+                        record_color_barrier_shader_read_to_undefined(
+                            cb, pickIdTarget.color_image_vk());
+                } else if (scene_pick_pending) {
+                    lumen::render::PickIdRenderTarget::
+                        record_color_barrier_to_undefined(
+                            cb, pickIdTarget.color_image_vk());
+                }
+            }
+        }
 
         if (pbrDebugTileGrid) {
             VkRenderPassBeginInfo debugRpInfo {
@@ -1633,12 +2035,14 @@ static int run_pbr(int, char **) {
                         }
                         lumen::scene::append_mesh_render_items(
                             sponzaAsset.geometry(), mesh_part,
-                            sponza_root_world_dbg, 0, pbrRenderItemsDbg);
+                            sponza_root_world_dbg, 0, pbrRenderItemsDbg,
+                            sponzaRootEntity);
                     }
                 } else {
                     lumen::scene::append_model_render_items(
                         sponzaAsset.geometry(), sponzaAsset.model,
-                        sponza_root_world_dbg, 0, pbrRenderItemsDbg);
+                        sponza_root_world_dbg, 0, pbrRenderItemsDbg,
+                        sponzaRootEntity);
                 }
 
                 for (int tileIndex = 0; tileIndex < DEBUG_TILE_COUNT;
@@ -1820,6 +2224,25 @@ static int run_pbr(int, char **) {
             continue;
         }
 
+        if (record_scene_pick) {
+            const VkFence pick_fence = frameSync.in_flight_fence(frameIndex);
+            vkWaitForFences(dev, 1, &pick_fence, VK_TRUE, UINT64_MAX);
+            void *const pickMap = pickReadbackBuffer.map();
+            if (pickMap != nullptr) {
+                pickReadbackBuffer.invalidate_mapped_range(
+                    0, sizeof(std::uint32_t));
+                const std::uint32_t enc =
+                    *static_cast<const std::uint32_t *>(pickMap);
+                pickReadbackBuffer.unmap();
+                const entt::entity picked =
+                    lumen::scene::decode_pick_entity_id(enc);
+                entt::registry &pick_reg = editorScene.registry();
+                editorSelection.entity =
+                    pick_reg.valid(picked) ? picked : entt::null;
+            }
+            scene_pick_pending = false;
+        }
+
         const VkResult pr =
             swapchain.present(ctx.present_queue(), imageIndex, signalSemaphore);
         if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -1841,6 +2264,10 @@ static int run_pbr(int, char **) {
     if (debugSceneTexId != static_cast<ImTextureID>(0)) {
         lumen::ui::imgui_backend_remove_texture(
             reinterpret_cast<void *>(debugSceneTexId));
+    }
+    if (idMapVizTexId != static_cast<ImTextureID>(0)) {
+        lumen::ui::imgui_backend_remove_texture(
+            reinterpret_cast<void *>(idMapVizTexId));
     }
     lumen::ui::imgui_backend_shutdown();
 

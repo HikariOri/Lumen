@@ -60,7 +60,19 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_SOURCE_DIR}/shaders/glsl/pbr_forward.frag"
           -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/pbr_forward.frag.spv"
-  COMMENT "Compile engine light viewport gizmo + pbr_forward shaders"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_SOURCE_DIR}/shaders/glsl/pick_id.vert"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/pick_id.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_SOURCE_DIR}/shaders/glsl/pick_id.frag"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/pick_id.frag.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_SOURCE_DIR}/shaders/glsl/pick_id_visualize.vert"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/pick_id_visualize.vert.spv"
+  COMMAND ${GLSLC_COMPILER}
+          "${CMAKE_SOURCE_DIR}/shaders/glsl/pick_id_visualize.frag"
+          -o "$<TARGET_FILE_DIR:${ENGINE_TARGET}>/shaders/pick_id_visualize.frag.spv"
+  COMMENT "Compile engine light viewport gizmo + pbr_forward + pick_id shaders"
   VERBATIM
 )
 

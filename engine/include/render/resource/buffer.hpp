@@ -78,6 +78,14 @@ struct BufferCreateInfo {
      * 适合每帧 Uniform 更新，避免反复 vmaMapMemory / vmaUnmapMemory。
      */
     bool persistentlyMapped { false };
+
+    /**
+     * @brief 与 hostVisible 配合：GPU 写入后 CPU 可读（如 `vkCmdCopyImageToBuffer` 回读）
+     *
+     * 为真时使用 `VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT`，否则为
+     * `HOST_ACCESS_SEQUENTIAL_WRITE`。
+     */
+    bool hostRandomAccess { false };
 };
 
 /**
@@ -138,6 +146,11 @@ public:
      * 持久映射时为 no-op（由 vmaDestroyBuffer 释放）。
      */
     void unmap();
+
+    /**
+     * @brief GPU 写入 host-visible 内存后，使 CPU 读可见（`vkCmdCopyImageToBuffer` 等之后）
+     */
+    void invalidate_mapped_range(size_t byte_offset, size_t byte_count);
 
     /// 获取 VkBuffer
     [[nodiscard]] VkBuffer handle() const { return vkBuffer; }

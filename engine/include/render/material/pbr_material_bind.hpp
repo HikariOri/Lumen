@@ -31,6 +31,20 @@ inline constexpr std::string_view PBR_FORWARD_FRAG_SPV_RELATIVE {
     "shaders/pbr_forward.frag.spv"
 };
 
+inline constexpr std::string_view PICK_ID_VERT_SPV_RELATIVE {
+    "shaders/pick_id.vert.spv"
+};
+inline constexpr std::string_view PICK_ID_FRAG_SPV_RELATIVE {
+    "shaders/pick_id.frag.spv"
+};
+
+inline constexpr std::string_view PICK_ID_VISUALIZE_VERT_SPV_RELATIVE {
+    "shaders/pick_id_visualize.vert.spv"
+};
+inline constexpr std::string_view PICK_ID_VISUALIZE_FRAG_SPV_RELATIVE {
+    "shaders/pick_id_visualize.frag.spv"
+};
+
 /**
  * @name PBR 片元调试模式
  * @brief 与 `shaders/glsl/pbr_forward.frag` 中 DEBUG_* 及 `note/shader
