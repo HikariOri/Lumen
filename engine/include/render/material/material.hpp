@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
@@ -19,6 +20,28 @@ enum class MaterialAlphaMode : std::uint8_t {
     Opaque = 0,
     Mask = 1,
     Blend = 2,
+};
+
+/**
+ * @brief glTF 加载输出的 CPU 材质描述（路径为资源根相对路径，见 `get_resource_path`）
+ */
+struct MaterialLoadDesc {
+    glm::vec4 base_color_factor { 1.0F, 1.0F, 1.0F, 1.0F };
+    float metallic_factor { 1.0F };
+    float roughness_factor { 1.0F };
+    float ao_factor { 1.0F };
+    glm::vec3 emissive_factor { 0.0F, 0.0F, 0.0F };
+    float alpha_cutoff { 0.5F };
+
+    MaterialAlphaMode alpha_mode { MaterialAlphaMode::Opaque };
+    bool double_sided {};
+    bool spec_gloss_texture_in_mr_slot {};
+
+    std::string albedo_path;
+    std::string normal_path;
+    std::string metallic_roughness_path;
+    std::string ao_path;
+    std::string emissive_path;
 };
 
 /**

@@ -1,6 +1,9 @@
 /**
  * @file pbr_material_bind.cpp
- * @brief Forward PBR 描述符写入、材质默认贴图、金属粗糙度合并
+ * @brief 前向 PBR 描述符布局/写入实现，以及金属–粗糙度灰度图合并上传
+ *
+ * @details
+ * 各公开 API 的语义与参数说明见 `pbr_material_bind.hpp`。
  */
 
 #include "render/material/pbr_material_bind.hpp"
@@ -14,13 +17,17 @@
 #include "core/logger.hpp"
 #include "render/context.hpp"
 #include "render/resource/texture.hpp"
+
 namespace lumen::render {
 namespace {
 
-constexpr std::uint32_t RGBA8_BYTES_PER_PIXEL = 4U;
+constexpr std::uint32_t kBytesPerRgba8Pixel = 4U;
 
 } // namespace
 
+/**
+ * @brief 实现 @ref pbr_frame_ibl_descriptor_bindings
+ */
 std::vector<DescriptorBinding> pbr_frame_ibl_descriptor_bindings() {
     return {
         { .binding = 0,
@@ -42,6 +49,9 @@ std::vector<DescriptorBinding> pbr_frame_ibl_descriptor_bindings() {
     };
 }
 
+/**
+ * @brief 实现 @ref pbr_material_descriptor_bindings
+ */
 std::vector<DescriptorBinding> pbr_material_descriptor_bindings() {
     return {
         { .binding = 0,
@@ -71,33 +81,42 @@ std::vector<DescriptorBinding> pbr_material_descriptor_bindings() {
     };
 }
 
+/**
+ * @brief 实现 @ref pbr_object_descriptor_bindings
+ */
 std::vector<DescriptorBinding> pbr_object_descriptor_bindings() {
     return { { .binding = 0,
-              .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-              .count = 1,
-              .stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-          } };
+               .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+               .count = 1,
+               .stages = VK_SHADER_STAGE_VERTEX_BIT |
+                         VK_SHADER_STAGE_FRAGMENT_BIT } };
 }
 
+/**
+ * @brief 实现 @ref pbr_light_descriptor_bindings
+ */
 std::vector<DescriptorBinding> pbr_light_descriptor_bindings() {
     return { { .binding = 0,
-              .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-              .count = 1,
-              .stages = VK_SHADER_STAGE_FRAGMENT_BIT } };
+               .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+               .count = 1,
+               .stages = VK_SHADER_STAGE_FRAGMENT_BIT } };
 }
 
+/**
+ * @brief 实现 @ref write_pbr_frame_ibl_descriptor_set
+ */
 void write_pbr_frame_ibl_descriptor_set(
-    VkDevice device, VkDescriptorSet set, VkBuffer frameUbo,
-    std::size_t uboRange, const Texture &irradianceCube,
+    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer frameUbo,
+    std::size_t frameUboRange, const Texture &irradianceCube,
     const Texture &prefilterCube, const Texture &brdfLut) {
 
     write_descriptor_set(
-        device, set,
+        device, descriptorSet,
         { { .binding = 0,
             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .buffer = frameUbo,
             .offset = 0,
-            .range = uboRange } },
+            .range = frameUboRange } },
         { { .binding = 1,
             .imageView = irradianceCube.view(),
             .sampler = irradianceCube.sampler(),
@@ -112,144 +131,159 @@ void write_pbr_frame_ibl_descriptor_set(
             .imageLayout = brdfLut.descriptor_layout() } });
 }
 
+/**
+ * @brief 实现 @ref write_pbr_material_descriptor_set
+ */
 void write_pbr_material_descriptor_set(
-    VkDevice device, VkDescriptorSet set, VkBuffer materialUbo,
+    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer materialUbo,
     std::size_t materialUboRange, const Material &material,
     const PbrPlaceholderTextures &placeholders) {
 
-    const Texture &albedo =
-        (material.baseColorTex != nullptr &&
-         material.baseColorTex->is_valid())
+    const Texture &texAlbedo =
+        (material.baseColorTex != nullptr && material.baseColorTex->is_valid())
             ? *material.baseColorTex
             : placeholders.albedo();
-    const Texture &mr = (material.metallicRoughnessTex != nullptr &&
-                         material.metallicRoughnessTex->is_valid())
-                            ? *material.metallicRoughnessTex
-                            : placeholders.metallic_roughness();
-    const Texture &nrm =
+    const Texture &texMetallicRoughness =
+        (material.metallicRoughnessTex != nullptr &&
+         material.metallicRoughnessTex->is_valid())
+            ? *material.metallicRoughnessTex
+            : placeholders.metallic_roughness();
+    const Texture &texNormal =
         (material.normalTex != nullptr && material.normalTex->is_valid())
             ? *material.normalTex
             : placeholders.normal();
-    const Texture &occ =
-        (material.occlusionTex != nullptr &&
-         material.occlusionTex->is_valid())
+    const Texture &texOcclusion =
+        (material.occlusionTex != nullptr && material.occlusionTex->is_valid())
             ? *material.occlusionTex
             : placeholders.ao();
-    const Texture &em =
+    const Texture &texEmissive =
         (material.emissiveTex != nullptr && material.emissiveTex->is_valid())
             ? *material.emissiveTex
             : placeholders.emissive();
 
-    write_descriptor_set(
-        device, set,
-        { { .binding = 0,
-            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .buffer = materialUbo,
-            .offset = 0,
-            .range = materialUboRange } },
-        { { .binding = 1,
-            .imageView = albedo.view(),
-            .sampler = albedo.sampler(),
-            .imageLayout = albedo.descriptor_layout() },
-          { .binding = 2,
-            .imageView = mr.view(),
-            .sampler = mr.sampler(),
-            .imageLayout = mr.descriptor_layout() },
-          { .binding = 3,
-            .imageView = nrm.view(),
-            .sampler = nrm.sampler(),
-            .imageLayout = nrm.descriptor_layout() },
-          { .binding = 4,
-            .imageView = occ.view(),
-            .sampler = occ.sampler(),
-            .imageLayout = occ.descriptor_layout() },
-          { .binding = 5,
-            .imageView = em.view(),
-            .sampler = em.sampler(),
-            .imageLayout = em.descriptor_layout() } });
+    write_descriptor_set(device, descriptorSet,
+                         { { .binding = 0,
+                             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                             .buffer = materialUbo,
+                             .offset = 0,
+                             .range = materialUboRange } },
+                         { { .binding = 1,
+                             .imageView = texAlbedo.view(),
+                             .sampler = texAlbedo.sampler(),
+                             .imageLayout = texAlbedo.descriptor_layout() },
+                           { .binding = 2,
+                             .imageView = texMetallicRoughness.view(),
+                             .sampler = texMetallicRoughness.sampler(),
+                             .imageLayout = texMetallicRoughness.descriptor_layout() },
+                           { .binding = 3,
+                             .imageView = texNormal.view(),
+                             .sampler = texNormal.sampler(),
+                             .imageLayout = texNormal.descriptor_layout() },
+                           { .binding = 4,
+                             .imageView = texOcclusion.view(),
+                             .sampler = texOcclusion.sampler(),
+                             .imageLayout = texOcclusion.descriptor_layout() },
+                           { .binding = 5,
+                             .imageView = texEmissive.view(),
+                             .sampler = texEmissive.sampler(),
+                             .imageLayout = texEmissive.descriptor_layout() } });
 }
 
-void write_pbr_object_descriptor_set_dynamic(
-    VkDevice device, VkDescriptorSet set, VkBuffer objectUbo,
-    std::size_t rangeOneObject) {
-    write_descriptor_set(
-        device, set,
-        { { .binding = 0,
-            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            .buffer = objectUbo,
-            .offset = 0,
-            .range = rangeOneObject } },
-        {});
+/**
+ * @brief 实现 @ref write_pbr_object_descriptor_set_dynamic
+ */
+void write_pbr_object_descriptor_set_dynamic(VkDevice device,
+                                             VkDescriptorSet descriptorSet,
+                                             VkBuffer objectUbo,
+                                             std::size_t perObjectRange) {
+    write_descriptor_set(device, descriptorSet,
+                         { { .binding = 0,
+                             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                             .buffer = objectUbo,
+                             .offset = 0,
+                             .range = perObjectRange } },
+                         {});
 }
 
-void write_pbr_light_descriptor_set(VkDevice device, VkDescriptorSet set,
+/**
+ * @brief 实现 @ref write_pbr_light_descriptor_set
+ */
+void write_pbr_light_descriptor_set(VkDevice device,
+                                    VkDescriptorSet descriptorSet,
                                     VkBuffer lightUbo,
                                     std::size_t lightUboRange) {
-    write_descriptor_buffer(device, set, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                            lightUbo, 0, lightUboRange);
+    write_descriptor_buffer(device, descriptorSet, 0,
+                            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, lightUbo, 0,
+                            lightUboRange);
 }
 
+/**
+ * @brief 实现 @ref create_metallic_roughness_texture_from_grayscale_files
+ */
 bool create_metallic_roughness_texture_from_grayscale_files(
-    Texture &outTexture, const Context &ctx, const char *metallicImagePath,
-    const char *roughnessImagePath, VkQueue transferQueue,
-    CommandPool &cmdPool) {
+    Texture &outTexture, const Context &ctx, const char *metallicPath,
+    const char *roughnessPath, VkQueue transferQueue,
+    CommandPool &commandPool) {
 
-    int mw = 0;
-    int mh = 0;
-    int mc = 0;
-    stbi_uc *m_data = stbi_load(metallicImagePath, &mw, &mh, &mc, 4);
-    if (!m_data || mw <= 0 || mh <= 0) {
-        if (m_data) {
-            stbi_image_free(m_data);
+    int metalWidth = 0;
+    int metalHeight = 0;
+    int metalChannels = 0;
+    stbi_uc *metalPixels =
+        stbi_load(metallicPath, &metalWidth, &metalHeight, &metalChannels, 4);
+    if (!metalPixels || metalWidth <= 0 || metalHeight <= 0) {
+        if (metalPixels) {
+            stbi_image_free(metalPixels);
         }
         LUMEN_LOG_ERROR("merge MR: 金属度图加载失败: {}",
-                        metallicImagePath ? metallicImagePath : "");
+                        metallicPath ? metallicPath : "");
         return false;
     }
 
-    int rw = 0;
-    int rh = 0;
-    int rc = 0;
-    stbi_uc *r_data = stbi_load(roughnessImagePath, &rw, &rh, &rc, 4);
-    if (!r_data || rw <= 0 || rh <= 0) {
-        stbi_image_free(m_data);
-        if (r_data) {
-            stbi_image_free(r_data);
+    int roughWidth = 0;
+    int roughHeight = 0;
+    int roughChannels = 0;
+    stbi_uc *roughPixels =
+        stbi_load(roughnessPath, &roughWidth, &roughHeight, &roughChannels, 4);
+    if (!roughPixels || roughWidth <= 0 || roughHeight <= 0) {
+        stbi_image_free(metalPixels);
+        if (roughPixels) {
+            stbi_image_free(roughPixels);
         }
         LUMEN_LOG_ERROR("merge MR: 粗糙度图加载失败: {}",
-                        roughnessImagePath ? roughnessImagePath : "");
+                        roughnessPath ? roughnessPath : "");
         return false;
     }
 
-    const int out_w = (std::min)(mw, rw);
-    const int out_h = (std::min)(mh, rh);
-    std::vector<std::uint8_t> rgba(
-        static_cast<size_t>(out_w) * static_cast<size_t>(out_h) *
-        RGBA8_BYTES_PER_PIXEL);
+    const int outWidth = (std::min)(metalWidth, roughWidth);
+    const int outHeight = (std::min)(metalHeight, roughHeight);
+    std::vector<std::uint8_t> outRgba(static_cast<std::size_t>(outWidth) *
+                                      static_cast<std::size_t>(outHeight) *
+                                      kBytesPerRgba8Pixel);
 
-    for (int y = 0; y < out_h; ++y) {
-        for (int x = 0; x < out_w; ++x) {
-            const int mi = (y * mw + x) * 4;
-            const int ri = (y * rw + x) * 4;
-            const std::uint8_t met = m_data[mi];
-            const std::uint8_t rou = r_data[ri];
-            const size_t oi =
-                (static_cast<size_t>(y) * static_cast<size_t>(out_w) +
-                 static_cast<size_t>(x)) *
-                RGBA8_BYTES_PER_PIXEL;
-            rgba[oi + 0] = 0;
-            rgba[oi + 1] = rou;
-            rgba[oi + 2] = met;
-            rgba[oi + 3] = 255;
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            const int idxMetal = (y * metalWidth + x) * 4;
+            const int idxRough = (y * roughWidth + x) * 4;
+            const std::uint8_t metallicByte = metalPixels[idxMetal];
+            const std::uint8_t roughnessByte = roughPixels[idxRough];
+            const std::size_t idxOut =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(outWidth) +
+                 static_cast<std::size_t>(x)) *
+                kBytesPerRgba8Pixel;
+            outRgba[idxOut + 0] = 0;
+            outRgba[idxOut + 1] = roughnessByte;
+            outRgba[idxOut + 2] = metallicByte;
+            outRgba[idxOut + 3] = 255;
         }
     }
 
-    stbi_image_free(m_data);
-    stbi_image_free(r_data);
+    stbi_image_free(metalPixels);
+    stbi_image_free(roughPixels);
 
     return outTexture.create_from_memory(
-        ctx, rgba.data(), rgba.size(), static_cast<std::uint32_t>(out_w),
-        static_cast<std::uint32_t>(out_h), transferQueue, cmdPool,
+        ctx, outRgba.data(), outRgba.size(),
+        static_cast<std::uint32_t>(outWidth),
+        static_cast<std::uint32_t>(outHeight), transferQueue, commandPool,
         VK_FORMAT_R8G8B8A8_UNORM, {}, true);
 }
 

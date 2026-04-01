@@ -1,6 +1,5 @@
 find_package(glm CONFIG REQUIRED)
 find_path(TINYGLTF_INCLUDE_DIRS "tiny_gltf.h")
-find_package(tinyobjloader CONFIG REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(imguizmo CONFIG REQUIRED)

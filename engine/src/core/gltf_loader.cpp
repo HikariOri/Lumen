@@ -14,7 +14,7 @@
  *   - POSITION
  *   - NORMAL
  *   - TEXCOORD_0
- * - 合并为单一 ObjMesh
+ * - 合并为单一 CpuMesh
  *
  * ============================================================
  * 材质系统（PBR）
@@ -48,7 +48,7 @@
 #include "core/logger.hpp"
 #include "core/path.hpp"
 
-#include "core/gltf_material.hpp"
+#include "render/material/material.hpp"
 
 #include <ghc/filesystem.hpp>
 #include <stb_image.h>
@@ -361,7 +361,7 @@ bool read_float2(const tinygltf::Model &model, int accessor_idx, size_t i,
  */
 void append_primitive(const tinygltf::Model &model,
                       const tinygltf::Primitive &prim, const glm::mat4 &world,
-                      ObjMesh &out, std::vector<GltfSubmeshRange> *ranges) {
+                      CpuMesh &out, std::vector<PrimitiveSlice> *ranges) {
     const int mode = prim.mode;
     if (mode != TINYGLTF_MODE_TRIANGLES && mode != -1) {
         return;
@@ -422,7 +422,7 @@ void append_primitive(const tinygltf::Model &model,
             uv.y = 1.0F - uv.y;
         }
 
-        out.vertices.push_back(ObjVertex { wp, n, uv });
+        out.vertices.push_back(CpuVertex { wp, n, uv });
     }
 
     if (prim.indices >= 0) {
@@ -443,11 +443,10 @@ void append_primitive(const tinygltf::Model &model,
         const std::uint32_t total =
             static_cast<std::uint32_t>(out.indices.size());
         if (total > submesh_first_index) {
-            ranges->push_back(GltfSubmeshRange { .firstIndex = submesh_first_index,
-                                                 .indexCount =
-                                                     total - submesh_first_index,
-                                                 .materialIndex =
-                                                     prim.material });
+            ranges->push_back(
+                PrimitiveSlice { .first_index = submesh_first_index,
+                                 .index_count = total - submesh_first_index,
+                                 .material_index = prim.material });
         }
     }
 }
@@ -456,8 +455,8 @@ void append_primitive(const tinygltf::Model &model,
  * @brief 追加 mesh（包含多个 primitive）
  */
 void append_mesh(const tinygltf::Model &model, int mesh_idx,
-                 const glm::mat4 &world, ObjMesh &out,
-                 std::vector<GltfSubmeshRange> *ranges) {
+                 const glm::mat4 &world, CpuMesh &out,
+                 std::vector<PrimitiveSlice> *ranges) {
     if (mesh_idx < 0 || mesh_idx >= static_cast<int>(model.meshes.size())) {
         return;
     }
@@ -517,7 +516,7 @@ void set_texture_path(const fs::path &gltf_dir, const tinygltf::Model &model,
  */
 void apply_material_factors_from_parameter(const std::string &key,
                                            const tinygltf::Parameter &param,
-                                           GltfMaterialData &out) {
+                                           render::MaterialLoadDesc &out) {
     if (key == "baseColorFactor") {
         const auto c = param.ColorFactor();
         out.base_color_factor =
@@ -548,7 +547,7 @@ void apply_material_texture_from_key(const std::string &key,
                                      const tinygltf::Parameter &param,
                                      const fs::path &gltf_dir,
                                      const tinygltf::Model &model,
-                                     GltfMaterialData &out,
+                                     render::MaterialLoadDesc &out,
                                      bool skip_base_color_texture_from_maps) {
     if (key.find("Texture") == std::string::npos) {
         return;
@@ -583,7 +582,7 @@ void apply_material_texture_from_key(const std::string &key,
  */
 void merge_parameter_maps_into_material(
     const tinygltf::Material &m, const fs::path &gltf_dir,
-    const tinygltf::Model &model, GltfMaterialData &out,
+    const tinygltf::Model &model, render::MaterialLoadDesc &out,
     bool skip_base_color_texture_from_maps) {
     for (const auto &kv : m.values) {
         apply_material_factors_from_parameter(kv.first, kv.second, out);
@@ -598,7 +597,7 @@ void merge_parameter_maps_into_material(
 }
 
 /**
- * @brief 填充 GltfMaterialData（核心）
+ * @brief 填充 MaterialLoadDesc（核心）
  *
  * @details
  * 支持：
@@ -617,7 +616,7 @@ void merge_parameter_maps_into_material(
  *   roughness = 1 - glossiness
  */
 void fill_material(const tinygltf::Model &model, int material_index,
-                   const fs::path &gltf_dir, GltfMaterialData &out) {
+                   const fs::path &gltf_dir, render::MaterialLoadDesc &out) {
     if (material_index < 0 ||
         material_index >= static_cast<int>(model.materials.size())) {
         return;
@@ -625,11 +624,11 @@ void fill_material(const tinygltf::Model &model, int material_index,
     const tinygltf::Material &m = model.materials[material_index];
 
     if (m.alphaMode == "MASK") {
-        out.alpha_mode = GltfMaterialAlphaMode::Mask;
+        out.alpha_mode = render::MaterialAlphaMode::Mask;
     } else if (m.alphaMode == "BLEND") {
-        out.alpha_mode = GltfMaterialAlphaMode::Blend;
+        out.alpha_mode = render::MaterialAlphaMode::Blend;
     } else {
-        out.alpha_mode = GltfMaterialAlphaMode::Opaque;
+        out.alpha_mode = render::MaterialAlphaMode::Opaque;
     }
     out.alpha_cutoff = static_cast<float>(m.alphaCutoff);
     out.double_sided = m.doubleSided;
@@ -817,22 +816,23 @@ int find_first_material_index(const tinygltf::Model &model, int node_idx) {
  * - glTF 已优化顶点索引（无需 OBJ 那样去重）
  * - world transform 已 baked 进顶点
  */
-bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
-               GltfMaterialData &outMaterial,
-               std::vector<GltfSubmeshRange> *outSubmeshes,
-               std::vector<GltfMaterialData> *outAllMaterials) {
-    outMesh.vertices.clear();
-    outMesh.indices.clear();
-    if (outSubmeshes != nullptr) {
-        outSubmeshes->clear();
-        if (outAllMaterials == nullptr) {
+bool load_gltf(const std::string_view file_path, CpuMesh &out_mesh,
+               render::MaterialLoadDesc *out_main_material,
+               std::vector<PrimitiveSlice> *out_primitive_slices,
+               std::vector<render::MaterialLoadDesc> *out_all_materials) {
+    out_mesh.vertices.clear();
+    out_mesh.indices.clear();
+    if (out_primitive_slices != nullptr) {
+        out_primitive_slices->clear();
+        if (out_all_materials == nullptr) {
             LUMEN_LOG_ERROR(
-                "load_gltf: 提供 outSubmeshes 时必须同时提供 outAllMaterials");
+                "load_gltf: 提供 out_primitive_slices 时必须同时提供 "
+                "out_all_materials");
             return false;
         }
     }
 
-    const std::string path { filePath };
+    const std::string path { file_path };
     const fs::path gltf_path = fs::absolute(fs::path(path));
     const fs::path gltf_dir = gltf_path.parent_path();
 
@@ -877,32 +877,34 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
     for (int root : scene.nodes) {
         traverse_nodes(model, root, glm::mat4(1.F),
                        [&](int mesh_idx, const glm::mat4 &world) {
-                           append_mesh(model, mesh_idx, world, outMesh,
-                                       outSubmeshes);
+                           append_mesh(model, mesh_idx, world, out_mesh,
+                                       out_primitive_slices);
                        });
     }
 
-    if (outMesh.vertices.empty() || outMesh.indices.empty()) {
+    if (out_mesh.vertices.empty() || out_mesh.indices.empty()) {
         LUMEN_LOG_ERROR("glTF 网格为空: {}", path);
         return false;
     }
 
-    outMaterial = GltfMaterialData {};
-    if (outSubmeshes != nullptr && outAllMaterials != nullptr) {
-        outAllMaterials->clear();
-        outAllMaterials->resize(model.materials.size());
+    if (out_main_material != nullptr) {
+        *out_main_material = render::MaterialLoadDesc {};
+    }
+    if (out_primitive_slices != nullptr && out_all_materials != nullptr) {
+        out_all_materials->clear();
+        out_all_materials->resize(model.materials.size());
         for (size_t i = 0; i < model.materials.size(); ++i) {
             fill_material(model, static_cast<int>(i), gltf_dir,
-                          (*outAllMaterials)[i]);
+                          (*out_all_materials)[i]);
         }
         int dominant = -1;
         size_t best_tri = 0;
         std::vector<size_t> tri_per_mat(model.materials.size(), 0);
-        for (const auto &r : *outSubmeshes) {
-            if (r.materialIndex >= 0 &&
-                r.materialIndex < static_cast<int>(model.materials.size())) {
-                tri_per_mat[static_cast<size_t>(r.materialIndex)] +=
-                    static_cast<size_t>(r.indexCount) / 3u;
+        for (const auto &r : *out_primitive_slices) {
+            if (r.material_index >= 0 &&
+                r.material_index < static_cast<int>(model.materials.size())) {
+                tri_per_mat[static_cast<size_t>(r.material_index)] +=
+                    static_cast<size_t>(r.index_count) / 3u;
             }
         }
         for (size_t i = 0; i < tri_per_mat.size(); ++i) {
@@ -911,19 +913,22 @@ bool load_gltf(const std::string_view filePath, ObjMesh &outMesh,
                 dominant = static_cast<int>(i);
             }
         }
-        if (dominant >= 0) {
-            outMaterial = (*outAllMaterials)[static_cast<size_t>(dominant)];
-        } else if (first_material >= 0 &&
-                   first_material < static_cast<int>(model.materials.size())) {
-            outMaterial =
-                (*outAllMaterials)[static_cast<size_t>(first_material)];
+        if (out_main_material != nullptr) {
+            if (dominant >= 0) {
+                *out_main_material =
+                    (*out_all_materials)[static_cast<size_t>(dominant)];
+            } else if (first_material >= 0 &&
+                       first_material < static_cast<int>(model.materials.size())) {
+                *out_main_material =
+                    (*out_all_materials)[static_cast<size_t>(first_material)];
+            }
         }
-    } else if (first_material >= 0) {
-        fill_material(model, first_material, gltf_dir, outMaterial);
+    } else if (first_material >= 0 && out_main_material != nullptr) {
+        fill_material(model, first_material, gltf_dir, *out_main_material);
     }
 
     LUMEN_LOG_DEBUG("glTF 加载成功 {}: {} 顶点, {} 索引", path,
-                    outMesh.vertices.size(), outMesh.indices.size());
+                    out_mesh.vertices.size(), out_mesh.indices.size());
     return true;
 }
 

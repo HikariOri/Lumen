@@ -203,17 +203,5 @@ struct SkyLightComponent {
     glm::vec3 turbidityAzimuthInclination { 2.0F, 0.0F, 0.0F };
 };
 
-/**
- * @brief EnTT 材质组件：glTF 风格 PBR 参数与贴图指针（与 `render::Material` /
- * `Primitive::material` 同源模型）
- */
-struct MaterialComponent {
-    lumen::render::Material pbr {};
-};
-
-struct MeshComponent {};
-
-struct CameraCompoent {};
-
 } // namespace scene
 } // namespace lumen

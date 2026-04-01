@@ -12,8 +12,11 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 proj;
     mat4 viewProj;
     vec4 cameraPos;
+    
     vec4 exposureIblMips;
+
     int debugMode;
+
     int _framePad0;
     int _framePad1;
     int _framePad2;

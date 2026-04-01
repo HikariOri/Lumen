@@ -16,7 +16,6 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC $<IF:$<TARGET_EXISTS:SDL3_image::S
 target_link_libraries(${ENGINE_TARGET} PUBLIC glm::glm)
 target_link_libraries(${ENGINE_TARGET} PUBLIC spdlog::spdlog)
 target_include_directories(${ENGINE_TARGET} PUBLIC ${TINYGLTF_INCLUDE_DIRS})
-target_link_libraries(${ENGINE_TARGET} PUBLIC tinyobjloader::tinyobjloader_double)
 target_include_directories(${ENGINE_TARGET} PUBLIC ${Stb_INCLUDE_DIR})
 target_include_directories(${ENGINE_TARGET} PUBLIC imgui::imgui)
 target_link_libraries(${ENGINE_TARGET} PUBLIC imgui::imgui)

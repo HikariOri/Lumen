@@ -20,7 +20,7 @@ inline constexpr ID INVALID_ID = 0;
  * @brief 线程局部 `std::mt19937_64` 生成随机 ID（非 0）
  */
 [[nodiscard]] inline ID generate_random_id() {
-    thread_local std::mt19937_64 rng{ std::random_device{}() };
+    thread_local std::mt19937_64 rng { std::random_device {}() };
     ID out;
     do {
         out = static_cast<ID>(rng());

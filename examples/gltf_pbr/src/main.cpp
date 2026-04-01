@@ -6,7 +6,6 @@
 #include "ibl_bake.hpp"
 
 #include "core/gltf_loader.hpp"
-#include "core/gltf_material.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
@@ -42,7 +41,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <type_traits>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -154,7 +152,7 @@ struct HelmVertex {
     glm::vec4 tangent { 1.0F, 0.0F, 0.0F, 1.0F };
 };
 
-void center_and_scale_mesh(lumen::core::ObjMesh &mesh,
+void center_and_scale_mesh(lumen::core::CpuMesh &mesh,
                            float target_max_extent = 1.8F) {
     if (mesh.vertices.empty()) {
         return;
@@ -387,16 +385,17 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::core::ObjMesh sponza_mesh {};
-    lumen::core::GltfMaterialData sponza_main_mat {};
-    std::vector<lumen::core::GltfSubmeshRange> sponza_submeshes;
-    std::vector<lumen::core::GltfMaterialData> sponza_materials;
-    if (!lumen::core::load_gltf(scene_gltf_path, sponza_mesh, sponza_main_mat,
-                                &sponza_submeshes, &sponza_materials)) {
+    lumen::core::CpuMesh sponza_cpu_mesh {};
+    lumen::render::MaterialLoadDesc sponza_main_mat {};
+    std::vector<lumen::core::PrimitiveSlice> sponza_submeshes;
+    std::vector<lumen::render::MaterialLoadDesc> sponza_materials;
+    if (!lumen::core::load_gltf(scene_gltf_path, sponza_cpu_mesh,
+                                &sponza_main_mat, &sponza_submeshes,
+                                &sponza_materials)) {
         LUMEN_APP_LOG_ERROR("glTF 解析失败: {}", scene_gltf_path);
         return -1;
     }
-    if (sponza_mesh.vertices.empty() || sponza_mesh.indices.empty()) {
+    if (sponza_cpu_mesh.vertices.empty() || sponza_cpu_mesh.indices.empty()) {
         LUMEN_APP_LOG_ERROR("Sponza 网格为空: {}", scene_gltf_path);
         return -1;
     }
@@ -411,22 +410,22 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "glTF 已加载: 顶点={} 索引={} 三角≈{} 子网格={} 材质={} 路径={}",
-        sponza_mesh.vertices.size(), sponza_mesh.indices.size(),
-        sponza_mesh.indices.size() / 3U, sponza_submeshes.size(),
+        sponza_cpu_mesh.vertices.size(), sponza_cpu_mesh.indices.size(),
+        sponza_cpu_mesh.indices.size() / 3U, sponza_submeshes.size(),
         sponza_materials.size(), scene_gltf_path);
 
-    center_and_scale_mesh(sponza_mesh, k_sponza_fit_max_extent);
+    center_and_scale_mesh(sponza_cpu_mesh, k_sponza_fit_max_extent);
 
     std::vector<HelmVertex> helm_verts;
-    helm_verts.reserve(sponza_mesh.vertices.size());
-    for (const auto &ov : sponza_mesh.vertices) {
+    helm_verts.reserve(sponza_cpu_mesh.vertices.size());
+    for (const auto &ov : sponza_cpu_mesh.vertices) {
         helm_verts.push_back(
             HelmVertex { .position = ov.position,
                          .normal = ov.normal,
                          .uv = ov.uv,
                          .tangent = { 1.0F, 0.0F, 0.0F, 1.0F } });
     }
-    compute_mesh_tangents(helm_verts, sponza_mesh.indices);
+    compute_mesh_tangents(helm_verts, sponza_cpu_mesh.indices);
 
     VkQueue gq = ctx.graphics_queue();
 
@@ -446,7 +445,9 @@ static int run_pbr(int, char **) {
             const std::string key =
                 path.empty()
                     ? fallback_key(fmt, fallback_rgba)
-                    : std::filesystem::absolute(path).generic_string();
+                    : std::filesystem::absolute(
+                          lumen::core::get_resource_path(path))
+                          .generic_string();
             if (const auto it = scene_tex_by_key.find(key);
                 it != scene_tex_by_key.end()) {
                 return it->second;
@@ -457,7 +458,9 @@ static int run_pbr(int, char **) {
                 ok = tex->create_from_memory(ctx, fallback_rgba.data(), 4, 1, 1,
                                              gq, cmdPool, fmt, {}, false);
             } else {
-                ok = tex->create_from_file(ctx, path.c_str(), gq, cmdPool, {},
+                const std::string full =
+                    lumen::core::get_resource_path(path);
+                ok = tex->create_from_file(ctx, full.c_str(), gq, cmdPool, {},
                                            fmt);
             }
             if (!ok) {
@@ -484,7 +487,7 @@ static int run_pbr(int, char **) {
     };
     std::vector<MatTexIdx> mat_tex_idx(sponza_materials.size());
     for (size_t mi = 0; mi < sponza_materials.size(); ++mi) {
-        const lumen::core::GltfMaterialData &gm = sponza_materials[mi];
+        const lumen::render::MaterialLoadDesc &gm = sponza_materials[mi];
         mat_tex_idx[mi].albedo =
             acquire_tex(gm.albedo_path, VK_FORMAT_R8G8B8A8_SRGB, k_rgba_white);
         mat_tex_idx[mi].normal = acquire_tex(
@@ -528,7 +531,7 @@ static int run_pbr(int, char **) {
     std::vector<lumen::render::Material> pbr_materials(
         sponza_materials.size());
     for (size_t mi = 0; mi < sponza_materials.size(); ++mi) {
-        const lumen::core::GltfMaterialData &gm = sponza_materials[mi];
+        const lumen::render::MaterialLoadDesc &gm = sponza_materials[mi];
         const MatTexIdx &ix = mat_tex_idx[mi];
         lumen::render::Material &pm = pbr_materials[mi];
         pm.baseColorFactor = gm.base_color_factor;
@@ -537,9 +540,7 @@ static int run_pbr(int, char **) {
         pm.emissiveFactor = gm.emissive_factor;
         pm.occlusionStrength = gm.ao_factor;
         pm.doubleSided = gm.double_sided;
-        pm.alphaMode = static_cast<lumen::render::MaterialAlphaMode>(
-            static_cast<std::underlying_type_t<
-                lumen::core::GltfMaterialAlphaMode>>(gm.alpha_mode));
+        pm.alphaMode = gm.alpha_mode;
         pm.baseColorTex = scene_tex_pool[ix.albedo].get();
         pm.normalTex = scene_tex_pool[ix.normal].get();
         pm.metallicRoughnessTex = scene_tex_pool[ix.mr].get();
@@ -557,8 +558,8 @@ static int run_pbr(int, char **) {
     lumen::render::IndexBuffer helmet_ibuf;
     helmet_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
     if (!helmet_ibuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, sponza_mesh.indices.data(),
-            sponza_mesh.indices.size() * sizeof(uint32_t))) {
+            ctx, gq, cmdPool, sponza_cpu_mesh.indices.data(),
+            sponza_cpu_mesh.indices.size() * sizeof(uint32_t))) {
         LUMEN_APP_LOG_ERROR("场景索引缓冲失败");
         return -1;
     }
@@ -914,8 +915,8 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "pbr 资源就绪: 顶点={} 索引={} 三角≈{} 材质={} 着色器 {} | {}",
-        sponza_mesh.vertices.size(), sponza_mesh.indices.size(),
-        sponza_mesh.indices.size() / 3U, sponza_materials.size(),
+        sponza_cpu_mesh.vertices.size(), sponza_cpu_mesh.indices.size(),
+        sponza_cpu_mesh.indices.size() / 3U, sponza_materials.size(),
         helmet_vs_path, helmet_fs_path);
 
     float sky_exposure { 0.35F };
@@ -1438,9 +1439,9 @@ static int run_pbr(int, char **) {
                 vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
                                      helmet_ibuf.vk_index_type());
                 uint32_t draw_slot = 0;
-                for (const lumen::core::GltfSubmeshRange &sub :
+                for (const lumen::core::PrimitiveSlice &sub :
                      sponza_submeshes) {
-                    int mid = sub.materialIndex;
+                    int mid = sub.material_index;
                     if (mid < 0 || mid >= static_cast<int>(mat_count_u32)) {
                         mid = 0;
                     }
@@ -1462,7 +1463,7 @@ static int run_pbr(int, char **) {
                         0, static_cast<uint32_t>(pbr_sets.size()),
                         pbr_sets.data(), 1, &dyn_off);
                     ++draw_slot;
-                    vkCmdDrawIndexed(cb, sub.indexCount, 1, sub.firstIndex,
+                    vkCmdDrawIndexed(cb, sub.index_count, 1, sub.first_index,
                                      0, 0);
                 }
             } else {
@@ -1529,9 +1530,9 @@ static int run_pbr(int, char **) {
                     vkCmdBindIndexBuffer(cb, helmet_ibuf.handle(), 0,
                                          helmet_ibuf.vk_index_type());
                     uint32_t draw_slot_dbg = 0;
-                    for (const lumen::core::GltfSubmeshRange &sub :
+                    for (const lumen::core::PrimitiveSlice &sub :
                          sponza_submeshes) {
-                        int mid = sub.materialIndex;
+                        int mid = sub.material_index;
                         if (mid < 0 || mid >= static_cast<int>(mat_count_u32)) {
                             mid = 0;
                         }
@@ -1555,8 +1556,8 @@ static int run_pbr(int, char **) {
                             static_cast<uint32_t>(pbr_sets_tile.size()),
                             pbr_sets_tile.data(), 1, &dyn_d);
                         ++draw_slot_dbg;
-                        vkCmdDrawIndexed(cb, sub.indexCount, 1,
-                                         sub.firstIndex, 0, 0);
+                        vkCmdDrawIndexed(cb, sub.index_count, 1,
+                                         sub.first_index, 0, 0);
                     }
                 }
             }

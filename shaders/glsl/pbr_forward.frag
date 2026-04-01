@@ -2,6 +2,7 @@
 
 // `note/forward_shader.md`：Frame / Material / Object / Lighting + IBL + exp 色调 + gamma
 // Debug 模式与输出组织见 `note/shader debug.md`
+// TOOD: 无贴图使用因子替代
 
 layout(location = 0) in vec3 vWorldPos;
 layout(location = 1) in vec2 vUv;

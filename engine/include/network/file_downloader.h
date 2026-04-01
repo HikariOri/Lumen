@@ -44,13 +44,13 @@ using CompletionCallback =
  * @brief 下载配置选项
  */
 struct DownloadOptions {
-    std::map<std::string, std::string> headers;  // 自定义HTTP头
-    std::chrono::milliseconds timeout { 30000 }; // 超时时间（默认30秒）
-    int maxRetries = 0;                          // 最大重试次数（默认不重试）
+    std::map<std::string, std::string> headers;    // 自定义HTTP头
+    std::chrono::milliseconds timeout { 30000 };   // 超时时间（默认30秒）
+    int maxRetries = 0;                            // 最大重试次数（默认不重试）
     std::chrono::milliseconds retryDelay { 1000 }; // 重试延迟（默认1秒）
-    ProgressCallback progressCallback;            // 进度回调函数
-    bool verify_ssl = true;                       // 是否验证SSL证书
-    std::string userAgent = "FileDownloader/1.0"; // User-Agent
+    ProgressCallback progressCallback;             // 进度回调函数
+    bool verify_ssl = true;                        // 是否验证SSL证书
+    std::string userAgent = "FileDownloader/1.0";  // User-Agent
 
     // 添加自定义HTTP头
     DownloadOptions &addHeader(const std::string &key,

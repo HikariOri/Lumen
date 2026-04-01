@@ -1,13 +1,12 @@
 /**
  * @file main.cpp
- * @brief PBR — IBL 烘焙、HDR 天空盒、DamagedHelmet（OBJ + 贴图）与 ImGui
- * 预览
+ * @brief PBR — IBL 烘焙、HDR 天空盒、DamagedHelmet（glTF）与 ImGui 预览
  */
 
 #include "ibl_bake.hpp"
 
+#include "core/gltf_loader.hpp"
 #include "core/logger.hpp"
-#include "core/obj_loader.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
 #include "platform/event_pump.hpp"
@@ -59,26 +58,8 @@ namespace {
 
 constexpr const char *kHdrRelPath { "assets/environment_maps/meadow_2_2k.hdr" };
 
-constexpr const char *kHelmetObjRel {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet.obj"
-};
-constexpr const char *kHelmetBaseColor {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_baseColorTexture.jpg"
-};
-constexpr const char *kHelmetEmissive {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_emissiveTexture.jpg"
-};
-constexpr const char *kHelmetMetallic {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_metallicTexture.jpg"
-};
-constexpr const char *kHelmetNormal {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_normalTexture.jpg"
-};
-constexpr const char *kHelmetOcclusion {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_occlusionTexture.jpg"
-};
-constexpr const char *kHelmetRoughness {
-    "assets/models/DamagedHelmet_obj/DamagedHelmet_roughnessTexture.jpg"
+constexpr const char *kHelmetGltfRel {
+    "assets/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf"
 };
 
 // 单位立方体（与 ibl_bake 天空捕获一致）
@@ -114,7 +95,7 @@ struct HelmVertex {
     glm::vec4 tangent { 1.0F, 0.0F, 0.0F, 1.0F };
 };
 
-void center_and_scale_mesh(lumen::core::ObjMesh &mesh) {
+void center_and_scale_mesh(lumen::core::CpuMesh &mesh) {
     if (mesh.vertices.empty()) {
         return;
     }
@@ -345,49 +326,49 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const std::string obj_path = lumen::core::get_resource_path(kHelmetObjRel);
-    if (!std::filesystem::exists(obj_path)) {
-        LUMEN_APP_LOG_ERROR(
-            "未找到头盔模型: {} (需 DamagedHelmet.obj 与同目录 JPG)", obj_path);
+    const std::string helmet_gltf_path =
+        lumen::core::get_resource_path(kHelmetGltfRel);
+    if (!std::filesystem::exists(helmet_gltf_path)) {
+        LUMEN_APP_LOG_ERROR("未找到头盔 glTF: {}（含同级纹理）",
+                            helmet_gltf_path);
         return -1;
     }
 
-    lumen::core::ObjMesh helmet_obj {};
-    if (!lumen::core::load_obj(obj_path, helmet_obj)) {
-        LUMEN_APP_LOG_ERROR("OBJ 解析失败: {}", obj_path);
+    lumen::core::CpuMesh helmet_cpu {};
+    lumen::render::MaterialLoadDesc helmet_load {};
+    if (!lumen::core::load_gltf(helmet_gltf_path, helmet_cpu, &helmet_load,
+                                nullptr, nullptr)) {
+        LUMEN_APP_LOG_ERROR("glTF 解析失败: {}", helmet_gltf_path);
         return -1;
     }
-    if (helmet_obj.vertices.empty()) {
-        LUMEN_APP_LOG_ERROR("OBJ 无顶点数据: {}", obj_path);
+    if (helmet_cpu.vertices.empty()) {
+        LUMEN_APP_LOG_ERROR("头盔无顶点数据: {}", helmet_gltf_path);
         return -1;
     }
-    if (helmet_obj.indices.empty()) {
-        LUMEN_APP_LOG_ERROR("OBJ 无索引数据: {}", obj_path);
+    if (helmet_cpu.indices.empty()) {
+        LUMEN_APP_LOG_ERROR("头盔无索引数据: {}", helmet_gltf_path);
         return -1;
     }
 
     LUMEN_APP_LOG_INFO(
-        "OBJ 模型已加载: 顶点数={}, 索引数={}, 面片(三角)数={}, 路径={}",
-        helmet_obj.vertices.size(), helmet_obj.indices.size(),
-        helmet_obj.indices.size() / 3U, obj_path);
+        "glTF 头盔已加载: 顶点数={}, 索引数={}, 三角数={}, 路径={}",
+        helmet_cpu.vertices.size(), helmet_cpu.indices.size(),
+        helmet_cpu.indices.size() / 3U, helmet_gltf_path);
 
-    center_and_scale_mesh(helmet_obj);
-    // OBJ `vt` 的 v：0=纹理底边、1=顶边，与 Vulkan 归一化坐标（v=0 为底）一致。
-    // create_from_file 已 stbi_set_flip_vertically_on_load(1) 对齐行序，勿再对
-    // UV 做 1−v， 否则 Base Color 等与贴图预览会上下错开。
+    center_and_scale_mesh(helmet_cpu);
 
     std::vector<HelmVertex> helm_verts;
-    helm_verts.reserve(helmet_obj.vertices.size());
-    for (const auto &ov : helmet_obj.vertices) {
+    helm_verts.reserve(helmet_cpu.vertices.size());
+    for (const auto &ov : helmet_cpu.vertices) {
         helm_verts.push_back(
             HelmVertex { .position = ov.position,
                          .normal = ov.normal,
                          .uv = ov.uv,
                          .tangent = { 1.0F, 0.0F, 0.0F, 1.0F } });
     }
-    compute_mesh_tangents(helm_verts, helmet_obj.indices);
+    compute_mesh_tangents(helm_verts, helmet_cpu.indices);
     const uint32_t helmet_index_count =
-        static_cast<uint32_t>(helmet_obj.indices.size());
+        static_cast<uint32_t>(helmet_cpu.indices.size());
 
     VkQueue gq = ctx.graphics_queue();
     lumen::render::Texture tex_albedo;
@@ -395,42 +376,93 @@ static int run_pbr(int, char **) {
     lumen::render::Texture tex_mr;
     lumen::render::Texture tex_ao;
     lumen::render::Texture tex_emissive;
-    const std::string p_albedo =
-        lumen::core::get_resource_path(kHelmetBaseColor);
-    const std::string p_normal = lumen::core::get_resource_path(kHelmetNormal);
-    const std::string p_metallic =
-        lumen::core::get_resource_path(kHelmetMetallic);
-    const std::string p_roughness =
-        lumen::core::get_resource_path(kHelmetRoughness);
-    const std::string p_ao = lumen::core::get_resource_path(kHelmetOcclusion);
-    const std::string p_emissive =
-        lumen::core::get_resource_path(kHelmetEmissive);
 
-    if (!tex_albedo.create_from_file(ctx, p_albedo.c_str(), gq, cmdPool, {},
+    auto path_or_empty = [](const std::string &rel) -> std::string {
+        return rel.empty() ? std::string {}
+                           : lumen::core::get_resource_path(rel);
+    };
+
+    const std::string p_albedo = path_or_empty(helmet_load.albedo_path);
+    if (p_albedo.empty() ||
+        !std::filesystem::exists(p_albedo) ||
+        !tex_albedo.create_from_file(ctx, p_albedo.c_str(), gq, cmdPool, {},
                                      VK_FORMAT_R8G8B8A8_SRGB)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (baseColor): {}", p_albedo);
+        LUMEN_APP_LOG_ERROR("贴图加载失败 (baseColor): {}",
+                            p_albedo.empty() ? "(路径空)" : p_albedo);
         return -1;
     }
-    if (!tex_normal.create_from_file(ctx, p_normal.c_str(), gq, cmdPool, {},
+
+    const std::string p_normal = path_or_empty(helmet_load.normal_path);
+    if (!p_normal.empty() && std::filesystem::exists(p_normal)) {
+        if (!tex_normal.create_from_file(ctx, p_normal.c_str(), gq, cmdPool, {},
+                                         VK_FORMAT_R8G8B8A8_UNORM)) {
+            LUMEN_APP_LOG_ERROR("贴图加载失败 (normal): {}", p_normal);
+            return -1;
+        }
+    } else {
+        constexpr std::array<uint8_t, 4> k_default_normal {
+            { 128, 128, 255, 255 }
+        };
+        if (!tex_normal.create_from_memory(
+                ctx, k_default_normal.data(), 4, 1, 1, gq, cmdPool,
+                VK_FORMAT_R8G8B8A8_UNORM, {}, false)) {
+            LUMEN_APP_LOG_ERROR("默认法线贴图创建失败");
+            return -1;
+        }
+    }
+
+    const std::string p_mr = path_or_empty(helmet_load.metallic_roughness_path);
+    if (!p_mr.empty() && std::filesystem::exists(p_mr)) {
+        if (!tex_mr.create_from_file(ctx, p_mr.c_str(), gq, cmdPool, {},
+                                      VK_FORMAT_R8G8B8A8_UNORM)) {
+            LUMEN_APP_LOG_ERROR("贴图加载失败 (metallicRoughness): {}", p_mr);
+            return -1;
+        }
+    } else {
+        const uint8_t bv = static_cast<uint8_t>(std::round(
+            std::clamp(helmet_load.metallic_factor, 0.0F, 1.0F) * 255.0F));
+        const uint8_t gv = static_cast<uint8_t>(std::round(
+            std::clamp(helmet_load.roughness_factor, 0.0F, 1.0F) * 255.0F));
+        const std::array<uint8_t, 4> mr_px { { 255, gv, bv, 255 } };
+        if (!tex_mr.create_from_memory(ctx, mr_px.data(), 4, 1, 1, gq, cmdPool,
+                                       VK_FORMAT_R8G8B8A8_UNORM, {}, false)) {
+            LUMEN_APP_LOG_ERROR("MR 占位贴图创建失败");
+            return -1;
+        }
+    }
+
+    const std::string p_ao = path_or_empty(helmet_load.ao_path);
+    if (!p_ao.empty() && std::filesystem::exists(p_ao)) {
+        if (!tex_ao.create_from_file(ctx, p_ao.c_str(), gq, cmdPool, {},
                                      VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (normal): {}", p_normal);
-        return -1;
+            LUMEN_APP_LOG_ERROR("贴图加载失败 (occlusion): {}", p_ao);
+            return -1;
+        }
+    } else {
+        constexpr std::array<uint8_t, 4> k_white { { 255, 255, 255, 255 } };
+        if (!tex_ao.create_from_memory(ctx, k_white.data(), 4, 1, 1, gq,
+                                       cmdPool, VK_FORMAT_R8G8B8A8_UNORM, {},
+                                       false)) {
+            LUMEN_APP_LOG_ERROR("AO 占位贴图创建失败");
+            return -1;
+        }
     }
-    if (!lumen::render::create_metallic_roughness_texture_from_grayscale_files(
-            tex_mr, ctx, p_metallic.c_str(), p_roughness.c_str(), gq, cmdPool)) {
-        LUMEN_APP_LOG_ERROR("金属粗糙度合并失败: {} + {}", p_metallic,
-                            p_roughness);
-        return -1;
-    }
-    if (!tex_ao.create_from_file(ctx, p_ao.c_str(), gq, cmdPool, {},
-                                 VK_FORMAT_R8G8B8A8_UNORM)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (occlusion): {}", p_ao);
-        return -1;
-    }
-    if (!tex_emissive.create_from_file(ctx, p_emissive.c_str(), gq, cmdPool, {},
-                                       VK_FORMAT_R8G8B8A8_SRGB)) {
-        LUMEN_APP_LOG_ERROR("贴图加载失败 (emissive): {}", p_emissive);
-        return -1;
+
+    const std::string p_emissive = path_or_empty(helmet_load.emissive_path);
+    if (!p_emissive.empty() && std::filesystem::exists(p_emissive)) {
+        if (!tex_emissive.create_from_file(ctx, p_emissive.c_str(), gq, cmdPool,
+                                           {}, VK_FORMAT_R8G8B8A8_SRGB)) {
+            LUMEN_APP_LOG_ERROR("贴图加载失败 (emissive): {}", p_emissive);
+            return -1;
+        }
+    } else {
+        constexpr std::array<uint8_t, 4> k_black { { 0, 0, 0, 255 } };
+        if (!tex_emissive.create_from_memory(
+                ctx, k_black.data(), 4, 1, 1, gq, cmdPool,
+                VK_FORMAT_R8G8B8A8_SRGB, {}, false)) {
+            LUMEN_APP_LOG_ERROR("自发光占位贴图创建失败");
+            return -1;
+        }
     }
 
     lumen::render::PbrPlaceholderTextures pbr_placeholders;
@@ -441,7 +473,13 @@ static int run_pbr(int, char **) {
     }
 
     lumen::render::Material helmet_mat {};
-    helmet_mat.emissiveFactor = glm::vec3(1.0F, 1.0F, 1.0F);
+    helmet_mat.baseColorFactor = helmet_load.base_color_factor;
+    helmet_mat.metallicFactor = helmet_load.metallic_factor;
+    helmet_mat.roughnessFactor = helmet_load.roughness_factor;
+    helmet_mat.emissiveFactor = helmet_load.emissive_factor;
+    helmet_mat.occlusionStrength = helmet_load.ao_factor;
+    helmet_mat.doubleSided = helmet_load.double_sided;
+    helmet_mat.alphaMode = helmet_load.alpha_mode;
     helmet_mat.baseColorTex = &tex_albedo;
     helmet_mat.normalTex = &tex_normal;
     helmet_mat.metallicRoughnessTex = &tex_mr;
@@ -458,8 +496,8 @@ static int run_pbr(int, char **) {
     lumen::render::IndexBuffer helmet_ibuf;
     helmet_ibuf.set_index_type(lumen::render::IndexBuffer::IndexType::Uint32);
     if (!helmet_ibuf.create_device_local_and_upload(
-            ctx, gq, cmdPool, helmet_obj.indices.data(),
-            helmet_obj.indices.size() * sizeof(uint32_t))) {
+            ctx, gq, cmdPool, helmet_cpu.indices.data(),
+            helmet_cpu.indices.size() * sizeof(uint32_t))) {
         LUMEN_APP_LOG_ERROR("头盔索引缓冲失败");
         return -1;
     }
@@ -790,8 +828,8 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "pbr 资源就绪: OBJ 顶点={} 索引={} 三角形={}, 着色器 {} | {}",
-        helmet_obj.vertices.size(), helmet_obj.indices.size(),
-        helmet_obj.indices.size() / 3, helmet_vs_path, helmet_fs_path);
+        helmet_cpu.vertices.size(), helmet_cpu.indices.size(),
+        helmet_cpu.indices.size() / 3, helmet_vs_path, helmet_fs_path);
 
     float skyExposure { 4.0F };
     float iblStrength { 3.0F };
