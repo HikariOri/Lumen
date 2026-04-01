@@ -37,6 +37,7 @@
 #include "scene/scene_camera.hpp"
 #include "scene/scene_orbit_controller.hpp"
 #include "scene/transform.hpp"
+#include "scene/components.hpp"
 #include "scene/id_lookup.hpp"
 #include "scene/pick.hpp"
 #include "ui/editor_selection.hpp"
@@ -63,6 +64,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <format>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -1079,6 +1081,9 @@ static int run_pbr(int, char **) {
     bool scene_viewport_gizmo_rect_valid { false };
     ImGuiWindow *scene_viewport_imgui_window_for_gizmo { nullptr };
     bool prev_key_f_down { false };
+    bool prev_key_w_down { false };
+    bool prev_key_e_down { false };
+    bool prev_key_r_down { false };
     bool prev_scene_pick_lmb_down { false };
     bool scene_pick_pending { false };
     std::uint32_t scene_pick_fb_x { 0 };
@@ -1219,6 +1224,9 @@ static int run_pbr(int, char **) {
                 "在「Scene」视口内左键点选 SubMesh / 根网格（ID Map）；层级与检视器"
                 "一致。选中后可拖 Gizmo。未在输入文字且非 Alt 时按 F 平滑对焦（鼠标在"
                 " Scene 图像上或该视口已记为悬停）。");
+            ImGui::TextUnformatted(
+                "工具快捷键（与 Unity 一致）：W 平移 | E 旋转 | R 缩放。视口悬停时生效；"
+                "按住右键飞行（WASD / Q 下 / E 上）时暂时不响应 W/E/R，避免与相机移动冲突。");
             ImGui::RadioButton(
                 "平移", &scene_gizmo_operation,
                 static_cast<int>(ImGuizmo::TRANSLATE));
@@ -1505,6 +1513,44 @@ static int run_pbr(int, char **) {
             mouse_over_scene_image_rect;
         const bool imguiBlocksSceneMouse =
             lumen::ui::imgui_wants_mouse() && !sceneTexViewportHovered;
+
+        // Unity 式 Gizmo 切换：W/E/R；右键飞行（与轨道控制器 WASD+QE 一致）时不处理
+        const bool scene_fly_rmb =
+            sceneTexViewportHovered &&
+            pump.input().is_mouse_button_down(
+                lumen::platform::MouseButton::Right) &&
+            !pump.input().has_alt();
+        if (sceneTexViewportHovered && !scene_fly_rmb &&
+            !ImGui::GetIO().WantTextInput) {
+            const bool w_down =
+                pump.input().is_key_down(lumen::platform::Key::W);
+            const bool e_down =
+                pump.input().is_key_down(lumen::platform::Key::E);
+            const bool r_down =
+                pump.input().is_key_down(lumen::platform::Key::R);
+            if (w_down && !prev_key_w_down) {
+                scene_gizmo_operation =
+                    static_cast<int>(ImGuizmo::TRANSLATE);
+            }
+            if (e_down && !prev_key_e_down) {
+                scene_gizmo_operation =
+                    static_cast<int>(ImGuizmo::ROTATE);
+            }
+            if (r_down && !prev_key_r_down) {
+                scene_gizmo_operation =
+                    static_cast<int>(ImGuizmo::SCALE);
+            }
+            prev_key_w_down = w_down;
+            prev_key_e_down = e_down;
+            prev_key_r_down = r_down;
+        } else {
+            prev_key_w_down =
+                pump.input().is_key_down(lumen::platform::Key::W);
+            prev_key_e_down =
+                pump.input().is_key_down(lumen::platform::Key::E);
+            prev_key_r_down =
+                pump.input().is_key_down(lumen::platform::Key::R);
+        }
 
         const bool key_f_down =
             pump.input().is_key_down(lumen::platform::Key::F);
@@ -2239,6 +2285,61 @@ static int run_pbr(int, char **) {
                 entt::registry &pick_reg = editorScene.registry();
                 editorSelection.entity =
                     pick_reg.valid(picked) ? picked : entt::null;
+
+                if (enc == 0U) {
+                    LUMEN_APP_LOG_INFO(
+                        "Scene 拾取: 像素 ({}, {}) —— 背景或未命中（R32 编码 0）",
+                        scene_pick_fb_x, scene_pick_fb_y);
+                } else if (!pick_reg.valid(picked)) {
+                    LUMEN_APP_LOG_WARN(
+                        "Scene 拾取: 像素 ({}, {}) R32 编码 {} 解码为无效实体 "
+                        "（entt::to_integral={}）",
+                        scene_pick_fb_x, scene_pick_fb_y, enc,
+                        static_cast<std::uint32_t>(entt::to_integral(picked)));
+                } else {
+                    std::string tag_str { "<无 TagComponent>" };
+                    if (const auto *tc =
+                            pick_reg.try_get<lumen::scene::TagComponent>(
+                                picked)) {
+                        tag_str = tc->tag;
+                    }
+                    std::string core_id_str { "-" };
+                    if (const auto *idc =
+                            pick_reg.try_get<lumen::scene::IDComponent>(
+                                picked)) {
+                        core_id_str = std::format(
+                            "{:016x}",
+                            static_cast<std::uint64_t>(idc->id));
+                    }
+                    std::string mesh_note;
+                    if (const auto *smr =
+                            pick_reg.try_get<
+                                lumen::scene::SubMeshRendererComponent>(
+                                picked)) {
+                        mesh_note = std::format(
+                            " | SubMeshRenderer primitiveIndex={} "
+                            "meshPrimitiveCount={}",
+                            smr->primitiveIndex,
+                            smr->mesh != nullptr
+                                ? smr->mesh->primitives.size()
+                                : 0U);
+                    } else if (const auto *mr =
+                                   pick_reg.try_get<
+                                       lumen::scene::MeshRendererComponent>(
+                                       picked)) {
+                        mesh_note = std::format(
+                            " | MeshRenderer meshPrimitiveCount={}",
+                            mr->mesh != nullptr
+                                ? mr->mesh->primitives.size()
+                                : 0U);
+                    }
+                    LUMEN_APP_LOG_INFO(
+                        "Scene 拾取: 像素 ({}, {}) R32 编码={} "
+                        "entt::to_integral={} core::ID(hex)={} 标签=\"{}\"{}",
+                        scene_pick_fb_x, scene_pick_fb_y, enc,
+                        static_cast<std::uint32_t>(entt::to_integral(picked)),
+                        core_id_str, tag_str, mesh_note);
+                }
             }
             scene_pick_pending = false;
         }
