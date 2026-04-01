@@ -6,6 +6,7 @@
 
 #include "scene/components.hpp"
 #include "scene/id_lookup.hpp"
+#include "scene/mesh.hpp"
 #include "scene/scene.hpp"
 #include "ui/editor_selection.hpp"
 #include "ui/imgui_hazel_helpers.hpp"
@@ -13,6 +14,8 @@
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
+
+#include <algorithm>
 
 #include <ImGuizmo.h>
 #include <entt/entt.hpp>
@@ -22,18 +25,22 @@
 namespace lumen::ui {
 namespace {
 
-static const void *kCmpEntity { reinterpret_cast<const void *>(
+static const void *CMP_ENTITY { reinterpret_cast<const void *>(
     uintptr_t { 1 }) };
-static const void *kCmpTransform { reinterpret_cast<const void *>(
+static const void *CMP_TRANSFORM { reinterpret_cast<const void *>(
     uintptr_t { 2 }) };
-static const void *kCmpHierarchy { reinterpret_cast<const void *>(
+static const void *CMP_HIERARCHY { reinterpret_cast<const void *>(
     uintptr_t { 3 }) };
-static const void *kCmpDirLight { reinterpret_cast<const void *>(
+static const void *CMP_DIR_LIGHT { reinterpret_cast<const void *>(
     uintptr_t { 4 }) };
-static const void *kCmpPointLight { reinterpret_cast<const void *>(
+static const void *CMP_POINT_LIGHT { reinterpret_cast<const void *>(
     uintptr_t { 5 }) };
-static const void *kCmpSpotLight { reinterpret_cast<const void *>(
+static const void *CMP_SPOT_LIGHT { reinterpret_cast<const void *>(
     uintptr_t { 6 }) };
+static const void *CMP_SUB_MESH { reinterpret_cast<const void *>(
+    uintptr_t { 7 }) };
+static const void *CMP_MESH_RENDERER { reinterpret_cast<const void *>(
+    uintptr_t { 8 }) };
 
 void remove_light_components(entt::registry &reg, entt::entity ent) {
     if (reg.all_of<lumen::scene::DirectionalLightComponent>(ent)) {
@@ -84,7 +91,7 @@ void SceneInspectorPanel::on_imgui_render() {
     }
     ImGui::PopItemWidth();
 
-    if (imgui_hazel_component_begin("Entity", kCmpEntity)) {
+    if (imgui_hazel_component_begin("Entity", CMP_ENTITY)) {
         if (const auto *idc = reg.try_get<lumen::scene::IDComponent>(e)) {
             ImGui::BeginDisabled();
             char idBuf[32];
@@ -99,7 +106,7 @@ void SceneInspectorPanel::on_imgui_render() {
     }
 
     if (reg.all_of<lumen::scene::TransformComponent>(e)) {
-        if (imgui_hazel_component_begin("Transform", kCmpTransform)) {
+        if (imgui_hazel_component_begin("Transform", CMP_TRANSFORM)) {
             auto &tr = reg.get<lumen::scene::TransformComponent>(e);
             glm::mat4 local_mat = tr.get_transform();
             glm::vec3 pos {};
@@ -126,7 +133,7 @@ void SceneInspectorPanel::on_imgui_render() {
         }
     }
 
-    if (imgui_hazel_component_begin("Hierarchy", kCmpHierarchy)) {
+    if (imgui_hazel_component_begin("Hierarchy", CMP_HIERARCHY)) {
         if (auto *par = reg.try_get<lumen::scene::RelationshipComponent>(e)) {
             if (par->parent != lumen::core::INVALID_ID) {
                 const auto p_ent =
@@ -156,8 +163,101 @@ void SceneInspectorPanel::on_imgui_render() {
         ImGui::TreePop();
     }
 
+    if (reg.all_of<lumen::scene::MeshRendererComponent>(e)) {
+        if (imgui_hazel_component_begin("Mesh Renderer", CMP_MESH_RENDERER)) {
+            auto &meshRenderer =
+                reg.get<lumen::scene::MeshRendererComponent>(e);
+            ImGui::Text("Mesh: %p",
+                        static_cast<const void *>(meshRenderer.mesh));
+            if (meshRenderer.mesh != nullptr) {
+                const auto &prims = meshRenderer.mesh->primitives;
+                std::size_t drawable = 0;
+                for (const auto &p : prims) {
+                    if (p.is_drawable()) {
+                        ++drawable;
+                    }
+                }
+                ImGui::Text("Primitives: %zu（可绘制 %zu）", prims.size(),
+                            drawable);
+                if (!prims.empty() &&
+                    ImGui::TreeNodeEx("Primitive 摘要",
+                                      ImGuiTreeNodeFlags_DefaultOpen)) {
+                    const std::size_t showMax =
+                        (std::min)(prims.size(), std::size_t { 24 });
+                    for (std::size_t i = 0; i < showMax; ++i) {
+                        const auto &p = prims[i];
+                        ImGui::BulletText(
+                            "[%zu] index_count=%u %s", i, p.index_count,
+                            p.is_drawable() ? "可绘制" : "跳过");
+                    }
+                    if (prims.size() > showMax) {
+                        ImGui::TextDisabled("… 其余 %zu 项未展开",
+                                            prims.size() - showMax);
+                    }
+                    ImGui::TreePop();
+                }
+            } else {
+                ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.2F, 1.0F),
+                                   "mesh 为空指针");
+            }
+            ImGui::TextDisabled(
+                "整网绘制：append_mesh_render_items(meshBuffer, *mesh, …)。");
+            if (ImGui::Button("Remove##meshrenderer", ImVec2(-1.0F, 0.0F))) {
+                reg.remove<lumen::scene::MeshRendererComponent>(e);
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    if (reg.all_of<lumen::scene::SubMeshRendererComponent>(e)) {
+        if (imgui_hazel_component_begin("SubMesh Renderer", CMP_SUB_MESH)) {
+            auto &subMeshRenderer =
+                reg.get<lumen::scene::SubMeshRendererComponent>(e);
+            ImGui::Text("Mesh: %p",
+                        static_cast<const void *>(subMeshRenderer.mesh));
+            const std::uint32_t primCount =
+                subMeshRenderer.mesh != nullptr
+                    ? static_cast<std::uint32_t>(
+                          subMeshRenderer.mesh->primitives.size())
+                    : 0U;
+            ImGui::DragScalar("Primitive index", ImGuiDataType_U32,
+                              &subMeshRenderer.primitiveIndex, 0.25F, nullptr,
+                              nullptr);
+            if (subMeshRenderer.mesh != nullptr) {
+                const bool inRange =
+                    subMeshRenderer.primitiveIndex < primCount;
+                ImGui::Text("有效下标范围: [0, %u)", primCount);
+                if (inRange) {
+                    const auto &p = subMeshRenderer
+                                        .mesh->primitives[subMeshRenderer
+                                                              .primitiveIndex];
+                    ImGui::Text("该 primitive: index_count=%u %s",
+                                p.index_count,
+                                p.is_drawable() ? "可绘制" : "不可绘制");
+                } else {
+                    ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.2F, 1.0F),
+                                       "下标越界，绘制时会被跳过");
+                }
+            } else {
+                ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.2F, 1.0F),
+                                   "mesh 为空指针");
+            }
+            ImGui::Text("Material override: %p",
+                        static_cast<const void *>(
+                            subMeshRenderer.materialOverride));
+            ImGui::TextDisabled(
+                "世界矩阵 = 父链 × 局部 Transform；收集绘制见 "
+                "append_submesh_render_items。");
+            if (ImGui::Button("Remove##submeshrenderer",
+                              ImVec2(-1.0F, 0.0F))) {
+                reg.remove<lumen::scene::SubMeshRendererComponent>(e);
+            }
+            ImGui::TreePop();
+        }
+    }
+
     if (reg.all_of<lumen::scene::DirectionalLightComponent>(e)) {
-        if (imgui_hazel_component_begin("Directional Light", kCmpDirLight)) {
+        if (imgui_hazel_component_begin("Directional Light", CMP_DIR_LIGHT)) {
             auto &L = reg.get<lumen::scene::DirectionalLightComponent>(e);
             ImGui::ColorEdit3("Radiance (linear)", glm::value_ptr(L.radiance),
                               ImGuiColorEditFlags_Float);
@@ -178,7 +278,7 @@ void SceneInspectorPanel::on_imgui_render() {
     }
 
     if (reg.all_of<lumen::scene::PointLightComponent>(e)) {
-        if (imgui_hazel_component_begin("Point Light", kCmpPointLight)) {
+        if (imgui_hazel_component_begin("Point Light", CMP_POINT_LIGHT)) {
             auto &L = reg.get<lumen::scene::PointLightComponent>(e);
             ImGui::ColorEdit3("Radiance (linear)", glm::value_ptr(L.radiance),
                               ImGuiColorEditFlags_Float);
@@ -201,7 +301,7 @@ void SceneInspectorPanel::on_imgui_render() {
     }
 
     if (reg.all_of<lumen::scene::SpotLightComponent>(e)) {
-        if (imgui_hazel_component_begin("Spot Light", kCmpSpotLight)) {
+        if (imgui_hazel_component_begin("Spot Light", CMP_SPOT_LIGHT)) {
             auto &L = reg.get<lumen::scene::SpotLightComponent>(e);
             ImGui::ColorEdit3("Radiance (linear)", glm::value_ptr(L.radiance),
                               ImGuiColorEditFlags_Float);
@@ -253,6 +353,18 @@ void SceneInspectorPanel::on_imgui_render() {
                 reg.emplace<lumen::scene::SpotLightComponent>(e);
             }
             ImGui::CloseCurrentPopup();
+        }
+        if (!reg.all_of<lumen::scene::MeshRendererComponent>(e)) {
+            if (ImGui::MenuItem("Mesh Renderer")) {
+                reg.emplace<lumen::scene::MeshRendererComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!reg.all_of<lumen::scene::SubMeshRendererComponent>(e)) {
+            if (ImGui::MenuItem("SubMesh Renderer")) {
+                reg.emplace<lumen::scene::SubMeshRendererComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
         }
         ImGui::EndPopup();
     }

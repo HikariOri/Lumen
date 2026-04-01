@@ -27,7 +27,7 @@
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
-#include "scene/gltf_scene_mesh.hpp"
+#include "gltf/gltf_scene_mesh.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/imgui_layer.hpp"
 
@@ -286,8 +286,8 @@ static int run_pbr(int, char **) {
 
     lumen::scene::GltfSceneMesh helmet_asset {};
     lumen::scene::GltfSceneMeshLoadOptions helmet_load_opts {};
-    helmet_load_opts.recenter_to_origin = true;
-    helmet_load_opts.uniform_scale_max_axis = 1.8F;
+    helmet_load_opts.recenterToOrigin = true;
+    helmet_load_opts.uniformScaleMaxAxis = 1.8F;
     std::string helmet_load_err;
     if (!lumen::scene::load_gltf_scene_mesh(ctx, gq, cmdPool, helmet_gltf_path,
                                             helmet_asset, helmet_load_opts,
@@ -296,9 +296,19 @@ static int run_pbr(int, char **) {
                             helmet_load_err.empty() ? "unknown" : helmet_load_err);
         return -1;
     }
-    if (helmet_asset.model.empty() ||
-        helmet_asset.model.front().primitives.empty() ||
-        !helmet_asset.model.front().primitives.front().is_drawable()) {
+    bool helmet_any_drawable = false;
+    for (const lumen::scene::Mesh &hm : helmet_asset.model) {
+        for (const lumen::scene::Primitive &pp : hm.primitives) {
+            if (pp.is_drawable()) {
+                helmet_any_drawable = true;
+                break;
+            }
+        }
+        if (helmet_any_drawable) {
+            break;
+        }
+    }
+    if (!helmet_any_drawable) {
         LUMEN_APP_LOG_ERROR("头盔无可绘制 primitive");
         return -1;
     }
@@ -307,14 +317,13 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const lumen::scene::Primitive &helmet_prim =
-        helmet_asset.model.front().primitives.front();
     lumen::render::Material &helmet_mat = helmet_asset.materials.front();
 
     LUMEN_APP_LOG_INFO(
-        "glTF 头盔已加载: 顶点数={}, 索引数={}, 三角数={}, 路径={}",
-        helmet_asset.stats_vertex_count, helmet_asset.stats_index_count,
-        helmet_asset.stats_index_count / 3U, helmet_gltf_path);
+        "glTF 头盔已加载: 顶点数={}, 索引数={}, 三角数={}, mesh数={}, 路径={}",
+        helmet_asset.statsVertexCount, helmet_asset.statsIndexCount,
+        helmet_asset.statsIndexCount / 3U, helmet_asset.model.size(),
+        helmet_gltf_path);
 
     auto commandBuffers = cmdPool.allocate(3);
     if (commandBuffers.size() != 3) {
@@ -642,8 +651,8 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "pbr 资源就绪: 顶点={} 索引={} 三角形={}, 着色器 {} | {}",
-        helmet_asset.stats_vertex_count, helmet_asset.stats_index_count,
-        helmet_asset.stats_index_count / 3U, helmet_vs_path, helmet_fs_path);
+        helmet_asset.statsVertexCount, helmet_asset.statsIndexCount,
+        helmet_asset.statsIndexCount / 3U, helmet_vs_path, helmet_fs_path);
 
     float skyExposure { 4.0F };
     float iblStrength { 3.0F };
@@ -1089,29 +1098,44 @@ static int run_pbr(int, char **) {
 
                 vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   helmet_pipe.handle());
-                lumen::render::PbrObjectUbo ou {};
-                ou.model = helmet_model;
-                const glm::mat3 n3 = glm::mat3(helmet_model);
-                ou.normalMatrix =
-                    glm::mat4(glm::transpose(glm::inverse(n3)));
-                helmet_object_ubo.update(ou, 0);
-                std::array<VkDescriptorSet, 4> pbr_sets {
-                    helmet_frame_ds[frameIdx], helmet_material_ds,
-                    helmet_object_ds, helmet_light_ds[frameIdx]
-                };
-                const uint32_t dyn0 = 0;
-                vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                        helmet_pl.handle(), 0,
-                                        static_cast<uint32_t>(pbr_sets.size()),
-                                        pbr_sets.data(), 1, &dyn0);
                 VkDeviceSize hv_off { 0 };
-                VkBuffer hvb = helmet_asset.vertex_buffer->handle();
+                VkBuffer hvb = helmet_asset.vertexBuffer->handle();
                 vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off);
-                vkCmdBindIndexBuffer(cb, helmet_asset.index_buffer->handle(), 0,
-                                     helmet_asset.index_buffer->vk_index_type());
-                vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
-                                 helmet_prim.first_index, helmet_prim.base_vertex,
-                                 0);
+                vkCmdBindIndexBuffer(cb, helmet_asset.indexBuffer->handle(), 0,
+                                     helmet_asset.indexBuffer->vk_index_type());
+                for (const lumen::scene::Mesh &hm : helmet_asset.model) {
+                    for (const lumen::scene::Primitive &helmet_prim :
+                         hm.primitives) {
+                        if (!helmet_prim.is_drawable()) {
+                            continue;
+                        }
+                        const lumen::render::Material *prim_mat =
+                            helmet_prim.material != nullptr ? helmet_prim.material
+                                                            : &helmet_mat;
+                        lumen::render::PbrMaterialUbo mu_draw {};
+                        lumen::render::pack_pbr_material_ubo(mu_draw, *prim_mat,
+                                                             emissiveScale);
+                        helmet_material_ubo.update(mu_draw);
+                        lumen::render::PbrObjectUbo ou {};
+                        ou.model = helmet_model;
+                        const glm::mat3 n3 = glm::mat3(helmet_model);
+                        ou.normalMatrix =
+                            glm::mat4(glm::transpose(glm::inverse(n3)));
+                        helmet_object_ubo.update(ou, 0);
+                        std::array<VkDescriptorSet, 4> pbr_sets {
+                            helmet_frame_ds[frameIdx], helmet_material_ds,
+                            helmet_object_ds, helmet_light_ds[frameIdx]
+                        };
+                        const uint32_t dyn0 = 0;
+                        vkCmdBindDescriptorSets(
+                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS, helmet_pl.handle(),
+                            0, static_cast<uint32_t>(pbr_sets.size()),
+                            pbr_sets.data(), 1, &dyn0);
+                        vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
+                                         helmet_prim.first_index,
+                                         helmet_prim.base_vertex, 0);
+                    }
+                }
             } else {
                 constexpr int k_dbg_tile_cols = 4;
                 constexpr int k_dbg_tile_rows = 4;
@@ -1119,7 +1143,7 @@ static int run_pbr(int, char **) {
                     k_dbg_tile_cols * k_dbg_tile_rows;
                 const float cw = wf / static_cast<float>(k_dbg_tile_cols);
                 const float ch = hf / static_cast<float>(k_dbg_tile_rows);
-                VkBuffer hvb = helmet_asset.vertex_buffer->handle();
+                VkBuffer hvb = helmet_asset.vertexBuffer->handle();
                 VkDeviceSize hv_off_zero { 0 };
 
                 for (int ti = 0; ti < k_dbg_tile_count; ++ti) {
@@ -1171,29 +1195,46 @@ static int run_pbr(int, char **) {
 
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmet_pipe.handle());
-                    lumen::render::PbrObjectUbo ou_tile {};
-                    ou_tile.model = helmet_model;
-                    const glm::mat3 n3t = glm::mat3(helmet_model);
-                    ou_tile.normalMatrix =
-                        glm::mat4(glm::transpose(glm::inverse(n3t)));
-                    helmet_object_ubo.update(ou_tile, 0);
-                    std::array<VkDescriptorSet, 4> pbr_sets_tile {
-                        helmet_frame_ds[frameIdx], helmet_material_ds,
-                        helmet_object_ds, helmet_light_ds[frameIdx]
-                    };
-                    const uint32_t dyn_tile = 0;
-                    vkCmdBindDescriptorSets(
-                        cb, VK_PIPELINE_BIND_POINT_GRAPHICS, helmet_pl.handle(),
-                        0, static_cast<uint32_t>(pbr_sets_tile.size()),
-                        pbr_sets_tile.data(), 1, &dyn_tile);
                     vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off_zero);
-                    vkCmdBindIndexBuffer(cb, helmet_asset.index_buffer->handle(),
+                    vkCmdBindIndexBuffer(cb, helmet_asset.indexBuffer->handle(),
                                          0,
-                                         helmet_asset.index_buffer
+                                         helmet_asset.indexBuffer
                                              ->vk_index_type());
-                    vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
-                                     helmet_prim.first_index,
-                                     helmet_prim.base_vertex, 0);
+                    for (const lumen::scene::Mesh &hm : helmet_asset.model) {
+                        for (const lumen::scene::Primitive &helmet_prim :
+                             hm.primitives) {
+                            if (!helmet_prim.is_drawable()) {
+                                continue;
+                            }
+                            const lumen::render::Material *prim_mat =
+                                helmet_prim.material != nullptr
+                                    ? helmet_prim.material
+                                    : &helmet_mat;
+                            lumen::render::PbrMaterialUbo mu_tile_prim {};
+                            lumen::render::pack_pbr_material_ubo(
+                                mu_tile_prim, *prim_mat, emissiveScale);
+                            helmet_material_ubo.update(mu_tile_prim);
+                            lumen::render::PbrObjectUbo ou_tile {};
+                            ou_tile.model = helmet_model;
+                            const glm::mat3 n3t = glm::mat3(helmet_model);
+                            ou_tile.normalMatrix =
+                                glm::mat4(glm::transpose(glm::inverse(n3t)));
+                            helmet_object_ubo.update(ou_tile, 0);
+                            std::array<VkDescriptorSet, 4> pbr_sets_tile {
+                                helmet_frame_ds[frameIdx], helmet_material_ds,
+                                helmet_object_ds, helmet_light_ds[frameIdx]
+                            };
+                            const uint32_t dyn_tile = 0;
+                            vkCmdBindDescriptorSets(
+                                cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                helmet_pl.handle(), 0,
+                                static_cast<uint32_t>(pbr_sets_tile.size()),
+                                pbr_sets_tile.data(), 1, &dyn_tile);
+                            vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
+                                             helmet_prim.first_index,
+                                             helmet_prim.base_vertex, 0);
+                        }
+                    }
                 }
             }
         }

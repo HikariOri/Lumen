@@ -27,7 +27,7 @@
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
-#include "scene/gltf_scene_mesh.hpp"
+#include "gltf/gltf_scene_mesh.hpp"
 #include "scene/mesh.hpp"
 #include "scene/render_item.hpp"
 #include "ui/imgui_backend.hpp"
@@ -338,8 +338,8 @@ static int run_pbr(int, char **) {
 
     lumen::scene::GltfSceneMesh scene_asset {};
     lumen::scene::GltfSceneMeshLoadOptions scene_load_opts {};
-    scene_load_opts.recenter_to_origin = true;
-    scene_load_opts.uniform_scale_max_axis = k_sponza_fit_max_extent;
+    scene_load_opts.recenterToOrigin = true;
+    scene_load_opts.uniformScaleMaxAxis = k_sponza_fit_max_extent;
     std::string scene_load_err;
     if (!lumen::scene::load_gltf_scene_mesh(ctx, gq, cmdPool, scene_gltf_path,
                                             scene_asset, scene_load_opts,
@@ -354,14 +354,17 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
+    std::size_t scene_prim_total = 0;
+    for (const lumen::scene::Mesh &m : scene_asset.model) {
+        scene_prim_total += m.primitives.size();
+    }
     LUMEN_APP_LOG_INFO(
-        "glTF 已加载: 顶点={} 索引={} 三角≈{} primitive={} 材质={} 路径={}",
-        scene_asset.stats_vertex_count, scene_asset.stats_index_count,
-        scene_asset.stats_index_count / 3U, scene_asset.model.front().primitives.size(),
+        "glTF 已加载: 顶点={} 索引={} 三角≈{} mesh={} primitive={} 材质={} 路径={}",
+        scene_asset.statsVertexCount, scene_asset.statsIndexCount,
+        scene_asset.statsIndexCount / 3U, scene_asset.model.size(), scene_prim_total,
         scene_asset.materials.size(), scene_gltf_path);
 
     std::vector<lumen::render::Material> &pbr_materials = scene_asset.materials;
-    lumen::scene::Mesh &sponza_mesh = scene_asset.model.front();
 
     auto cmd_buffers = cmdPool.allocate(3);
     if (cmd_buffers.size() != 3) {
@@ -510,7 +513,7 @@ static int run_pbr(int, char **) {
             ctx.physical_device_properties()
                 .limits.minUniformBufferOffsetAlignment));
     const uint32_t gltf_draw_slots = static_cast<uint32_t>(
-        (std::max)(sponza_mesh.primitives.size(), size_t { 1 }));
+        (std::max)(scene_prim_total, size_t { 1 }));
     const VkDeviceSize helmet_object_ubo_bytes =
         static_cast<VkDeviceSize>(helmet_obj_stride) *
         static_cast<VkDeviceSize>(gltf_draw_slots);
@@ -712,8 +715,8 @@ static int run_pbr(int, char **) {
 
     LUMEN_APP_LOG_INFO(
         "pbr 资源就绪: 顶点={} 索引={} 三角≈{} 材质={} 着色器 {} | {}",
-        scene_asset.stats_vertex_count, scene_asset.stats_index_count,
-        scene_asset.stats_index_count / 3U, pbr_materials.size(),
+        scene_asset.statsVertexCount, scene_asset.statsIndexCount,
+        scene_asset.statsIndexCount / 3U, pbr_materials.size(),
         helmet_vs_path, helmet_fs_path);
 
     float sky_exposure { 0.35F };
@@ -1253,13 +1256,13 @@ static int run_pbr(int, char **) {
                 vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   helmet_pipe.handle());
                 VkDeviceSize hv_off { 0 };
-                VkBuffer hvb = scene_asset.vertex_buffer->handle();
+                VkBuffer hvb = scene_asset.vertexBuffer->handle();
                 vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off);
-                vkCmdBindIndexBuffer(cb, scene_asset.index_buffer->handle(), 0,
-                                     scene_asset.index_buffer->vk_index_type());
+                vkCmdBindIndexBuffer(cb, scene_asset.indexBuffer->handle(), 0,
+                                     scene_asset.indexBuffer->vk_index_type());
                 std::vector<lumen::scene::RenderItem> sponza_render_items;
-                lumen::scene::append_mesh_render_items(
-                    scene_asset.geometry(), sponza_mesh, helmet_model, 0,
+                lumen::scene::append_model_render_items(
+                    scene_asset.geometry(), scene_asset.model, helmet_model, 0,
                     sponza_render_items);
                 uint32_t draw_slot = 0;
                 for (const lumen::scene::RenderItem &item :
@@ -1296,7 +1299,7 @@ static int run_pbr(int, char **) {
                     k_dbg_tile_cols * k_dbg_tile_rows;
                 const float cw = wf / static_cast<float>(k_dbg_tile_cols);
                 const float ch = hf / static_cast<float>(k_dbg_tile_rows);
-                VkBuffer hvb = scene_asset.vertex_buffer->handle();
+                VkBuffer hvb = scene_asset.vertexBuffer->handle();
                 VkDeviceSize hv_off_zero { 0 };
 
                 for (int ti = 0; ti < k_dbg_tile_count; ++ti) {
@@ -1352,12 +1355,12 @@ static int run_pbr(int, char **) {
                                       helmet_pipe.handle());
                     vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off_zero);
                     vkCmdBindIndexBuffer(
-                        cb, scene_asset.index_buffer->handle(), 0,
-                        scene_asset.index_buffer->vk_index_type());
+                        cb, scene_asset.indexBuffer->handle(), 0,
+                        scene_asset.indexBuffer->vk_index_type());
                     std::vector<lumen::scene::RenderItem>
                         sponza_render_items_dbg;
-                    lumen::scene::append_mesh_render_items(
-                        scene_asset.geometry(), sponza_mesh, helmet_model, 0,
+                    lumen::scene::append_model_render_items(
+                        scene_asset.geometry(), scene_asset.model, helmet_model, 0,
                         sponza_render_items_dbg);
                     uint32_t draw_slot_dbg = 0;
                     for (const lumen::scene::RenderItem &item_dbg :

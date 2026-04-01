@@ -144,6 +144,25 @@ struct MeshRendererComponent {
 };
 
 /**
+ * @brief 单个 Primitive 的 ECS 渲染项（≈ glTF primitive / SubEntity）
+ *
+ * @details
+ * 实体表示共享 `Mesh` 中某一 `primitiveIndex` 的实例，可配合父节点
+ * `RelationshipComponent` 与局部 `TransformComponent` 独立变换；可选
+ * `materialOverride` 覆盖 `Primitive::material`。收集绘制项见
+ * `scene/submesh.hpp` 的 `append_submesh_render_items`。
+ *
+ * @note
+ * 与 `MeshRendererComponent` 二选一即可：整网绘制用后者；需按 primitive
+ * 隐藏 / 拾取 / 局部编辑时用本组件 + 子实体。
+ */
+struct SubMeshRendererComponent {
+    const Mesh *mesh {};
+    std::uint32_t primitiveIndex { 0 };
+    const render::Material *materialOverride {};
+};
+
+/**
  * @brief 光源类型枚举（逻辑分类；与 `pack_lights_for_ubo` 写入 GPU 的
  * `position.w` 0/1/2 编码独立）
  */

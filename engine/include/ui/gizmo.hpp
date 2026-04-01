@@ -2,9 +2,11 @@
  * @file gizmo.hpp
  * @brief ImGuizmo 封装：离屏视口内对 glm::mat4 做平移 / 旋转 / 缩放
  *
- * 须在 ImGui::Begin 与对应 Image 之后的同一窗口内调用（或由
- * imgui_texture_view_panel 的 after_image 回调调用）。每帧
- * `ImGuizmo::BeginFrame()` 由 imgui_backend_new_frame() 负责。
+ * 可在轨道相机等逻辑更新后再调用，使 view/proj 与即将渲染的离屏场景一致（仍须与
+ * @a viewport_rect 为同一帧内记录）。若当前不在目标窗口的 `Begin`/`End` 之间，应传入
+ * @a imgui_host_window，以便使用其 `DrawList`（与 vcpkg 旧版 ImGuizmo 无
+ * `SetAlternativeWindow` 时仍能正确拾取）。
+ * 每帧 `ImGuizmo::BeginFrame()` 由 imgui_backend_new_frame() 负责。
  */
 
 #pragma once
@@ -17,24 +19,34 @@
 
 #include "ui/texture_view_panel.hpp"
 
+struct ImDrawList;
+struct ImGuiWindow;
+
 namespace lumen {
 namespace ui {
 
 /**
  * @brief 在视口矩形内绘制并处理 Gizmo，就地修改 object_world
- * @param viewport_rect Scene Image 的屏幕矩形（与离屏相机一致）
+ * @param viewport_rect Scene Image 的屏幕矩形（与离屏相机一致；绘制会裁剪到此矩形内）
  * @param view 与离屏渲染相同的视图矩阵（列主序）
  * @param proj 与离屏渲染相同的投影矩阵（列主序，含 Vulkan NDC 的 `proj[1][1] *=
  * -1`）。 内部会再抵消该 Y 翻转后传给 ImGuizmo（其按 OpenGL 风格 NDC 计算）。
  * @param object_world
  * 物体世界矩阵，输入输出。每次调用后会对各轴缩放绝对值做下限钳制 （默认
  * 1e-2），避免缩放过小导致矩阵奇异、无法再放大。
+ * @param draw_list 非空时强制使用该 DrawList（须与宿主窗口一致，否则旧版 ImGuizmo
+ * 拾取会失效）；通常传 `nullptr`。
+ * @param imgui_host_window 非空且 @a draw_list 为空时，使用
+ * `imgui_host_window->DrawList`（如 Scene 视口 `after_image` 内
+ * `ImGui::GetCurrentWindowRead()`），以便在窗口 `End` 之后仍可绘制且悬停判定正确。
  */
 void imguizmo_manipulate(const TextureViewRect &viewport_rect,
                          const glm::mat4 &view, const glm::mat4 &proj,
                          glm::mat4 *object_world,
                          ImGuizmo::OPERATION operation = ImGuizmo::ROTATE,
-                         ImGuizmo::MODE mode = ImGuizmo::LOCAL);
+                         ImGuizmo::MODE mode = ImGuizmo::LOCAL,
+                         ImDrawList *draw_list = nullptr,
+                         ImGuiWindow *imgui_host_window = nullptr);
 
 /// 上一帧 imguizmo_manipulate 调用后，用户是否正在拖拽 Gizmo
 bool imguizmo_is_using();

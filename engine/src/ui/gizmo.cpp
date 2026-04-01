@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -48,7 +49,8 @@ void clamp_mat4_scale(glm::mat4 &m) {
 void imguizmo_manipulate(const TextureViewRect &viewport_rect,
                          const glm::mat4 &view, const glm::mat4 &proj,
                          glm::mat4 *object_world, ImGuizmo::OPERATION operation,
-                         ImGuizmo::MODE mode) {
+                         ImGuizmo::MODE mode, ImDrawList *draw_list,
+                         ImGuiWindow *imgui_host_window) {
     if (!object_world) {
         g_last_using = false;
         g_last_over = false;
@@ -68,10 +70,22 @@ void imguizmo_manipulate(const TextureViewRect &viewport_rect,
     proj_imguizmo[1][1] *= -1.0f;
 
     ImGuizmo::AllowAxisFlip(false);
-    ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+    ImDrawList *dl = draw_list;
+    if (dl == nullptr && imgui_host_window != nullptr) {
+        dl = imgui_host_window->DrawList;
+    }
+    if (dl == nullptr) {
+        dl = ImGui::GetWindowDrawList();
+    }
+    ImGuizmo::SetDrawlist(dl);
     ImGuizmo::SetRect(viewport_rect.minX, viewport_rect.minY, w, h);
+    // ImGuizmo 的轴线会沿屏幕延伸，不裁剪会画到 Scene 图像外侧；与 Image 矩形对齐
+    const ImVec2 clip_min(viewport_rect.minX, viewport_rect.minY);
+    const ImVec2 clip_max(viewport_rect.maxX, viewport_rect.maxY);
+    dl->PushClipRect(clip_min, clip_max, true);
     ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj_imguizmo),
                          operation, mode, glm::value_ptr(*object_world));
+    dl->PopClipRect();
     // 不限于 SCALE 模式：矩阵已缩放过小时也须拉回，否则缩放手柄无法再次拾取。
     clamp_mat4_scale(*object_world);
     g_last_using = ImGuizmo::IsUsing();

@@ -31,13 +31,62 @@ void SceneOrbitController::set_world_up(glm::vec3 up) {
 }
 
 void SceneOrbitController::set_pitch(float radians) {
+    cancel_smooth_frame();
     pitch_ = radians;
     clamp_pitch_radius_();
 }
 
 void SceneOrbitController::set_radius(float r) {
+    cancel_smooth_frame();
     radius_ = r;
     clamp_pitch_radius_();
+}
+
+void SceneOrbitController::cancel_smooth_frame() {
+    smooth_frame_active_ = false;
+}
+
+void SceneOrbitController::begin_smooth_frame(const glm::vec3 target_pivot,
+                                            const float target_radius) {
+    smooth_frame_target_pivot_ = target_pivot;
+    smooth_frame_target_radius_ =
+        glm::clamp(target_radius, limits_.min_radius, limits_.max_radius);
+    const float tau = orbit_settings_.frame_smooth_time_seconds;
+    if (tau <= 0.0f) {
+        pivot_ = smooth_frame_target_pivot_;
+        radius_ = smooth_frame_target_radius_;
+        clamp_pitch_radius_();
+        smooth_frame_active_ = false;
+        return;
+    }
+    smooth_frame_active_ = true;
+}
+
+void SceneOrbitController::tick_smooth_frame(const float delta_seconds) {
+    if (!smooth_frame_active_) {
+        return;
+    }
+    const float tau = orbit_settings_.frame_smooth_time_seconds;
+    if (tau <= 0.0f || delta_seconds <= 0.0f) {
+        pivot_ = smooth_frame_target_pivot_;
+        radius_ = smooth_frame_target_radius_;
+        clamp_pitch_radius_();
+        smooth_frame_active_ = false;
+        return;
+    }
+    const float a = exp_smooth_alpha_(delta_seconds, tau);
+    pivot_ += (smooth_frame_target_pivot_ - pivot_) * a;
+    radius_ += (smooth_frame_target_radius_ - radius_) * a;
+    clamp_pitch_radius_();
+    const float r_eps =
+        std::max(1e-3f, std::abs(smooth_frame_target_radius_) * 1e-4f);
+    if (glm::distance(pivot_, smooth_frame_target_pivot_) < 1e-3f &&
+        std::abs(radius_ - smooth_frame_target_radius_) < r_eps) {
+        pivot_ = smooth_frame_target_pivot_;
+        radius_ = smooth_frame_target_radius_;
+        clamp_pitch_radius_();
+        smooth_frame_active_ = false;
+    }
 }
 
 glm::vec3 SceneOrbitController::orbit_direction() const {
@@ -51,17 +100,20 @@ glm::vec3 SceneOrbitController::eye_position() const {
 
 void SceneOrbitController::apply_scroll_zoom(float wheel_delta_y,
                                              float zoom_speed) {
+    cancel_smooth_frame();
     radius_ -= wheel_delta_y * zoom_speed;
     clamp_pitch_radius_();
 }
 
 void SceneOrbitController::apply_radius_scale_drag(float mouse_delta_y,
                                                    float sensitivity) {
+    cancel_smooth_frame();
     radius_ *= (1.0f + mouse_delta_y * sensitivity);
     clamp_pitch_radius_();
 }
 
 void SceneOrbitController::sync_from_view(const glm::mat4 &view) {
+    cancel_smooth_frame();
     const glm::mat4 inv = glm::inverse(view);
     const glm::vec3 eye(inv[3]);
     const glm::vec3 v = eye - pivot_;
@@ -85,16 +137,16 @@ void SceneOrbitController::clamp_pitch_radius_() {
     pitch_ = glm::clamp(pitch_, limits_.min_pitch, limits_.max_pitch);
 }
 
-void frame_orbit_on_drawable(SceneOrbitController &orbit,
-                             const entt::registry &reg,
-                             const entt::entity drawable,
-                             const glm::vec3 &mesh_center_local,
-                             const glm::vec3 &mesh_half_extents_local) {
+std::optional<std::pair<glm::vec3, float>> frame_orbit_targets_for_drawable(
+    const SceneOrbitController &orbit, const entt::registry &reg,
+    const entt::entity drawable, const glm::vec3 &mesh_center_local,
+    const glm::vec3 &mesh_half_extents_local) {
     if (drawable == entt::null || !reg.valid(drawable)) {
-        return;
+        return std::nullopt;
     }
     const glm::mat4 mw = world_matrix(reg, drawable);
-    orbit.set_pivot(glm::vec3(mw * glm::vec4(mesh_center_local, 1.0f)));
+    const glm::vec3 pivot_world =
+        glm::vec3(mw * glm::vec4(mesh_center_local, 1.0f));
     const float sx = glm::length(glm::vec3(mw[0]));
     const float sy = glm::length(glm::vec3(mw[1]));
     const float sz = glm::length(glm::vec3(mw[2]));
@@ -102,13 +154,26 @@ void frame_orbit_on_drawable(SceneOrbitController &orbit,
     const auto lim = orbit.limits();
     const float fit_r =
         glm::length(mesh_half_extents_local) * col_scale * 2.75f;
-    const float r = glm::clamp(
-        std::max(fit_r, lim.min_radius * 1.5f), lim.min_radius, lim.max_radius);
-    orbit.set_radius(r);
+    const float r = glm::clamp(std::max(fit_r, lim.min_radius), lim.min_radius,
+                               lim.max_radius);
+    return std::pair<glm::vec3, float> { pivot_world, r };
+}
+
+void frame_orbit_on_drawable(SceneOrbitController &orbit,
+                             const entt::registry &reg,
+                             const entt::entity drawable,
+                             const glm::vec3 &mesh_center_local,
+                             const glm::vec3 &mesh_half_extents_local) {
+    if (const auto t = frame_orbit_targets_for_drawable(
+            orbit, reg, drawable, mesh_center_local, mesh_half_extents_local)) {
+        orbit.set_pivot(t->first);
+        orbit.set_radius(t->second);
+    }
 }
 
 void SceneOrbitController::apply_alt_orbit(const float mouse_delta_x,
                                            const float mouse_delta_y) {
+    cancel_smooth_frame();
     const float s = orbit_settings_.alt_orbit_sensitivity;
     set_yaw(yaw() - mouse_delta_x * s);
     set_pitch(pitch() + mouse_delta_y * s);
@@ -116,6 +181,7 @@ void SceneOrbitController::apply_alt_orbit(const float mouse_delta_x,
 
 void SceneOrbitController::apply_alt_pan(const float mouse_delta_x,
                                          const float mouse_delta_y) {
+    cancel_smooth_frame();
     const glm::vec3 pivot = pivot_;
     const glm::vec3 orbit_off = radius_ * orbit_direction();
     const glm::vec3 cam_pos = pivot + orbit_off;
@@ -138,6 +204,7 @@ void SceneOrbitController::apply_alt_zoom_drag(const float mouse_delta_y) {
 
 void SceneOrbitController::apply_rmb_look(const float mouse_delta_x,
                                           const float mouse_delta_y) {
+    cancel_smooth_frame();
     const float s = orbit_settings_.rmb_look_sensitivity;
     set_yaw(yaw() - mouse_delta_x * s);
     set_pitch(pitch() + mouse_delta_y * s);
@@ -231,6 +298,7 @@ bool SceneOrbitController::apply_per_frame_editor_navigation(
         input.is_mouse_button_down(MouseButton::Right) && !input.has_alt();
 
     if (!imgui_blocks_scene_mouse && scene_fly) {
+        cancel_smooth_frame();
         apply_rmb_look(udx, udy);
         FlyInput fly {};
         fly.move_forward = input.is_key_down(platform::Key::W);
@@ -244,6 +312,7 @@ bool SceneOrbitController::apply_per_frame_editor_navigation(
         apply_fly_pan(fly);
     } else if (delta_seconds > 0.0f &&
                glm::dot(fly_velocity_world_, fly_velocity_world_) > 1e-12f) {
+        cancel_smooth_frame();
         set_pivot(pivot() + fly_velocity_world_ * delta_seconds);
         const float v_tau = orbit_settings_.fly_velocity_smooth_time_seconds;
         if (v_tau > 0.0f) {

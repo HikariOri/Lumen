@@ -1,11 +1,11 @@
 /**
- * @file gltf_scene_mesh.cpp
+ * @file gltf/gltf_scene_mesh.cpp
  * @brief `load_gltf_scene_mesh` 实现
  */
 
-#include "scene/gltf_scene_mesh.hpp"
+#include "gltf/gltf_scene_mesh.hpp"
 
-#include "core/gltf_loader.hpp"
+#include "gltf/gltf_loader.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
 
@@ -48,7 +48,7 @@ void recenter_and_scale_cpu_mesh(lumen::core::CpuMesh &mesh,
         bmin = glm::min(bmin, v.position);
         bmax = glm::max(bmax, v.position);
     }
-    if (opts.recenter_to_origin) {
+    if (opts.recenterToOrigin) {
         const glm::vec3 center { 0.5F * (bmin + bmax) };
         for (auto &v : mesh.vertices) {
             v.position -= center;
@@ -56,16 +56,59 @@ void recenter_and_scale_cpu_mesh(lumen::core::CpuMesh &mesh,
         bmin -= center;
         bmax -= center;
     }
-    if (opts.uniform_scale_max_axis > 0.F) {
+    if (opts.uniformScaleMaxAxis > 0.F) {
         const glm::vec3 extent { bmax - bmin };
         const float max_axis =
             (std::max)(extent.x, (std::max)(extent.y, extent.z));
         const float s =
-            max_axis > 1e-8F ? (opts.uniform_scale_max_axis / max_axis) : 1.0F;
+            max_axis > 1e-8F ? (opts.uniformScaleMaxAxis / max_axis) : 1.0F;
         for (auto &v : mesh.vertices) {
             v.position *= s;
         }
     }
+}
+
+struct PrimitiveLocalAabb {
+    glm::vec3 center { 0.0F, 0.0F, 0.0F };
+    glm::vec3 half_extent { 0.0F, 0.0F, 0.0F };
+    bool valid { false };
+};
+
+/// primitive 索引范围内所引用顶点的 AABB（mesh 空间）
+[[nodiscard]] PrimitiveLocalAabb primitive_index_local_aabb(
+    const std::vector<PbrInterleavedVertex> &verts,
+    const std::vector<std::uint32_t> &indices, std::uint32_t first_index,
+    std::uint32_t index_count) {
+    PrimitiveLocalAabb out {};
+    if (index_count == 0U) {
+        return out;
+    }
+    const std::size_t end =
+        static_cast<std::size_t>(first_index) +
+        static_cast<std::size_t>(index_count);
+    if (end > indices.size()) {
+        return out;
+    }
+    glm::vec3 bmin(std::numeric_limits<float>::max());
+    glm::vec3 bmax(std::numeric_limits<float>::lowest());
+    std::uint32_t hit_count { 0U };
+    for (std::uint32_t i = 0; i < index_count; ++i) {
+        const std::uint32_t vi = indices[first_index + i];
+        if (vi >= verts.size()) {
+            continue;
+        }
+        const glm::vec3 &p = verts[vi].position;
+        bmin = glm::min(bmin, p);
+        bmax = glm::max(bmax, p);
+        ++hit_count;
+    }
+    if (hit_count == 0U) {
+        return out;
+    }
+    out.center = 0.5F * (bmin + bmax);
+    out.half_extent = 0.5F * (bmax - bmin);
+    out.valid = true;
+    return out;
 }
 
 void compute_mesh_tangents(std::vector<PbrInterleavedVertex> &verts,
@@ -124,9 +167,11 @@ bool load_gltf_scene_mesh(lumen::render::Context &ctx, VkQueue transfer_queue,
     lumen::core::CpuMesh cpu {};
     std::vector<lumen::core::PrimitiveSlice> slices {};
     std::vector<lumen::render::MaterialLoadDesc> mat_descs {};
+    std::size_t gltf_mesh_count = 0;
 
     const std::string path_str { gltf_path };
-    if (!lumen::core::load_gltf(path_str, cpu, nullptr, &slices, &mat_descs)) {
+    if (!lumen::core::load_gltf(path_str, cpu, nullptr, &slices, &mat_descs,
+                                &gltf_mesh_count)) {
         fail(error_message, "load_gltf 解析失败");
         return false;
     }
@@ -137,10 +182,14 @@ bool load_gltf_scene_mesh(lumen::render::Context &ctx, VkQueue transfer_queue,
 
     if (slices.empty()) {
         slices.push_back(lumen::core::PrimitiveSlice {
-            .first_index = 0,
-            .index_count = static_cast<std::uint32_t>(cpu.indices.size()),
-            .material_index = 0,
+            .meshIndex = 0,
+            .firstIndex = 0,
+            .indexCount = static_cast<std::uint32_t>(cpu.indices.size()),
+            .materialIndex = 0,
         });
+    }
+    if (gltf_mesh_count == 0) {
+        gltf_mesh_count = 1;
     }
     if (mat_descs.empty()) {
         mat_descs.emplace_back();
@@ -232,34 +281,47 @@ bool load_gltf_scene_mesh(lumen::render::Context &ctx, VkQueue transfer_queue,
     const lumen::render::VertexLayout layout =
         lumen::render::make_vertex_layout_pbr_forward_tangent();
 
-    out.model.assign(1, Mesh {});
-    Mesh &merged = out.model.front();
-    merged.primitives.clear();
-    merged.primitives.reserve(slices.size());
+    out.model.assign(gltf_mesh_count, Mesh {});
     for (const lumen::core::PrimitiveSlice &sl : slices) {
-        int mi = sl.material_index;
+        int mesh_i = sl.meshIndex;
+        if (mesh_i < 0 ||
+            mesh_i >= static_cast<int>(out.model.size())) {
+            mesh_i = 0;
+        }
+        int mi = sl.materialIndex;
         if (mi < 0 || mi >= static_cast<int>(out.materials.size())) {
             mi = 0;
         }
-        merged.primitives.push_back(Primitive {
-            .vertex_byte_offset = 0,
-            .first_index = sl.first_index,
-            .index_count = sl.index_count,
-            .base_vertex = 0,
-            .layout = layout,
-            .material = &out.materials[static_cast<std::size_t>(mi)],
-        });
+        const PrimitiveLocalAabb prim_aabb = primitive_index_local_aabb(
+            verts, cpu.indices, sl.firstIndex, sl.indexCount);
+        out.model[static_cast<std::size_t>(mesh_i)].primitives.push_back(
+            Primitive { .vertex_byte_offset = 0,
+                        .first_index = sl.firstIndex,
+                        .index_count = sl.indexCount,
+                        .base_vertex = 0,
+                        .layout = layout,
+                        .material = &out.materials[static_cast<std::size_t>(mi)],
+                        .local_pivot = prim_aabb.valid ? prim_aabb.center
+                                                       : glm::vec3(0.0F),
+                        .local_aabb_half_extent =
+                            prim_aabb.valid ? prim_aabb.half_extent
+                                            : glm::vec3(0.0F),
+                      });
     }
 
-    out.vertex_buffer = std::move(vbuf);
-    out.index_buffer = std::move(ibuf);
+    out.vertexBuffer = std::move(vbuf);
+    out.indexBuffer = std::move(ibuf);
     out.textures = std::move(tex_storage);
-    out.stats_vertex_count = verts.size();
-    out.stats_index_count = cpu.indices.size();
+    out.statsVertexCount = verts.size();
+    out.statsIndexCount = cpu.indices.size();
 
+    std::size_t prim_total = 0;
+    for (const Mesh &m : out.model) {
+        prim_total += m.primitives.size();
+    }
     LUMEN_LOG_DEBUG(
-        "load_gltf_scene_mesh: {} 顶点, {} 索引, {} primitive, {} 材质",
-        out.stats_vertex_count, out.stats_index_count, slices.size(),
+        "load_gltf_scene_mesh: {} 顶点, {} 索引, {} mesh, {} primitive, {} 材质",
+        out.statsVertexCount, out.statsIndexCount, out.model.size(), prim_total,
         out.materials.size());
     return true;
 }

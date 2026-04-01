@@ -14,6 +14,8 @@
 #include <glm/vec3.hpp>
 
 #include <entt/entt.hpp>
+#include <optional>
+#include <utility>
 
 namespace lumen {
 namespace platform {
@@ -35,6 +37,8 @@ public:
         float mouse_smooth_time_seconds { 0.022f };
         /// WASD 飞行目标速度趋近时间常数（秒）；`0` 表示立即到目标速度
         float fly_velocity_smooth_time_seconds { 0.07f };
+        /// F 取景等 `begin_smooth_frame` 的枢轴 / 距离插值时间常数（秒）；`0` 表示立即到位
+        float frame_smooth_time_seconds { 0.18f };
     };
 
     /// 半径与俯仰（弧度）钳制，与历史 demo 行为一致
@@ -74,6 +78,15 @@ public:
     void set_yaw(float radians) { yaw_ = radians; }
     void set_pitch(float radians);
     void set_radius(float r);
+    /// 与滚轮 / Alt 缩放等冲突时由内部取消平滑取景
+    void cancel_smooth_frame();
+    /// 每帧调用：将枢轴与半径指数趋近到 `begin_smooth_frame` 所设目标
+    void tick_smooth_frame(float delta_seconds);
+    /// 开始平滑取景（可重复调用以更新目标）
+    void begin_smooth_frame(glm::vec3 target_pivot, float target_radius);
+    [[nodiscard]] bool smooth_frame_active() const {
+        return smooth_frame_active_;
+    }
     [[nodiscard]] float yaw() const { return yaw_; }
     [[nodiscard]] float pitch() const { return pitch_; }
     [[nodiscard]] float radius() const { return radius_; }
@@ -127,6 +140,10 @@ private:
     float smooth_mouse_dx_ { 0.0f };
     float smooth_mouse_dy_ { 0.0f };
     glm::vec3 fly_velocity_world_ { 0.0f };
+
+    bool smooth_frame_active_ { false };
+    glm::vec3 smooth_frame_target_pivot_ { 0.0f };
+    float smooth_frame_target_radius_ { 1.0f };
 };
 
 void frame_orbit_on_drawable(SceneOrbitController &orbit,
@@ -134,6 +151,13 @@ void frame_orbit_on_drawable(SceneOrbitController &orbit,
                              entt::entity drawable,
                              const glm::vec3 &mesh_center_local,
                              const glm::vec3 &mesh_half_extents_local);
+
+/// 计算 `frame_orbit_on_drawable` 会使用的枢轴与世界空间半径（不修改 `orbit`）
+[[nodiscard]] std::optional<std::pair<glm::vec3, float>>
+frame_orbit_targets_for_drawable(
+    const SceneOrbitController &orbit, const entt::registry &reg,
+    entt::entity drawable, const glm::vec3 &mesh_center_local,
+    const glm::vec3 &mesh_half_extents_local);
 
 } // namespace scene
 } // namespace lumen
