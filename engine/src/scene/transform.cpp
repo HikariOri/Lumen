@@ -11,7 +11,7 @@
 
 namespace lumen::scene {
 
-glm::mat4 world_matrix(const ::entt::registry &registry, ::entt::entity entity,
+glm::mat4 world_matrix(const entt::registry &registry, entt::entity entity,
                        int max_depth) {
     if (!registry.valid(entity) || max_depth <= 0) {
         return { 1.0F };

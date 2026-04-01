@@ -42,7 +42,7 @@ struct GPULight {
  * 含 `DirectionalLightComponent` / `PointLightComponent` / `SpotLightComponent`
  * 的实体均参与；按 `entt::to_integral(entity)` 升序稳定排序。
  */
-void pack_lights_for_ubo(const ::entt::registry &registry, GPULight *out_lights,
+void pack_lights_for_ubo(const entt::registry &registry, GPULight *out_lights,
                          std::uint32_t &out_count);
 
 } // namespace scene

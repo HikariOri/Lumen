@@ -86,11 +86,11 @@ void SceneOrbitController::clamp_pitch_radius_() {
 }
 
 void frame_orbit_on_drawable(SceneOrbitController &orbit,
-                             const ::entt::registry &reg,
-                             const ::entt::entity drawable,
+                             const entt::registry &reg,
+                             const entt::entity drawable,
                              const glm::vec3 &mesh_center_local,
                              const glm::vec3 &mesh_half_extents_local) {
-    if (drawable == ::entt::null || !reg.valid(drawable)) {
+    if (drawable == entt::null || !reg.valid(drawable)) {
         return;
     }
     const glm::mat4 mw = world_matrix(reg, drawable);

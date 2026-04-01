@@ -79,8 +79,8 @@ public:
     /**
      * @param selected_for_debug 预留；当前无 ECS 光源时不生成调试线
      */
-    void prepare_frame(const ::entt::registry &registry,
-                       ::entt::entity selected_for_debug,
+    void prepare_frame(const entt::registry &registry,
+                       entt::entity selected_for_debug,
                        bool draw_icons_for_all_lights,
                        bool draw_range_direction_for_selected,
                        uint32_t frame_index);
@@ -90,7 +90,7 @@ public:
      */
     void record(VkCommandBuffer cmd, uint32_t frame_index,
                 const glm::mat4 &view, const glm::mat4 &proj,
-                const ::entt::registry &registry) const;
+                const entt::registry &registry) const;
 
 private:
     void destroy_();

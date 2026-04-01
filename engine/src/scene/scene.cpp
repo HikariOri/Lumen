@@ -11,13 +11,13 @@
 namespace lumen::scene {
 namespace {
 
-[[nodiscard]] bool parent_is_under_child(const ::entt::registry &reg,
-                                         ::entt::entity child,
-                                         ::entt::entity parent) {
-    if (parent == ::entt::null || child == ::entt::null || !reg.valid(parent)) {
+[[nodiscard]] bool parent_is_under_child(const entt::registry &reg,
+                                         entt::entity child,
+                                         entt::entity parent) {
+    if (parent == entt::null || child == entt::null || !reg.valid(parent)) {
         return false;
     }
-    ::entt::entity x = parent;
+    entt::entity x = parent;
     for (int i = 0; i < 64 && reg.valid(x); ++i) {
         if (x == child) {
             return true;
@@ -37,8 +37,8 @@ namespace {
 
 } // namespace
 
-::entt::entity Scene::create_entity(std::string_view name) {
-    const ::entt::entity e = reg_.create();
+entt::entity Scene::create_entity(std::string_view name) {
+    const entt::entity e = reg_.create();
     reg_.emplace<IDComponent>(
         e, IDComponent{ .id = lumen::core::generate_random_id() });
     reg_.emplace<TransformComponent>(e);
@@ -46,20 +46,20 @@ namespace {
     return e;
 }
 
-bool Scene::set_parent(::entt::entity child, ::entt::entity parent) {
+bool Scene::set_parent(entt::entity child, entt::entity parent) {
     if (!reg_.valid(child)) {
         return false;
     }
-    if (parent != ::entt::null && !reg_.valid(parent)) {
+    if (parent != entt::null && !reg_.valid(parent)) {
         return false;
     }
     if (parent == child) {
         return false;
     }
-    if (parent != ::entt::null && parent_is_under_child(reg_, child, parent)) {
+    if (parent != entt::null && parent_is_under_child(reg_, child, parent)) {
         return false;
     }
-    if (parent == ::entt::null) {
+    if (parent == entt::null) {
         reg_.remove<RelationshipComponent>(child);
         return true;
     }
@@ -72,7 +72,7 @@ bool Scene::set_parent(::entt::entity child, ::entt::entity parent) {
     return true;
 }
 
-void Scene::destroy_entity(::entt::entity entity) {
+void Scene::destroy_entity(entt::entity entity) {
     if (!reg_.valid(entity)) {
         return;
     }
@@ -91,8 +91,8 @@ void Scene::destroy_entity(::entt::entity entity) {
     reg_.destroy(entity);
 }
 
-std::vector<::entt::entity> Scene::children_of(::entt::entity parent) const {
-    std::vector<::entt::entity> out;
+std::vector<entt::entity> Scene::children_of(entt::entity parent) const {
+    std::vector<entt::entity> out;
     if (!reg_.valid(parent)) {
         return out;
     }

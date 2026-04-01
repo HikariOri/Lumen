@@ -57,16 +57,16 @@ namespace core {
 struct GltfSubmeshRange {
 
     /** @brief 起始索引（Index Buffer offset） */
-    std::uint32_t first_index = 0;
+    std::uint32_t firstIndex = 0;
 
     /** @brief 索引数量（该 primitive 的 index count） */
-    std::uint32_t index_count = 0;
+    std::uint32_t indexCount = 0;
 
     /**
      * @brief 材质索引（对应 glTF materials 数组）
      * @note -1 表示无材质
      */
-    int material_index = -1;
+    int materialIndex = -1;
 };
 
 /**
@@ -159,8 +159,8 @@ struct GltfSubmeshRange {
  * load_gltf("model.glb", mesh, mainMat, &submeshes, &materials);
  *
  * for (const auto& sub : submeshes) {
- *     bind(materials[sub.material_index]);
- *     drawIndexed(sub.first_index, sub.index_count);
+ *     bind(materials[sub.materialIndex]);
+ *     drawIndexed(sub.firstIndex, sub.indexCount);
  * }
  * @endcode
  *

@@ -7,6 +7,8 @@ target_link_libraries(pbr PRIVATE engine)
 
 target_precompile_headers(pbr REUSE_FROM engine)
 
+add_dependencies(pbr engine)
+
 set(PBR_SPV_DIR "$<TARGET_FILE_DIR:pbr>/shaders")
 foreach(_shader
   ibl_cube.vert
@@ -17,8 +19,6 @@ foreach(_shader
   ibl_brdf.frag
   skybox.vert
   skybox.frag
-  helmet_pbr.vert
-  helmet_pbr.frag
 )
   add_custom_command(
     TARGET pbr
@@ -31,6 +31,20 @@ foreach(_shader
     VERBATIM
   )
 endforeach()
+
+add_custom_command(
+  TARGET pbr
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${PBR_SPV_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pbr_forward.vert.spv"
+          "${PBR_SPV_DIR}/pbr_forward.vert.spv"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE_DIR:engine>/shaders/pbr_forward.frag.spv"
+          "${PBR_SPV_DIR}/pbr_forward.frag.spv"
+  COMMENT "Copy engine pbr_forward SPIR-V into pbr"
+  VERBATIM
+)
 
 add_custom_command(
   TARGET pbr
