@@ -64,7 +64,9 @@
 - [ ] 索引绘制
 - [ ] OBJ 加载（或 Assimp 多格式）
 - [ ] 子网格与材质索引
-- [ ] glTF 加载（可选）
+- [x] glTF 2.0 场景网格：`gltf/mesh_asset.hpp`（`lumen::gltf::Mesh` / `Primitive` / `Model` / `MeshBuffer`）、`load_gltf_scene_mesh`；共享 VB/IB + primitive 级 offset；`Primitive::material` 与多 primitive 多材质一致
+
+**说明**：当前 glTF 路径已落地；OBJ / 通用 AssetManager 等仍为规划项。
 
 ### 6. 纹理
 
@@ -313,7 +315,7 @@
 | Transform | 层级与世界矩阵，驱动 MVP 与光照位置 |
 | Camera | 相机参数与 View/Projection |
 | Light | 光源类型与参数，驱动 UBO 与 PBR 光照计算 |
-| Mesh | 网格数据与顶点格式，对应 Vulkan Buffer |
+| `lumen::gltf::Mesh` / `Primitive` | glTF 对齐网格资源；共享大 Buffer + offset；材质在 primitive；ECS 见 `MeshRendererComponent` / `SubMeshRendererComponent`，扁平绘制见 `RenderItem` |
 | Scene / GameObject | 场景图与渲染遍历 |
 | SceneSerializer | 场景序列化/反序列化（保存与加载、资产引用、版本） |
 | Prefab / Layer、Tag | 预制体实例化与覆盖；图层/标签用于裁剪、光照、拾取过滤 |

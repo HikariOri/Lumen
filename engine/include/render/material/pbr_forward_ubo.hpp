@@ -182,7 +182,7 @@ inline void fill_pbr_light_ubo_default_points(PbrLightUbo &lightUbo,
             lightUbo.lights[static_cast<size_t>(i)].colorIntensity =
                 glm::vec4(s.color, s.intensity * strengthScale);
             lightUbo.lights[static_cast<size_t>(i)].params =
-                glm::vec4((std::max)(s.range, 0.05F), 0.0F, 0.0F, 0.0F);
+                glm::vec4(std::max(s.range, 0.05F), 0.0F, 0.0F, 0.0F);
         } else {
             lightUbo.lights[static_cast<size_t>(i)] = {};
         }

@@ -38,23 +38,21 @@ void imgui_scene_viewport_panel(
                 }
             });
         if (pending_width != nullptr) {
-            *pending_width = (std::max)(2U, *pending_width);
+            *pending_width = std::max(2U, *pending_width);
         }
         if (pending_height != nullptr) {
-            *pending_height = (std::max)(2U, *pending_height);
+            *pending_height = std::max(2U, *pending_height);
         }
     } else {
         ImGui::Begin(title);
         const ImVec2 vp_avail = ImGui::GetContentRegionAvail();
         if (pending_width != nullptr) {
             *pending_width =
-                (std::max)(2U,
-                           static_cast<uint32_t>((std::max)(1.0F, vp_avail.x)));
+                std::max(2U, static_cast<uint32_t>(std::max(1.0F, vp_avail.x)));
         }
         if (pending_height != nullptr) {
             *pending_height =
-                (std::max)(2U,
-                           static_cast<uint32_t>((std::max)(1.0F, vp_avail.y)));
+                std::max(2U, static_cast<uint32_t>(std::max(1.0F, vp_avail.y)));
         }
         ImGui::End();
     }

@@ -10,7 +10,7 @@
  * `append_mesh_render_items(meshBuffer, *mr.mesh, world, pipelineKey, items)` → 排序或分桶 →
  * 按项 `vkCmdBind*`（可用 `item` 内缓冲指针）后 `vkCmdDrawIndexed`。
  *
- * @see `scene/mesh.hpp`
+ * @see `asset/geometry/mesh_asset.hpp`
  * @see `scene/components.hpp`（`MeshRendererComponent`、`SubMeshRendererComponent`）
  * @see `scene/submesh.hpp`（按实体收集 SubMesh）
  *
@@ -20,13 +20,15 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <entt/entt.hpp>
 #include <glm/mat4x4.hpp>
 
+#include "asset/mesh_instance_ref.hpp"
+#include "asset/geometry/mesh_asset.hpp"
 #include "render/material/material.hpp"
-#include "scene/mesh.hpp"
 
 namespace lumen::scene {
 
@@ -34,7 +36,7 @@ namespace lumen::scene {
  * @brief 单次 draw 所需的逻辑打包（扁平队列元素）
  */
 struct RenderItem {
-    const Primitive *primitive {}; ///< 非空；索引范围、布局、拓扑（不含 VB/IB）
+    const lumen::asset::geometry::Primitive *primitive {}; ///< 非空；索引范围、布局、拓扑（不含 VB/IB）
     /// 与 `primitive` 配套的大缓冲；由 `append_*_render_items` 从 `MeshBuffer` 填入
     const render::VertexBuffer *vertexBuffer {};
     const render::IndexBuffer *indexBuffer {};
@@ -62,8 +64,9 @@ struct RenderItem {
  * @note
  * `meshBuffer` 无效或 `!primitive.is_drawable()` 时直接返回。
  */
-inline void append_primitive_render_item(const MeshBuffer &meshBuffer,
-                                         const Primitive &primitive,
+inline void append_primitive_render_item(
+    const lumen::asset::geometry::MeshBuffer &meshBuffer,
+    const lumen::asset::geometry::Primitive &primitive,
                                          const glm::mat4 &model,
                                          std::uint64_t pipelineKey,
                                          const render::Material *materialOverride,
@@ -96,7 +99,9 @@ inline void append_primitive_render_item(const MeshBuffer &meshBuffer,
  * @note
  * `meshBuffer` 无效时直接返回。跳过 `!primitive.is_drawable()` 的项。
  */
-inline void append_mesh_render_items(const MeshBuffer &meshBuffer, const Mesh &mesh,
+inline void append_mesh_render_items(
+    const lumen::asset::geometry::MeshBuffer &meshBuffer,
+    const lumen::asset::geometry::Mesh &mesh,
                                      const glm::mat4 &model,
                                      std::uint64_t pipelineKey,
                                      std::vector<RenderItem> &outItems,
@@ -114,15 +119,33 @@ inline void append_mesh_render_items(const MeshBuffer &meshBuffer, const Mesh &m
 /**
  * @brief 将 `model` 中每个 `Mesh` 的可绘制 primitive 依次追加为 `RenderItem`
  */
-inline void append_model_render_items(const MeshBuffer &meshBuffer,
-                                      const Model &model, const glm::mat4 &world,
+inline void append_model_render_items(
+    const lumen::asset::geometry::MeshBuffer &meshBuffer,
+    const lumen::asset::geometry::Model &model,
+                                      const glm::mat4 &world,
                                       std::uint64_t pipelineKey,
                                       std::vector<RenderItem> &outItems,
                                       entt::entity pick_entity = entt::null) {
-    for (const Mesh &meshPart : model) {
+    for (const lumen::asset::geometry::Mesh &meshPart : model) {
         append_mesh_render_items(meshBuffer, meshPart, world, pipelineKey,
                                  outItems, pick_entity);
     }
+}
+
+/**
+ * @brief 由 `MeshInstanceRef` 解析后展开 `RenderItem`；场景资产已卸载时无操作
+ */
+inline void append_mesh_instance_ref_render_items(
+    const lumen::asset::MeshInstanceRef &ref, const glm::mat4 &world,
+    std::uint64_t pipelineKey, std::vector<RenderItem> &outItems,
+    entt::entity pick_entity = entt::null) {
+    const std::optional<lumen::asset::MeshInstanceRef::Resolved> r =
+        ref.resolve();
+    if (!r.has_value()) {
+        return;
+    }
+    append_mesh_render_items(r->meshBuffer, *r->mesh, world, pipelineKey,
+                             outItems, pick_entity);
 }
 
 } // namespace lumen::scene

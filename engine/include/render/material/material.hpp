@@ -49,6 +49,10 @@ struct MaterialLoadDesc {
  *
  * 缺失贴图时由 `PbrMaterialDefaultTextures` 提供默认采样，避免 descriptor
  * 绑定无效资源。
+ *
+ * @note 各 `*Tex` 为裸 `Texture*`，须指向由 `TextureRegistry` / `PbrMaterialInstance::textureKeepalive`
+ * 等在 **未卸载前** 保持有效的 GPU 纹理；glTF 经 `MaterialRegistry` 加载时由
+ * `PbrMaterialInstance` 持有贴图 `shared_ptr`。
  */
 struct Material {
     glm::vec4 baseColorFactor { 1.0F, 1.0F, 1.0F, 1.0F };

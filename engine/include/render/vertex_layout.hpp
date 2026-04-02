@@ -4,16 +4,17 @@
  *
  * @details
  * 描述交错顶点在单个 vertex buffer binding 内的 stride 与各 `location` 的
- * `VkFormat`、字节偏移。用于 `Primitive::layout`，使「画什么」与管线顶点输入声明一致。
+ * `VkFormat`、字节偏移。用于
+ * `Primitive::layout`，使「画什么」与管线顶点输入声明一致。
  *
- * 使用定长 `std::array` 存储 attribute，避免每个 `Primitive` 附带 `std::vector` 堆分配；
- * 有效个数由 `attribute_count` 表示，且不超过 `k_max_attributes`。
+ * 使用定长 `std::array` 存储 attribute，避免每个 `Primitive` 附带 `std::vector`
+ * 堆分配； 有效个数由 `attributeCount` 表示，且不超过 `MAX_ATTRIBUTES`。
  *
  * @note
- * 与具体 `GraphicsPipeline` 的 `vertexAttributes` 配置需保持一致，否则校验层或 GPU
- * 行为可能异常。
+ * 与具体 `GraphicsPipeline` 的 `vertexAttributes` 配置需保持一致，否则校验层或
+ * GPU 行为可能异常。
  *
- * @see `scene/mesh.hpp`（`Primitive::layout`）
+ * @see `asset/geometry/mesh_asset.hpp`（`geometry::Primitive::layout`）
  *
  * @ingroup Render
  */
@@ -34,7 +35,8 @@ namespace lumen::render {
  */
 struct VertexAttribute {
     std::uint32_t location {}; ///< 着色器中 `layout(location = …)` 对应槽位
-    VkFormat format {};        ///< 分量类型与维数（如 `vec3` → `VK_FORMAT_R32G32B32_SFLOAT`）
+    VkFormat format {};        ///< 分量类型与维数（如 `vec3` →
+                               ///< `VK_FORMAT_R32G32B32_SFLOAT`）
     std::uint32_t offset {};   ///< 相对当前 binding 起始的字节偏移
 };
 
@@ -42,29 +44,35 @@ struct VertexAttribute {
  * @brief 完整顶点输入布局（单 binding、交错顶点）
  */
 struct VertexLayout {
-    static constexpr std::uint32_t k_max_attributes { 16 }; ///< 最大 attribute 条数
+    static constexpr std::uint32_t MAX_ATTRIBUTES {
+        16
+    }; ///< 最大 attribute 条数
 
-    std::uint32_t stride {};          ///< 单个顶点跨距（字节），对应 `VkVertexInputBindingDescription::stride`
-    std::uint32_t attribute_count {}; ///< 当前有效的 `attributes` 前缀长度
-    std::array<VertexAttribute, k_max_attributes> attributes {}; ///< 各 location 描述
+    std::uint32_t stride {}; ///< 单个顶点跨距（字节），对应
+                             ///< `VkVertexInputBindingDescription::stride`
+    std::uint32_t attributeCount {}; ///< 当前有效的 `attributes` 前缀长度
+    std::array<VertexAttribute, MAX_ATTRIBUTES>
+        attributes {}; ///< 各 location 描述
 
     /**
      * @brief 追加一条属性（已满时静默忽略）
      * @param attr location / format / offset
      */
     void add_attribute(VertexAttribute attr) {
-        if (attribute_count >= k_max_attributes) {
+        if (attributeCount >= MAX_ATTRIBUTES) {
             return;
         }
-        const std::size_t ix = static_cast<std::size_t>(attribute_count);
+        const auto ix = static_cast<std::size_t>(attributeCount);
         attributes.at(ix) = attr;
-        ++attribute_count;
+        ++attributeCount;
     }
 
     /**
      * @return 未配置 stride 或无任何 attribute 时为 true
      */
-    [[nodiscard]] bool empty() const { return attribute_count == 0U || stride == 0U; }
+    [[nodiscard]] bool empty() const {
+        return attributeCount == 0U || stride == 0U;
+    }
 };
 
 /**

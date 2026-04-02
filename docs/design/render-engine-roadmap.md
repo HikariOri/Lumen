@@ -504,6 +504,9 @@ engine/
 │   │   ├── pbr.hpp                  # PBR 管线与 IBL 绑定
 │   │   ├── renderer.hpp             # 高层帧流程编排
 │   │   └── export.hpp               # 截图、视频录制（读回与编码接口）
+│   ├── gltf/
+│   │   ├── mesh_asset.hpp           # glTF 对齐 Mesh / Primitive / Model / MeshBuffer（lumen::gltf）
+│   │   └── gltf_scene_mesh.hpp      # load_gltf_scene_mesh，GPU 几何与材质
 │   ├── scene/
 │   │   ├── scene.hpp
 │   │   ├── scene_serializer.hpp      # 场景序列化/反序列化（保存与加载）
@@ -511,7 +514,7 @@ engine/
 │   │   ├── transform.hpp
 │   │   ├── camera.hpp
 │   │   ├── light.hpp
-│   │   ├── mesh.hpp
+│   │   ├── gltf_spawn.hpp           # glTF 场景写入 ECS（SubMesh / MeshRenderer）
 │   │   ├── material.hpp              # 材质参数与贴图槽定义
 │   │   ├── material_asset.hpp       # 材质资产（序列化、加载）
 │   │   ├── material_instance.hpp    # 材质实例（运行时覆盖）

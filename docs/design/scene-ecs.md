@@ -450,21 +450,29 @@ Scene ≠ 渲染
 ```
 
 ---
-## RenderObject
+## 与 Lumen 实现对齐：`RenderItem` 与网格组件
 
-```cpp
-struct RenderObject {
-    Mat4 transform;
-    MeshHandle mesh;
-    MaterialHandle material;
-};
-```
+运行时不在 Entity 上挂「唯一材质」驱动整块网格：glTF 语义下 **材质属于每个 `Primitive`**（`lumen::gltf::Primitive::material`，见 `gltf/mesh_asset.hpp`）。ECS 侧二选一或组合使用：
+
+* **`MeshRendererComponent`**：`const lumen::gltf::Mesh*`，整节点一个世界矩阵；收集绘制时用 `append_mesh_render_items` 将每个可绘制 primitive 展开为一条 `RenderItem`。
+* **`SubMeshRendererComponent`**：`mesh` + `primitiveIndex`，可选 `materialOverride`；子实体便于按 primitive Picking、显隐与编辑器树；收集时用 `append_submesh_render_items`。
+
+扁平队列元素 **`lumen::scene::RenderItem`**（`scene/render_item.hpp`）携带：`const lumen::gltf::Primitive*`、与资源配套的大 `VertexBuffer` / `IndexBuffer` 指针、解析后的 `Material*`（含 override）、`model` 矩阵、`pipelineKey`、可选 `pick_entity`。渲染循环只遍历 `RenderItem`，**不**再遍历 glTF Node JSON。
+
+**glTF 数据流**：`load_gltf_scene_mesh`（`gltf/gltf_scene_mesh.hpp`）→ `GltfSceneMesh`（`lumen::gltf::Model` + 共享 GPU 几何）→ `spawn_gltf_scene`（`scene/gltf_spawn.hpp`）写入 `TransformComponent` 与层级；默认 `GltfSpawnOptions::attach_submesh_children == true` 时在含 mesh 的节点下挂 SubMesh 子实体，`false` 时节点本体挂 `MeshRendererComponent`。
+
+**Collect / Sort 与 Submit 的分工（与 `scene/render_system.hpp` 一致）：**
+
+* **已实现于 `scene/`（Scene 渲染队列）**：`collect_render_items` 将 ECS 展开为 `RenderItem` 向量；`sort_render_items_for_minimal_state_change` 按管线键 / 材质 / 几何缓冲等排序以减少状态切换。此阶段 **不包含** `vkCmd*`、RenderPass、Framebuffer、UBO 或 descriptor 绑定。
+* **Submit（录制命令）**：在 **`render/`**（例如前向 PBR 的 `record_pbr_forward_render_items`、`record_pick_id_render_items`）或 **示例 / 应用 `main`** 中完成：更新 Frame / Material / Light / Object 等 UBO，解析材质 → `VkDescriptorSet`，再 `vkCmdBind*` 与 `vkCmdDrawIndexed`。`scene/` 不包含 Vulkan 头文件，以便场景层与 GPU API 解耦。
+
+笔记或讨论中的 **「完整 RenderSystem 流水线」**（Collect → Build → Sort → Submit）是端到端概念；**代码标识符 `scene::render_system` 仅指其中的队列构建段**（Collect + Sort），勿与整条流水线同名混为一谈。
 
 ---
-## 提取流程
+## 提取流程（概念）
 
 ```text
-遍历 ECS → 生成 RenderObject
+遍历 ECS（SubMesh / MeshRenderer + Transform）→ 生成 RenderItem 列表 → 排序 / 分桶 →（render/ 或宿主）绑定与 draw
 ```
 
 ---
@@ -531,6 +539,8 @@ struct Batch {
     std::vector<Mat4> transforms;
 };
 ```
+
+合批键在实现中通常由 **`Material` + 管线状态**（如 `RenderItem::pipelineKey`）与共享 `MeshBuffer` 推导；逻辑绘制单元仍是 **primitive**，而非整 `Mesh`。
 
 ---
 # 9. Scene → RenderGraph（完整流程）

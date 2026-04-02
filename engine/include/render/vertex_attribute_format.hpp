@@ -15,7 +15,7 @@
 namespace lumen {
 namespace render {
 
-enum class VertexAttributeFormat : std::uint16_t {
+enum class VertexAttributeFormat : std::uint8_t {
     // --- 64-bit float ---
     F64,
     F64Vec2,
@@ -130,8 +130,7 @@ vertex_attribute_format_location_count(VertexAttributeFormat fmt) noexcept {
     case VertexAttributeFormat::I16Mat2:
     case VertexAttributeFormat::U16Mat2:
     case VertexAttributeFormat::I8Mat2:
-    case VertexAttributeFormat::U8Mat2:
-        return 2;
+    case VertexAttributeFormat::U8Mat2: return 2;
     case VertexAttributeFormat::F64Mat3:
     case VertexAttributeFormat::F32Mat3:
     case VertexAttributeFormat::F16Mat3:
@@ -140,8 +139,7 @@ vertex_attribute_format_location_count(VertexAttributeFormat fmt) noexcept {
     case VertexAttributeFormat::I16Mat3:
     case VertexAttributeFormat::U16Mat3:
     case VertexAttributeFormat::I8Mat3:
-    case VertexAttributeFormat::U8Mat3:
-        return 3;
+    case VertexAttributeFormat::U8Mat3: return 3;
     case VertexAttributeFormat::F64Mat4:
     case VertexAttributeFormat::F32Mat4:
     case VertexAttributeFormat::F16Mat4:
@@ -150,10 +148,8 @@ vertex_attribute_format_location_count(VertexAttributeFormat fmt) noexcept {
     case VertexAttributeFormat::I16Mat4:
     case VertexAttributeFormat::U16Mat4:
     case VertexAttributeFormat::I8Mat4:
-    case VertexAttributeFormat::U8Mat4:
-        return 4;
-    default:
-        return 1;
+    case VertexAttributeFormat::U8Mat4: return 4;
+    default: return 1;
     }
 }
 

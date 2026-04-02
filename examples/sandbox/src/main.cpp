@@ -3,10 +3,12 @@
  * @brief PBR — IBL 烘焙、HDR 天空盒、Sponza（glTF 多 primitive / 多材质）
  */
 
-#include "ibl_bake.hpp"
-
+#include "asset/asset_registry.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
+#include "scene/scene_mesh_asset.hpp"
+#include "scene/scene_mesh_spawn.hpp"
+#include "ibl_bake.hpp"
 #include "platform/event.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
@@ -16,8 +18,9 @@
 #include "render/material/material.hpp"
 #include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
-#include "render/pass/render_pass.hpp"
+#include "render/pbr_forward_record_render_items.hpp"
 #include "render/pass/pick_id_render_target.hpp"
+#include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/buffer.hpp"
@@ -29,17 +32,15 @@
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
-#include "gltf/gltf_scene_mesh.hpp"
-#include "scene/mesh.hpp"
-#include "scene/render_item.hpp"
+#include "scene/components.hpp"
+#include "scene/id_lookup.hpp"
+#include "asset/geometry/mesh_asset.hpp"
+#include "scene/pick.hpp"
+#include "scene/render.hpp"
 #include "scene/scene.hpp"
-#include "scene/submesh.hpp"
 #include "scene/scene_camera.hpp"
 #include "scene/scene_orbit_controller.hpp"
 #include "scene/transform.hpp"
-#include "scene/components.hpp"
-#include "scene/id_lookup.hpp"
-#include "scene/pick.hpp"
 #include "ui/editor_selection.hpp"
 #include "ui/gizmo.hpp"
 #include "ui/gpu_capabilities_panel.hpp"
@@ -51,6 +52,7 @@
 #include "ui/scene_inspector_panel.hpp"
 #include "ui/scene_viewport_panel.hpp"
 #include "ui/texture_view_panel.hpp"
+
 
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
@@ -64,12 +66,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <ghc/filesystem.hpp>
 #include <format>
-#include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
 
 #include <vulkan/vulkan.h>
 
@@ -90,10 +94,13 @@ constexpr const char *SPONZA_GLTF_REL {
     // "assets/models/chisa_wuthering_waves/scene.gltf"
     // "assets/models/chisa_wuthering_waves/scene.gltf"
     // "assets/glTF-Sample-Assets/Models/DamagedHelmet/glTF/DamagedHelmet.gltf"
-    "assets/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf"
+    // "assets/glTF-Sample-Assets/Models/Sponza/glTF/Sponza.gltf"
+    // "assets/glTF-Sample-Assets/Models/FlightHelmet/glTF/FlightHelmet.gltf"
+    "assets/glTF-Sample-Assets/Models/Lantern/glTF/Lantern.gltf"
 };
 
-/// 「Scene」视口 ImGuizmo 模式（须在本帧 `imgui_scene_viewport_panel` 之前写入）
+/// 「Scene」视口 ImGuizmo 模式（须在本帧 `imgui_scene_viewport_panel`
+/// 之前写入）
 int scene_gizmo_operation { static_cast<int>(ImGuizmo::TRANSLATE) };
 
 // 单位立方体（与 ibl_bake 天空捕获一致）
@@ -133,20 +140,21 @@ struct HelmVertex {
 
 [[nodiscard]] VkDescriptorSet vk_descriptor_set_for_pbr_material(
     const lumen::render::Material *material,
-    const std::vector<lumen::render::Material> &materialsStorage,
+    const std::unordered_map<const lumen::render::Material *, uint32_t>
+        &materialToDsIndex,
     const std::vector<VkDescriptorSet> &materialSets) {
     if (materialSets.empty()) {
         return VK_NULL_HANDLE;
     }
-    if (material == nullptr || materialsStorage.empty()) {
+    if (material == nullptr) {
         return materialSets[0];
     }
-    const ptrdiff_t indexInStorage = material - materialsStorage.data();
-    if (indexInStorage < 0 ||
-        static_cast<size_t>(indexInStorage) >= materialsStorage.size()) {
+    const auto it = materialToDsIndex.find(material);
+    if (it == materialToDsIndex.end() ||
+        static_cast<size_t>(it->second) >= materialSets.size()) {
         return materialSets[0];
     }
-    return materialSets[static_cast<size_t>(indexInStorage)];
+    return materialSets[static_cast<size_t>(it->second)];
 }
 
 /** @brief 立方体贴图某一面的 2D 视图（@a base_array_layer 0…5 对应 +X −X +Y −Y
@@ -156,7 +164,7 @@ create_cubemap_face_2d_view(VkDevice device, VkImage img, VkFormat format,
                             uint32_t mipLevel, uint32_t baseArrayLayer,
                             const char *label) {
     VkImageViewCreateInfo createInfo {
-        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        .sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
     };
     createInfo.image = img;
     createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -330,8 +338,7 @@ static int run_pbr(int, char **) {
             static_cast<uint32_t>((std::max)(2, windowHeight * 3 / 4));
         vizCfg.format = swapchain.image_format();
         vizCfg.useDepth = true;
-        vizCfg.colorFinalLayout =
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        vizCfg.colorFinalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         if (!idMapVizTarget.create(ctx, vizCfg, &offscreenRenderPass)) {
             LUMEN_APP_LOG_ERROR("ID Map 可视化离屏目标创建失败");
             return -1;
@@ -410,9 +417,11 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
+    namespace fs = ghc::filesystem;
+
     const std::string sponzaPath =
         lumen::core::get_resource_path(SPONZA_GLTF_REL);
-    if (!std::filesystem::exists(sponzaPath)) {
+    if (!fs::exists(fs::path(sponzaPath))) {
         LUMEN_APP_LOG_ERROR("未找到 Sponza glTF: {}（含同级纹理）", sponzaPath);
         return -1;
     }
@@ -426,56 +435,120 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::scene::GltfSceneMesh sponzaAsset {};
-    lumen::scene::GltfSceneMeshLoadOptions sponzaLoadOpts {};
+    lumen::scene::SceneMeshLoadOptions sponzaLoadOpts {};
     sponzaLoadOpts.recenterToOrigin = true;
     sponzaLoadOpts.uniformScaleMaxAxis = 1.8F;
     std::string sponzaLoadErr;
-    if (!lumen::scene::load_gltf_scene_mesh(ctx, gq, cmdPool, sponzaPath,
-                                            sponzaAsset, sponzaLoadOpts,
-                                            &sponzaLoadErr)) {
+    const lumen::asset::SceneMeshAssetHandle sponza_mesh_handle =
+        lumen::asset::AssetRegistry::instance().load_scene_mesh_handle(
+            ctx, gq, cmdPool, sponzaPath, sponzaLoadOpts, &sponzaLoadErr);
+    if (!sponza_mesh_handle.valid()) {
         LUMEN_APP_LOG_ERROR("Sponza 加载失败: {}",
                             sponzaLoadErr.empty() ? "unknown" : sponzaLoadErr);
         return -1;
     }
+    const std::shared_ptr<lumen::scene::SceneMeshAsset> sponza_asset_sp =
+        lumen::asset::AssetRegistry::instance().try_get_scene_mesh(
+            sponza_mesh_handle);
+    if (!sponza_asset_sp) {
+        LUMEN_APP_LOG_ERROR("Sponza 场景网格句柄解析失败");
+        return -1;
+    }
+    lumen::scene::SceneMeshAsset &sponzaAsset = *sponza_asset_sp;
     if (sponzaAsset.materials.empty()) {
         LUMEN_APP_LOG_ERROR("Sponza 无材质");
         return -1;
     }
 
-    std::vector<lumen::render::Material> &pbrMaterials = sponzaAsset.materials;
-    lumen::scene::Mesh *sponzaInspectorMesh = nullptr;
-    for (lumen::scene::Mesh &m : sponzaAsset.model) {
-        if (!m.primitives.empty()) {
-            sponzaInspectorMesh = &m;
-            break;
+    std::unordered_map<const lumen::render::Material *, uint32_t>
+        sponzaMaterialToDsIndex;
+    std::vector<const lumen::render::Material *> sponzaUniqueMaterials;
+    for (const auto &matInst : sponzaAsset.materials) {
+        if (!matInst) {
+            continue;
         }
+        const lumen::render::Material *const p = &matInst->material;
+        if (sponzaMaterialToDsIndex.find(p) != sponzaMaterialToDsIndex.end()) {
+            continue;
+        }
+        const uint32_t idx =
+            static_cast<uint32_t>(sponzaUniqueMaterials.size());
+        sponzaMaterialToDsIndex[p] = idx;
+        sponzaUniqueMaterials.push_back(p);
     }
-    if (sponzaInspectorMesh == nullptr) {
+    if (sponzaUniqueMaterials.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza 无有效材质实例");
+        return -1;
+    }
+    const lumen::render::Material *const sponzaDefaultMaterial =
+        sponzaUniqueMaterials[0];
+    std::size_t sponza_prim_definition_count = 0;
+    for (const lumen::asset::geometry::Mesh &m : sponzaAsset.model) {
+        sponza_prim_definition_count += m.primitives.size();
+    }
+    if (sponza_prim_definition_count == 0) {
         LUMEN_APP_LOG_ERROR("Sponza 无 mesh/primitive");
         return -1;
     }
 
     lumen::scene::Scene editorScene;
     lumen::ui::EditorSelection editorSelection {};
-    const entt::entity sponzaRootEntity = editorScene.create_entity("Sponza");
-    editorScene.registry().emplace<lumen::scene::MeshRendererComponent>(
-        sponzaRootEntity,
-        lumen::scene::MeshRendererComponent{ .mesh = sponzaInspectorMesh });
-    editorSelection.entity = sponzaRootEntity;
-    /// 为层级与 SubMesh 检视挂子实体（每 primitive 一条）；主渲染对首个检视 mesh
-    /// 走 SubMesh 路径以便子实体变换可见。
-    (void)lumen::scene::attach_submesh_children(
-        editorScene, sponzaRootEntity, *sponzaInspectorMesh, "SponzaSub");
-
-    uint32_t sponzaDrawSlots = 0;
-    for (const lumen::scene::Mesh &sm : sponzaAsset.model) {
-        for (const lumen::scene::Primitive &sp : sm.primitives) {
-            if (sp.is_drawable()) {
-                ++sponzaDrawSlots;
+    lumen::scene::SceneMeshSpawnOptions sponza_spawn_opts {};
+    sponza_spawn_opts.owning_scene = sponza_asset_sp;
+    sponza_spawn_opts.scene_mesh_handle = sponza_mesh_handle;
+    const lumen::scene::SceneMeshSpawnResult sponza_spawn =
+        lumen::scene::spawn_scene_mesh_hierarchy(editorScene, sponzaAsset,
+                                                 "SponzaSub", sponza_spawn_opts);
+    if (sponza_spawn.node_entities.empty()) {
+        LUMEN_APP_LOG_ERROR("Sponza glTF 场景节点为空");
+        return -1;
+    }
+    {
+        const lumen::asset::geometry::MeshBuffer gb = sponzaAsset.geometry();
+        for (const entt::entity ent :
+             editorScene.registry()
+                 .view<lumen::scene::SubMeshInstanceRefRendererComponent>()) {
+            const auto &sr = editorScene.registry()
+                                 .get<lumen::scene::SubMeshInstanceRefRendererComponent>(
+                                     ent);
+            const auto rp = sr.submeshRef.resolve();
+            if (!rp.has_value() || rp->meshBuffer.vertexBuffer != gb.vertexBuffer ||
+                rp->meshBuffer.indexBuffer != gb.indexBuffer) {
+                LUMEN_APP_LOG_ERROR(
+                    "SubMeshInstanceRef 与 geometry() 不一致（注册表/弱引用异常）");
+                return -1;
             }
+            break;
         }
     }
+    {
+        std::string meshFmtErr;
+        const std::string triObj =
+            lumen::core::get_resource_path("assets/meshes/triangle.obj");
+        if (const auto sp = lumen::asset::AssetRegistry::instance().load_scene_mesh(
+                ctx, gq, cmdPool, triObj, {}, &meshFmtErr)) {
+            LUMEN_APP_LOG_INFO("Mesh OBJ 烟测: {} 顶点", sp->statsVertexCount);
+        } else {
+            LUMEN_APP_LOG_WARN("Mesh OBJ 烟测跳过: {}",
+                               meshFmtErr.empty() ? "?" : meshFmtErr);
+        }
+        meshFmtErr.clear();
+        const std::string triLm =
+            lumen::core::get_resource_path("assets/meshes/triangle.lumenmesh");
+        if (const auto sp2 =
+                lumen::asset::AssetRegistry::instance().load_scene_mesh(
+                    ctx, gq, cmdPool, triLm, {}, &meshFmtErr)) {
+            LUMEN_APP_LOG_INFO("Mesh .lumenmesh 烟测: {} 顶点",
+                               sp2->statsVertexCount);
+        } else {
+            LUMEN_APP_LOG_WARN("Mesh .lumenmesh 烟测跳过: {}",
+                               meshFmtErr.empty() ? "?" : meshFmtErr);
+        }
+    }
+    editorSelection.entity = sponza_spawn.node_entities.front();
+
+    const uint32_t sponzaDrawSlots = (std::max)(
+        sponza_spawn.drawable_primitive_instances, 1u);
     const std::size_t helmetObjStride =
         lumen::render::pbr_object_ubo_dynamic_stride(static_cast<std::size_t>(
             ctx.physical_device_properties()
@@ -485,11 +558,12 @@ static int run_pbr(int, char **) {
         static_cast<VkDeviceSize>((std::max)(sponzaDrawSlots, 1u));
 
     LUMEN_APP_LOG_INFO(
-        "Sponza: 顶点={} 索引={} 三角≈{} mesh={} 可绘制 primitive={} 材质={} GPU "
-        "贴图实例={}",
+        "Sponza: 顶点={} 索引={} 三角≈{} mesh={} 可绘制 primitive={} "
+        "材质槽={} 去重后PBR材质种类={}",
         sponzaAsset.statsVertexCount, sponzaAsset.statsIndexCount,
-        sponzaAsset.statsIndexCount / 3U, sponzaAsset.model.size(), sponzaDrawSlots,
-        sponzaAsset.materials.size(), sponzaAsset.textures.size());
+        sponzaAsset.statsIndexCount / 3U, sponzaAsset.model.size(),
+        sponzaDrawSlots, sponzaAsset.materials.size(),
+        sponzaUniqueMaterials.size());
 
     auto commandBuffers = cmdPool.allocate(3);
     if (commandBuffers.size() != 3) {
@@ -712,10 +786,11 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    const auto sponzaMatCount = static_cast<uint32_t>(pbrMaterials.size());
-    const uint32_t PBR_UBO_STATIC = 3u + sponzaMatCount + 3u;
-    const uint32_t PBR_SET_COUNT = 3u + sponzaMatCount + 1u + 3u;
-    const uint32_t PBR_COMBINED_FOR_MATERIALS = sponzaMatCount * 5u;
+    const auto sponzaUniqueMatCount =
+        static_cast<uint32_t>(sponzaUniqueMaterials.size());
+    const uint32_t PBR_UBO_STATIC = 3u + sponzaUniqueMatCount + 3u;
+    const uint32_t PBR_SET_COUNT = 3u + sponzaUniqueMatCount + 1u + 3u;
+    const uint32_t PBR_COMBINED_FOR_MATERIALS = sponzaUniqueMatCount * 5u;
     const uint32_t PBR_COMBINED_TOTAL = 9u + PBR_COMBINED_FOR_MATERIALS;
 
     lumen::render::DescriptorPool pbrDpool;
@@ -728,13 +803,13 @@ static int run_pbr(int, char **) {
                 .count = PBR_COMBINED_TOTAL } },
             PBR_SET_COUNT)) {
         LUMEN_APP_LOG_ERROR("PBR DescriptorPool 失败 (材质数={})",
-                            sponzaMatCount);
+                            sponzaUniqueMatCount);
         return -1;
     }
 
     std::vector<lumen::render::UniformBuffer> sponzaMaterialUbos(
-        sponzaMatCount);
-    for (uint32_t mi = 0; mi < sponzaMatCount; ++mi) {
+        sponzaUniqueMatCount);
+    for (uint32_t mi = 0; mi < sponzaUniqueMatCount; ++mi) {
         if (!sponzaMaterialUbos[mi].create_persistent(
                 ctx, sizeof(lumen::render::PbrMaterialUbo))) {
             LUMEN_APP_LOG_ERROR("材质 UniformBuffer 失败 mi={}", mi);
@@ -742,19 +817,20 @@ static int run_pbr(int, char **) {
         }
     }
 
-    std::vector<VkDescriptorSet> sponzaMaterialDs(sponzaMatCount);
-    for (uint32_t mi = 0; mi < sponzaMatCount; ++mi) {
+    std::vector<VkDescriptorSet> sponzaMaterialDs(sponzaUniqueMatCount);
+    for (uint32_t mi = 0; mi < sponzaUniqueMatCount; ++mi) {
         if (!pbrDpool.allocate(dev, helmetMaterialDsl.handle(),
                                sponzaMaterialDs[mi])) {
             LUMEN_APP_LOG_ERROR("材质 DescriptorSet 分配失败 mi={}", mi);
             return -1;
         }
         lumen::render::PbrMaterialUbo mu {};
-        lumen::render::pack_pbr_material_ubo(mu, pbrMaterials[mi], 3.0F);
+        lumen::render::pack_pbr_material_ubo(mu, *sponzaUniqueMaterials[mi],
+                                             3.0F);
         sponzaMaterialUbos[mi].update(mu);
         lumen::render::write_pbr_material_descriptor_set(
             dev, sponzaMaterialDs[mi], sponzaMaterialUbos[mi].handle(),
-            sizeof(lumen::render::PbrMaterialUbo), pbrMaterials[mi],
+            sizeof(lumen::render::PbrMaterialUbo), *sponzaUniqueMaterials[mi],
             pbrPlaceholders);
     }
 
@@ -768,7 +844,7 @@ static int run_pbr(int, char **) {
     }
 
     std::array<lumen::render::UniformBuffer, 3> helmetFrameUbos {};
-    for (auto & helmetFrameUbo : helmetFrameUbos) {
+    for (auto &helmetFrameUbo : helmetFrameUbos) {
         if (!helmetFrameUbo.create_persistent(
                 ctx, sizeof(lumen::render::PbrFrameUbo))) {
             LUMEN_APP_LOG_ERROR("PBR Frame UniformBuffer 失败");
@@ -870,10 +946,9 @@ static int run_pbr(int, char **) {
         pcRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         pcRange.offset = 0;
         pcRange.size = sizeof(std::uint32_t);
-        if (!pickIdPl.create(ctx,
-                             { helmetFrameDsl.handle(),
-                               helmetObjectDsl.handle() },
-                             { pcRange })) {
+        if (!pickIdPl.create(
+                ctx, { helmetFrameDsl.handle(), helmetObjectDsl.handle() },
+                { pcRange })) {
             LUMEN_APP_LOG_ERROR("Pick ID PipelineLayout 失败");
             return -1;
         }
@@ -929,18 +1004,18 @@ static int run_pbr(int, char **) {
 
     lumen::render::DescriptorSetLayout idMapVizDsl;
     if (!idMapVizDsl.create(
-            ctx,
-            { { .binding = 0,
-                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                .count = 1,
-                .stages = VK_SHADER_STAGE_FRAGMENT_BIT } })) {
+            ctx, { { .binding = 0,
+                     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     .count = 1,
+                     .stages = VK_SHADER_STAGE_FRAGMENT_BIT } })) {
         LUMEN_APP_LOG_ERROR("ID Map 可视化 DescriptorSetLayout 失败");
         return -1;
     }
     lumen::render::DescriptorPool idMapVizDpool;
     if (!idMapVizDpool.create(
             ctx,
-            { { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .count = 1 } },
+            { { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .count = 1 } },
             1)) {
         LUMEN_APP_LOG_ERROR("ID Map 可视化 DescriptorPool 失败");
         return -1;
@@ -1220,31 +1295,32 @@ static int run_pbr(int, char **) {
         };
 
         if (ImGui::Begin("场景 Gizmo")) {
+            ImGui::TextUnformatted("在「Scene」视口内左键点选 SubMesh / "
+                                   "根网格（ID Map）；层级与检视器"
+                                   "一致。选中后可拖 Gizmo。未在输入文字且非 "
+                                   "Alt 时按 F 平滑对焦（鼠标在"
+                                   " Scene 图像上或该视口已记为悬停）。");
             ImGui::TextUnformatted(
-                "在「Scene」视口内左键点选 SubMesh / 根网格（ID Map）；层级与检视器"
-                "一致。选中后可拖 Gizmo。未在输入文字且非 Alt 时按 F 平滑对焦（鼠标在"
-                " Scene 图像上或该视口已记为悬停）。");
-            ImGui::TextUnformatted(
-                "工具快捷键（与 Unity 一致）：W 平移 | E 旋转 | R 缩放。视口悬停时生效；"
-                "按住右键飞行（WASD / Q 下 / E 上）时暂时不响应 W/E/R，避免与相机移动冲突。");
-            ImGui::RadioButton(
-                "平移", &scene_gizmo_operation,
-                static_cast<int>(ImGuizmo::TRANSLATE));
+                "工具快捷键（与 Unity 一致）：W 平移 | E 旋转 | R "
+                "缩放。视口悬停时生效；"
+                "按住右键飞行（WASD / Q 下 / E 上）时暂时不响应 "
+                "W/E/R，避免与相机移动冲突。");
+            ImGui::RadioButton("平移", &scene_gizmo_operation,
+                               static_cast<int>(ImGuizmo::TRANSLATE));
             ImGui::SameLine();
-            ImGui::RadioButton(
-                "旋转", &scene_gizmo_operation,
-                static_cast<int>(ImGuizmo::ROTATE));
+            ImGui::RadioButton("旋转", &scene_gizmo_operation,
+                               static_cast<int>(ImGuizmo::ROTATE));
             ImGui::SameLine();
-            ImGui::RadioButton(
-                "缩放", &scene_gizmo_operation,
-                static_cast<int>(ImGuizmo::SCALE));
+            ImGui::RadioButton("缩放", &scene_gizmo_operation,
+                               static_cast<int>(ImGuizmo::SCALE));
         }
         ImGui::End();
 
         if (ImGui::Begin("ID Map 可视化")) {
-            ImGui::Checkbox("启用（每帧渲染 ID Pass + 伪彩色）", &show_id_map_viz);
-            ImGui::TextUnformatted(
-                "与 Scene 同分辨率；深色为 ID 0（背景），其余为编码后的实体哈希色。");
+            ImGui::Checkbox("启用（每帧渲染 ID Pass + 伪彩色）",
+                            &show_id_map_viz);
+            ImGui::TextUnformatted("与 Scene 同分辨率；深色为 ID "
+                                   "0（背景），其余为编码后的实体哈希色。");
             if (show_id_map_viz &&
                 idMapVizTexId != static_cast<ImTextureID>(0)) {
                 const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -1263,7 +1339,8 @@ static int run_pbr(int, char **) {
 
         lumen::ui::imgui_scene_viewport_panel(
             "Scene", sceneTexId, &pendingSceneWidth, &pendingSceneHeight,
-            &sceneViewHovered, onOrbitViewportScroll, onSceneViewportAfterImage);
+            &sceneViewHovered, onOrbitViewportScroll,
+            onSceneViewportAfterImage);
 
         if (pbrDebugTileGrid &&
             debugSceneTexId != static_cast<ImTextureID>(0)) {
@@ -1347,7 +1424,8 @@ static int run_pbr(int, char **) {
             ImGui::TextUnformatted(
                 "右键拖拽旋转（「Scene」或「PBR 分屏调试」画面内、非 Alt）；"
                 "Alt+左/中键 轨道/平移/缩放；WASD+EQ 平移；滚轮绕枢轴缩放；"
-                "Scene 图像上左键点选实体（非 Alt、非 Gizmo 悬停）；未在输入文字时按 F 对焦");
+                "Scene 图像上左键点选实体（非 Alt、非 Gizmo "
+                "悬停）；未在输入文字时按 F 对焦");
             ImGui::TextUnformatted("天空曝光与 IBL 强度见「环境光贴图」。");
             float orbitR = orbit.radius();
             ImGui::SliderFloat("轨道距离（缩放）", &orbitR, 0.08F, 28.0F,
@@ -1417,22 +1495,23 @@ static int run_pbr(int, char **) {
         ImGui::End();
 
         if (ImGui::Begin("Sponza 场景网格")) {
-            ImGui::Text("glTF mesh 数: %zu（检视首个非空 mesh）",
-                        sponzaAsset.model.size());
-            ImGui::Text("Primitive 数: %zu", sponzaInspectorMesh->primitives.size());
-            ImGui::Text("材质槽位数: %zu", pbrMaterials.size());
-            ImGui::Text("已加载 GPU 纹理数: %zu", sponzaAsset.textures.size());
-            ImGui::TextWrapped("多 primitive 按 `scene::Mesh` 绘制；每材质一套 "
-                               "descriptor set=1。");
+            ImGui::Text("场景网格 mesh 数: %zu", sponzaAsset.model.size());
+            ImGui::Text("Primitive 定义数（各 mesh 合计）: %zu",
+                        sponza_prim_definition_count);
+            ImGui::Text("场景节点数: %zu", sponzaAsset.scene_nodes.size());
+            ImGui::Text("可绘制 primitive 实例数: %u", sponzaDrawSlots);
+            ImGui::Text("材质槽位数: %zu", sponzaAsset.materials.size());
+            ImGui::Text("去重后 PBR 材质种类: %zu", sponzaUniqueMaterials.size());
+            ImGui::TextWrapped(
+                "几何在 mesh 局部空间；Node 变换在 ECS。每实例 SubMesh 绘制。");
         }
         ImGui::End();
 
         if (ImGui::Begin("ECS 渲染组件总览")) {
             ImGui::TextWrapped(
-                "下列实体来自场景注册表。根实体带 MeshRenderer（整网）；子实体带 "
-                "SubMeshRenderer（单 primitive）。主渲染对首个检视 mesh 使用 "
-                "SubMesh 路径（子实体变换可见），其余 glTF mesh 随根 "
-                "`TransformComponent` 整体变换。");
+                "场景网格由 `spawn_scene_mesh_hierarchy` 生成：节点实体仅 "
+                "`TransformComponent`；含 mesh 的节点下挂 SubMesh 子实体（每 "
+                "primitive 一条），渲染走 `append_submesh_render_items`。");
             ImGui::Separator();
             entt::registry &reg = editorScene.registry();
             ImGui::TextUnformatted("MeshRendererComponent");
@@ -1444,10 +1523,12 @@ static int run_pbr(int, char **) {
                 }
                 for (const entt::entity ent : v) {
                     const char *tag = "?";
-                    if (const auto *t = reg.try_get<lumen::scene::TagComponent>(ent)) {
+                    if (const auto *t =
+                            reg.try_get<lumen::scene::TagComponent>(ent)) {
                         tag = t->tag.c_str();
                     }
-                    const auto &mr = v.get<lumen::scene::MeshRendererComponent>(ent);
+                    const auto &mr =
+                        v.get<lumen::scene::MeshRendererComponent>(ent);
                     const std::size_t n =
                         mr.mesh != nullptr ? mr.mesh->primitives.size() : 0;
                     ImGui::BulletText(
@@ -1461,28 +1542,30 @@ static int run_pbr(int, char **) {
             ImGui::TextUnformatted("SubMeshRendererComponent");
             ImGui::Indent();
             {
-                const auto v = reg.view<lumen::scene::SubMeshRendererComponent>();
+                const auto v =
+                    reg.view<lumen::scene::SubMeshRendererComponent>();
                 std::size_t count = 0;
                 for (const entt::entity ent : v) {
                     ++count;
                     const char *tag = "?";
-                    if (const auto *t = reg.try_get<lumen::scene::TagComponent>(ent)) {
+                    if (const auto *t =
+                            reg.try_get<lumen::scene::TagComponent>(ent)) {
                         tag = t->tag.c_str();
                     }
                     const auto &sm =
                         v.get<lumen::scene::SubMeshRendererComponent>(ent);
                     const std::uint32_t pc =
-                        sm.mesh != nullptr
-                            ? static_cast<std::uint32_t>(sm.mesh->primitives.size())
-                            : 0;
+                        sm.mesh != nullptr ? static_cast<std::uint32_t>(
+                                                 sm.mesh->primitives.size())
+                                           : 0;
                     const bool ok =
                         sm.mesh != nullptr && sm.primitiveIndex < pc &&
                         sm.mesh->primitives[sm.primitiveIndex].is_drawable();
                     ImGui::BulletText(
                         "%s  entity=%u  mesh=%p  primIndex=%u/%u  %s", tag,
                         static_cast<unsigned>(entt::to_integral(ent)),
-                        static_cast<const void *>(sm.mesh), sm.primitiveIndex, pc,
-                        ok ? "可绘制" : "无效或跳过");
+                        static_cast<const void *>(sm.mesh), sm.primitiveIndex,
+                        pc, ok ? "可绘制" : "无效或跳过");
                 }
                 if (count == 0) {
                     ImGui::TextDisabled("（无）");
@@ -1508,18 +1591,18 @@ static int run_pbr(int, char **) {
                                             scene_hotkey_mouse_y)
                 .inViewport;
 
-        const bool sceneTexViewportHovered =
-            sceneViewHovered || debugSceneViewHovered ||
-            mouse_over_scene_image_rect;
+        const bool sceneTexViewportHovered = sceneViewHovered ||
+                                             debugSceneViewHovered ||
+                                             mouse_over_scene_image_rect;
         const bool imguiBlocksSceneMouse =
             lumen::ui::imgui_wants_mouse() && !sceneTexViewportHovered;
 
-        // Unity 式 Gizmo 切换：W/E/R；右键飞行（与轨道控制器 WASD+QE 一致）时不处理
-        const bool scene_fly_rmb =
-            sceneTexViewportHovered &&
-            pump.input().is_mouse_button_down(
-                lumen::platform::MouseButton::Right) &&
-            !pump.input().has_alt();
+        // Unity 式 Gizmo 切换：W/E/R；右键飞行（与轨道控制器 WASD+QE
+        // 一致）时不处理
+        const bool scene_fly_rmb = sceneTexViewportHovered &&
+                                   pump.input().is_mouse_button_down(
+                                       lumen::platform::MouseButton::Right) &&
+                                   !pump.input().has_alt();
         if (sceneTexViewportHovered && !scene_fly_rmb &&
             !ImGui::GetIO().WantTextInput) {
             const bool w_down =
@@ -1529,69 +1612,104 @@ static int run_pbr(int, char **) {
             const bool r_down =
                 pump.input().is_key_down(lumen::platform::Key::R);
             if (w_down && !prev_key_w_down) {
-                scene_gizmo_operation =
-                    static_cast<int>(ImGuizmo::TRANSLATE);
+                scene_gizmo_operation = static_cast<int>(ImGuizmo::TRANSLATE);
             }
             if (e_down && !prev_key_e_down) {
-                scene_gizmo_operation =
-                    static_cast<int>(ImGuizmo::ROTATE);
+                scene_gizmo_operation = static_cast<int>(ImGuizmo::ROTATE);
             }
             if (r_down && !prev_key_r_down) {
-                scene_gizmo_operation =
-                    static_cast<int>(ImGuizmo::SCALE);
+                scene_gizmo_operation = static_cast<int>(ImGuizmo::SCALE);
             }
             prev_key_w_down = w_down;
             prev_key_e_down = e_down;
             prev_key_r_down = r_down;
         } else {
-            prev_key_w_down =
-                pump.input().is_key_down(lumen::platform::Key::W);
-            prev_key_e_down =
-                pump.input().is_key_down(lumen::platform::Key::E);
-            prev_key_r_down =
-                pump.input().is_key_down(lumen::platform::Key::R);
+            prev_key_w_down = pump.input().is_key_down(lumen::platform::Key::W);
+            prev_key_e_down = pump.input().is_key_down(lumen::platform::Key::E);
+            prev_key_r_down = pump.input().is_key_down(lumen::platform::Key::R);
         }
 
         const bool key_f_down =
             pump.input().is_key_down(lumen::platform::Key::F);
         const bool key_f_pressed = key_f_down && !prev_key_f_down;
         prev_key_f_down = key_f_down;
-        // `WantCaptureKeyboard` 在 Dock 下几乎总为 true，会误挡快捷键；仅在有文本
-        // 输入意图时屏蔽 F。
+        // `WantCaptureKeyboard` 在 Dock 下几乎总为
+        // true，会误挡快捷键；仅在有文本 输入意图时屏蔽 F。
         if (key_f_pressed && sceneTexViewportHovered &&
             !ImGui::GetIO().WantTextInput) {
             entt::registry &frame_reg = editorScene.registry();
             const entt::entity frame_sel = editorSelection.entity;
             if (frame_reg.valid(frame_sel)) {
-                if (const auto *smr = frame_reg.try_get<
-                        lumen::scene::SubMeshRendererComponent>(frame_sel)) {
+                if (const auto *smr =
+                        frame_reg
+                            .try_get<lumen::scene::SubMeshRendererComponent>(
+                                frame_sel)) {
                     if (smr->mesh != nullptr &&
                         smr->primitiveIndex < smr->mesh->primitives.size()) {
-                        const lumen::scene::Primitive &prim =
+                        const lumen::asset::geometry::Primitive &prim =
                             smr->mesh->primitives[smr->primitiveIndex];
                         if (prim.is_drawable()) {
-                            glm::vec3 half_ext = prim.local_aabb_half_extent;
+                            glm::vec3 half_ext = prim.localAabbHalfExtent;
                             if (glm::length(half_ext) < 1e-6F) {
                                 half_ext = glm::vec3(0.5F);
                             }
-                            if (const auto frame_targets =
-                                    lumen::scene::frame_orbit_targets_for_drawable(
+                            if (const auto frame_targets = lumen::scene::
+                                    frame_orbit_targets_for_drawable(
                                         orbit, frame_reg, frame_sel,
-                                        prim.local_pivot, half_ext)) {
+                                        prim.localPivot, half_ext)) {
                                 orbit.begin_smooth_frame(frame_targets->first,
                                                          frame_targets->second);
                             }
                         }
                     }
-                } else if (const auto *mr = frame_reg.try_get<
-                               lumen::scene::MeshRendererComponent>(frame_sel)) {
+                } else if (const auto *smir = frame_reg.try_get<
+                               lumen::scene::SubMeshInstanceRefRendererComponent>(
+                               frame_sel)) {
+                    const std::optional<lumen::asset::SubMeshInstanceRef::ResolvedPrim>
+                        rp = smir->submeshRef.resolve();
+                    if (rp.has_value() && rp->primitive->is_drawable()) {
+                        glm::vec3 half_ext = rp->primitive->localAabbHalfExtent;
+                        if (glm::length(half_ext) < 1e-6F) {
+                            half_ext = glm::vec3(0.5F);
+                        }
+                        if (const auto frame_targets = lumen::scene::
+                                frame_orbit_targets_for_drawable(
+                                    orbit, frame_reg, frame_sel,
+                                    rp->primitive->localPivot, half_ext)) {
+                            orbit.begin_smooth_frame(frame_targets->first,
+                                                     frame_targets->second);
+                        }
+                    }
+                } else if (const auto *mr =
+                               frame_reg.try_get<
+                                   lumen::scene::MeshRendererComponent>(
+                                   frame_sel)) {
                     if (mr->mesh != nullptr) {
                         glm::vec3 mesh_center {};
                         glm::vec3 mesh_half {};
-                        if (lumen::scene::drawable_mesh_local_bounds(
+                        if (lumen::asset::geometry::drawable_mesh_local_bounds(
                                 *mr->mesh, &mesh_center, &mesh_half)) {
-                            if (const auto frame_targets =
-                                    lumen::scene::frame_orbit_targets_for_drawable(
+                            if (const auto frame_targets = lumen::scene::
+                                    frame_orbit_targets_for_drawable(
+                                        orbit, frame_reg, frame_sel,
+                                        mesh_center, mesh_half)) {
+                                orbit.begin_smooth_frame(frame_targets->first,
+                                                         frame_targets->second);
+                            }
+                        }
+                    }
+                } else if (const auto *mir = frame_reg.try_get<
+                               lumen::scene::MeshInstanceRefRendererComponent>(
+                               frame_sel)) {
+                    const std::optional<lumen::asset::MeshInstanceRef::Resolved>
+                        rr = mir->meshRef.resolve();
+                    if (rr.has_value() && rr->mesh != nullptr) {
+                        glm::vec3 mesh_center {};
+                        glm::vec3 mesh_half {};
+                        if (lumen::asset::geometry::drawable_mesh_local_bounds(
+                                *rr->mesh, &mesh_center, &mesh_half)) {
+                            if (const auto frame_targets = lumen::scene::
+                                    frame_orbit_targets_for_drawable(
                                         orbit, frame_reg, frame_sel,
                                         mesh_center, mesh_half)) {
                                 orbit.begin_smooth_frame(frame_targets->first,
@@ -1619,7 +1737,11 @@ static int run_pbr(int, char **) {
             const bool has_draw =
                 tr != nullptr &&
                 (reg.all_of<lumen::scene::MeshRendererComponent>(sel) ||
-                 reg.all_of<lumen::scene::SubMeshRendererComponent>(sel));
+                 reg.all_of<lumen::scene::SubMeshRendererComponent>(sel) ||
+                 reg.all_of<lumen::scene::MeshInstanceRefRendererComponent>(
+                     sel) ||
+                 reg.all_of<lumen::scene::SubMeshInstanceRefRendererComponent>(
+                     sel));
             if (!has_draw) {
                 lumen::ui::imguizmo_reset_interaction_state();
             } else {
@@ -1636,18 +1758,27 @@ static int run_pbr(int, char **) {
                             sel)) {
                     if (smr->mesh != nullptr &&
                         smr->primitiveIndex < smr->mesh->primitives.size()) {
-                        pivot_mesh =
-                            smr->mesh->primitives[smr->primitiveIndex]
-                                .local_pivot;
+                        pivot_mesh = smr->mesh->primitives[smr->primitiveIndex]
+                                         .localPivot;
+                    }
+                } else if (const auto *smir =
+                               reg.try_get<
+                                   lumen::scene::
+                                       SubMeshInstanceRefRendererComponent>(
+                                   sel)) {
+                    const std::optional<
+                        lumen::asset::SubMeshInstanceRef::ResolvedPrim>
+                        rp = smir->submeshRef.resolve();
+                    if (rp.has_value()) {
+                        pivot_mesh = rp->primitive->localPivot;
                     }
                 }
                 const glm::mat4 pivot_tr =
                     glm::translate(glm::mat4(1.0F), pivot_mesh);
-                const glm::mat4 world =
-                    lumen::scene::world_matrix(reg, sel);
+                const glm::mat4 world = lumen::scene::world_matrix(reg, sel);
                 glm::mat4 gizmo_matrix = world * pivot_tr;
-                const auto op = static_cast<ImGuizmo::OPERATION>(
-                    scene_gizmo_operation);
+                const auto op =
+                    static_cast<ImGuizmo::OPERATION>(scene_gizmo_operation);
                 lumen::ui::imguizmo_manipulate(
                     scene_viewport_rect_for_gizmo, view, proj, &gizmo_matrix,
                     op, ImGuizmo::LOCAL, nullptr,
@@ -1670,8 +1801,7 @@ static int run_pbr(int, char **) {
                             }
                         }
                     }
-                    tr->set_transform(
-                        glm::inverse(parent_world) * world_new);
+                    tr->set_transform(glm::inverse(parent_world) * world_new);
                 }
             }
         } else {
@@ -1695,20 +1825,20 @@ static int run_pbr(int, char **) {
                 const VkExtent2D pe = sceneTarget.extent();
                 const float rw = scene_viewport_rect_for_gizmo.width();
                 const float rh = scene_viewport_rect_for_gizmo.height();
-                if (vms.inViewport && rw > 0.0F && rh > 0.0F && pe.width >= 1U &&
-                    pe.height >= 1U) {
-                    // ImGui 矩形：localY 自上而下增大；离屏与 Vulkan 附件 (0,0) 在
-                    // 左上角，行 y 向下递增，勿再翻转。
+                if (vms.inViewport && rw > 0.0F && rh > 0.0F &&
+                    pe.width >= 1U && pe.height >= 1U) {
+                    // ImGui 矩形：localY 自上而下增大；离屏与 Vulkan 附件 (0,0)
+                    // 在 左上角，行 y 向下递增，勿再翻转。
                     const float nx = vms.localX / rw;
                     const float ny = vms.localY / rh;
-                    scene_pick_fb_x = (std::min)(
-                        pe.width - 1U,
-                        static_cast<std::uint32_t>(
-                            nx * static_cast<float>(pe.width)));
-                    scene_pick_fb_y = (std::min)(
-                        pe.height - 1U,
-                        static_cast<std::uint32_t>(
-                            ny * static_cast<float>(pe.height)));
+                    scene_pick_fb_x =
+                        (std::min)(pe.width - 1U,
+                                   static_cast<std::uint32_t>(
+                                       nx * static_cast<float>(pe.width)));
+                    scene_pick_fb_y =
+                        (std::min)(pe.height - 1U,
+                                   static_cast<std::uint32_t>(
+                                       ny * static_cast<float>(pe.height)));
                     if (pickIdTarget.is_valid()) {
                         scene_pick_pending = true;
                     }
@@ -1759,40 +1889,15 @@ static int run_pbr(int, char **) {
             VkCommandBuffer cb = commandBuffer.handle();
 
             entt::registry &scene_reg = editorScene.registry();
-            const glm::mat4 sponza_root_world =
-                lumen::scene::world_matrix(scene_reg, sponzaRootEntity);
-            bool inspector_prims_via_submesh = false;
-            for (const entt::entity e :
-                 scene_reg.view<lumen::scene::SubMeshRendererComponent>()) {
-                const auto &smr =
-                    scene_reg.get<lumen::scene::SubMeshRendererComponent>(e);
-                if (smr.mesh == sponzaInspectorMesh) {
-                    inspector_prims_via_submesh = true;
-                    break;
-                }
-            }
             std::vector<lumen::scene::RenderItem> pbrRenderItems;
-            if (inspector_prims_via_submesh) {
-                lumen::scene::append_submesh_render_items(
-                    sponzaAsset.geometry(), scene_reg, 0, pbrRenderItems);
-                for (const lumen::scene::Mesh &mesh_part : sponzaAsset.model) {
-                    if (&mesh_part == sponzaInspectorMesh) {
-                        continue;
-                    }
-                    lumen::scene::append_mesh_render_items(
-                        sponzaAsset.geometry(), mesh_part, sponza_root_world, 0,
-                        pbrRenderItems, sponzaRootEntity);
-                }
-            } else {
-                lumen::scene::append_model_render_items(
-                    sponzaAsset.geometry(), sponzaAsset.model, sponza_root_world,
-                    0, pbrRenderItems, sponzaRootEntity);
-            }
+            lumen::scene::collect_render_items(scene_reg, pbrRenderItems);
+            lumen::scene::sort_render_items_for_minimal_state_change(
+                pbrRenderItems);
 
-            for (uint32_t mi = 0; mi < sponzaMatCount; ++mi) {
+            for (uint32_t mi = 0; mi < sponzaUniqueMatCount; ++mi) {
                 lumen::render::PbrMaterialUbo mu {};
-                lumen::render::pack_pbr_material_ubo(mu, pbrMaterials[mi],
-                                                     emissiveScale);
+                lumen::render::pack_pbr_material_ubo(
+                    mu, *sponzaUniqueMaterials[mi], emissiveScale);
                 sponzaMaterialUbos[mi].update(mu);
             }
 
@@ -1836,42 +1941,22 @@ static int run_pbr(int, char **) {
 
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               helmetPipe.handle());
-            uint32_t drawSlot = 0;
-            for (const lumen::scene::RenderItem &item : pbrRenderItems) {
-                if (!item.is_valid_for_draw()) {
-                    continue;
-                }
-                const lumen::scene::Primitive *prim = item.primitive;
-                const lumen::render::Material *primMaterial =
-                    item.material != nullptr ? item.material : &pbrMaterials[0];
-                VkDescriptorSet materialDescriptorSet =
-                    vk_descriptor_set_for_pbr_material(
-                        primMaterial, pbrMaterials, sponzaMaterialDs);
-                lumen::render::PbrObjectUbo ou {};
-                ou.model = item.model;
-                const glm::mat3 n3 = glm::mat3(item.model);
-                ou.normalMatrix = glm::mat4(glm::transpose(glm::inverse(n3)));
-                helmetObjectUbo.update(ou, drawSlot * helmetObjStride);
-                std::array<VkDescriptorSet, 4> pbrSets {
-                    helmetFrameDs[frameIndex], materialDescriptorSet,
-                    helmetObjectDs, helmetLightDs[frameIndex]
-                };
-                const uint32_t dynamicOffset =
-                    static_cast<uint32_t>(drawSlot * helmetObjStride);
-                vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                        helmetPl.handle(), 0,
-                                        static_cast<uint32_t>(pbrSets.size()),
-                                        pbrSets.data(), 1, &dynamicOffset);
-                ++drawSlot;
-                VkDeviceSize voff =
-                    static_cast<VkDeviceSize>(prim->vertex_byte_offset);
-                VkBuffer vb = item.vertexBuffer->handle();
-                vkCmdBindVertexBuffers(cb, 0, 1, &vb, &voff);
-                vkCmdBindIndexBuffer(cb, item.indexBuffer->handle(), 0,
-                                     item.indexBuffer->vk_index_type());
-                vkCmdDrawIndexed(cb, prim->index_count, 1, prim->first_index,
-                                 prim->base_vertex, 0);
-            }
+            lumen::render::PbrForwardRecordContext pbrFwdCtx {};
+            pbrFwdCtx.command_buffer = cb;
+            pbrFwdCtx.pipeline_layout = helmetPl.handle();
+            pbrFwdCtx.frame_descriptor_set = helmetFrameDs[frameIndex];
+            pbrFwdCtx.light_descriptor_set = helmetLightDs[frameIndex];
+            pbrFwdCtx.object_descriptor_set = helmetObjectDs;
+            pbrFwdCtx.default_material = sponzaDefaultMaterial;
+            pbrFwdCtx.object_dynamic_stride =
+                static_cast<std::uint32_t>(helmetObjStride);
+            pbrFwdCtx.bind_vertex_and_index_buffers_per_item = true;
+            lumen::render::record_pbr_forward_render_items(
+                pbrFwdCtx, pbrRenderItems, helmetObjectUbo,
+                [&](const lumen::render::Material *m) {
+                    return vk_descriptor_set_for_pbr_material(
+                        m, sponzaMaterialToDsIndex, sponzaMaterialDs);
+                });
 
             vkCmdEndRenderPass(commandBuffer.handle());
 
@@ -1899,46 +1984,18 @@ static int run_pbr(int, char **) {
                 vkCmdSetScissor(cb, 0, 1, &scissor);
                 vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   pickIdPipe.handle());
-                uint32_t pickDrawSlot = 0;
-                for (const lumen::scene::RenderItem &item : pbrRenderItems) {
-                    if (!item.is_valid_for_draw()) {
-                        continue;
-                    }
-                    const std::uint32_t pid =
-                        lumen::scene::encode_pick_entity_id(item.pick_entity);
-                    if (pid != 0U) {
-                        lumen::render::PbrObjectUbo ou {};
-                        ou.model = item.model;
-                        const glm::mat3 n3 = glm::mat3(item.model);
-                        ou.normalMatrix =
-                            glm::mat4(glm::transpose(glm::inverse(n3)));
-                        helmetObjectUbo.update(ou, pickDrawSlot * helmetObjStride);
-                        std::array<VkDescriptorSet, 2> pickSets {
-                            helmetFrameDs[frameIndex], helmetObjectDs
-                        };
-                        const uint32_t dynOff =
-                            static_cast<uint32_t>(pickDrawSlot * helmetObjStride);
-                        vkCmdBindDescriptorSets(
-                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pickIdPl.handle(), 0,
-                            static_cast<uint32_t>(pickSets.size()),
-                            pickSets.data(), 1, &dynOff);
-                        vkCmdPushConstants(cb, pickIdPl.handle(),
-                                           VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                           sizeof(std::uint32_t), &pid);
-                        const lumen::scene::Primitive *prim = item.primitive;
-                        VkDeviceSize voff =
-                            static_cast<VkDeviceSize>(prim->vertex_byte_offset);
-                        VkBuffer vb = item.vertexBuffer->handle();
-                        vkCmdBindVertexBuffers(cb, 0, 1, &vb, &voff);
-                        vkCmdBindIndexBuffer(cb, item.indexBuffer->handle(), 0,
-                                             item.indexBuffer->vk_index_type());
-                        vkCmdDrawIndexed(cb, prim->index_count, 1,
-                                         prim->first_index, prim->base_vertex,
-                                         0);
-                    }
-                    ++pickDrawSlot;
-                }
+                lumen::render::PickIdRecordContext pickCtx {};
+                pickCtx.command_buffer = cb;
+                pickCtx.pipeline_layout = pickIdPl.handle();
+                pickCtx.frame_descriptor_set = helmetFrameDs[frameIndex];
+                pickCtx.object_descriptor_set = helmetObjectDs;
+                pickCtx.object_dynamic_stride =
+                    static_cast<std::uint32_t>(helmetObjStride);
+                pickCtx.pick_id_push_stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+                pickCtx.pick_id_push_constant_offset = 0;
+                pickCtx.bind_vertex_and_index_buffers_per_item = true;
+                lumen::render::record_pick_id_render_items(pickCtx, pbrRenderItems,
+                                                         helmetObjectUbo);
                 vkCmdEndRenderPass(commandBuffer.handle());
 
                 if (scene_pick_pending) {
@@ -1956,10 +2013,10 @@ static int run_pbr(int, char **) {
                         static_cast<std::int32_t>(scene_pick_fb_y), 0
                     };
                     copyRegion.imageExtent = { 1, 1, 1 };
-                    vkCmdCopyImageToBuffer(
-                        cb, pickIdTarget.color_image_vk(),
-                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                        pickReadbackBuffer.handle(), 1, &copyRegion);
+                    vkCmdCopyImageToBuffer(cb, pickIdTarget.color_image_vk(),
+                                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                           pickReadbackBuffer.handle(), 1,
+                                           &copyRegion);
 
                     VkBufferMemoryBarrier bufBar {
                         VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
@@ -1971,10 +2028,9 @@ static int run_pbr(int, char **) {
                     bufBar.buffer = pickReadbackBuffer.handle();
                     bufBar.offset = 0;
                     bufBar.size = sizeof(std::uint32_t);
-                    vkCmdPipelineBarrier(
-                        cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &bufBar,
-                        0, nullptr);
+                    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0,
+                                         nullptr, 1, &bufBar, 0, nullptr);
                 }
 
                 if (show_id_map_viz) {
@@ -2002,10 +2058,7 @@ static int run_pbr(int, char **) {
                     const float vh = static_cast<float>(vizExt.height);
                     VkViewport vizVp { 0.0F, 0.0F, vw, vh, 0.0F, 1.0F };
                     vkCmdSetViewport(cb, 0, 1, &vizVp);
-                    VkRect2D vizSc {
-                        { 0, 0 },
-                        vizExt
-                    };
+                    VkRect2D vizSc { { 0, 0 }, vizExt };
                     vkCmdSetScissor(cb, 0, 1, &vizSc);
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       pickVizPipe.handle());
@@ -2056,40 +2109,11 @@ static int run_pbr(int, char **) {
                     hf / static_cast<float>(DEBUG_TILE_ROWS);
 
                 entt::registry &scene_reg_dbg = editorScene.registry();
-                const glm::mat4 sponza_root_world_dbg =
-                    lumen::scene::world_matrix(scene_reg_dbg, sponzaRootEntity);
-                bool inspector_via_sub_dbg = false;
-                for (const entt::entity e :
-                     scene_reg_dbg.view<lumen::scene::SubMeshRendererComponent>()) {
-                    const auto &smr =
-                        scene_reg_dbg.get<lumen::scene::SubMeshRendererComponent>(
-                            e);
-                    if (smr.mesh == sponzaInspectorMesh) {
-                        inspector_via_sub_dbg = true;
-                        break;
-                    }
-                }
                 std::vector<lumen::scene::RenderItem> pbrRenderItemsDbg;
-                if (inspector_via_sub_dbg) {
-                    lumen::scene::append_submesh_render_items(
-                        sponzaAsset.geometry(), scene_reg_dbg, 0,
-                        pbrRenderItemsDbg);
-                    for (const lumen::scene::Mesh &mesh_part :
-                         sponzaAsset.model) {
-                        if (&mesh_part == sponzaInspectorMesh) {
-                            continue;
-                        }
-                        lumen::scene::append_mesh_render_items(
-                            sponzaAsset.geometry(), mesh_part,
-                            sponza_root_world_dbg, 0, pbrRenderItemsDbg,
-                            sponzaRootEntity);
-                    }
-                } else {
-                    lumen::scene::append_model_render_items(
-                        sponzaAsset.geometry(), sponzaAsset.model,
-                        sponza_root_world_dbg, 0, pbrRenderItemsDbg,
-                        sponzaRootEntity);
-                }
+                lumen::scene::collect_render_items(scene_reg_dbg,
+                                                   pbrRenderItemsDbg);
+                lumen::scene::sort_render_items_for_minimal_state_change(
+                    pbrRenderItemsDbg);
 
                 for (int tileIndex = 0; tileIndex < DEBUG_TILE_COUNT;
                      ++tileIndex) {
@@ -2102,10 +2126,10 @@ static int run_pbr(int, char **) {
                                                       aspect, 0.05F, 120.0F);
                     proj[1][1] *= -1.0F;
 
-                    for (uint32_t mi = 0; mi < sponzaMatCount; ++mi) {
+                    for (uint32_t mi = 0; mi < sponzaUniqueMatCount; ++mi) {
                         lumen::render::PbrMaterialUbo mu {};
                         lumen::render::pack_pbr_material_ubo(
-                            mu, pbrMaterials[mi], emissiveScale);
+                            mu, *sponzaUniqueMaterials[mi], emissiveScale);
                         sponzaMaterialUbos[mi].update(mu);
                     }
 
@@ -2147,50 +2171,22 @@ static int run_pbr(int, char **) {
 
                     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                       helmetPipe.handle());
-                    uint32_t drawSlotDbg = 0;
-                    for (const lumen::scene::RenderItem &itemDbg :
-                         pbrRenderItemsDbg) {
-                        if (!itemDbg.is_valid_for_draw()) {
-                            continue;
-                        }
-                        const lumen::scene::Primitive *prim = itemDbg.primitive;
-                        const lumen::render::Material *primMaterialDbg =
-                            itemDbg.material != nullptr ? itemDbg.material
-                                                        : &pbrMaterials[0];
-                        VkDescriptorSet materialDescriptorSetDbg =
-                            vk_descriptor_set_for_pbr_material(
-                                primMaterialDbg, pbrMaterials,
-                                sponzaMaterialDs);
-                        lumen::render::PbrObjectUbo objectUboDbg {};
-                        objectUboDbg.model = itemDbg.model;
-                        const glm::mat3 n3d = glm::mat3(itemDbg.model);
-                        objectUboDbg.normalMatrix =
-                            glm::mat4(glm::transpose(glm::inverse(n3d)));
-                        helmetObjectUbo.update(objectUboDbg,
-                                               drawSlotDbg * helmetObjStride);
-                        std::array<VkDescriptorSet, 4> descriptorSetsDbg {
-                            helmetFrameDs[frameIndex], materialDescriptorSetDbg,
-                            helmetObjectDs, helmetLightDs[frameIndex]
-                        };
-                        const uint32_t dynamicOffsetDbg = static_cast<uint32_t>(
-                            drawSlotDbg * helmetObjStride);
-                        vkCmdBindDescriptorSets(
-                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            helmetPl.handle(), 0,
-                            static_cast<uint32_t>(descriptorSetsDbg.size()),
-                            descriptorSetsDbg.data(), 1, &dynamicOffsetDbg);
-                        ++drawSlotDbg;
-                        VkDeviceSize voff =
-                            static_cast<VkDeviceSize>(prim->vertex_byte_offset);
-                        VkBuffer vbd = itemDbg.vertexBuffer->handle();
-                        vkCmdBindVertexBuffers(cb, 0, 1, &vbd, &voff);
-                        vkCmdBindIndexBuffer(
-                            cb, itemDbg.indexBuffer->handle(), 0,
-                            itemDbg.indexBuffer->vk_index_type());
-                        vkCmdDrawIndexed(cb, prim->index_count, 1,
-                                         prim->first_index, prim->base_vertex,
-                                         0);
-                    }
+                    lumen::render::PbrForwardRecordContext pbrDbgCtx {};
+                    pbrDbgCtx.command_buffer = cb;
+                    pbrDbgCtx.pipeline_layout = helmetPl.handle();
+                    pbrDbgCtx.frame_descriptor_set = helmetFrameDs[frameIndex];
+                    pbrDbgCtx.light_descriptor_set = helmetLightDs[frameIndex];
+                    pbrDbgCtx.object_descriptor_set = helmetObjectDs;
+                    pbrDbgCtx.default_material = sponzaDefaultMaterial;
+                    pbrDbgCtx.object_dynamic_stride =
+                        static_cast<std::uint32_t>(helmetObjStride);
+                    pbrDbgCtx.bind_vertex_and_index_buffers_per_item = true;
+                    lumen::render::record_pbr_forward_render_items(
+                        pbrDbgCtx, pbrRenderItemsDbg, helmetObjectUbo,
+                        [&](const lumen::render::Material *m) {
+                            return vk_descriptor_set_for_pbr_material(
+                                m, sponzaMaterialToDsIndex, sponzaMaterialDs);
+                        });
                 }
             }
             vkCmdEndRenderPass(commandBuffer.handle());
@@ -2287,9 +2283,9 @@ static int run_pbr(int, char **) {
                     pick_reg.valid(picked) ? picked : entt::null;
 
                 if (enc == 0U) {
-                    LUMEN_APP_LOG_INFO(
-                        "Scene 拾取: 像素 ({}, {}) —— 背景或未命中（R32 编码 0）",
-                        scene_pick_fb_x, scene_pick_fb_y);
+                    LUMEN_APP_LOG_INFO("Scene 拾取: 像素 ({}, {}) —— "
+                                       "背景或未命中（R32 编码 0）",
+                                       scene_pick_fb_x, scene_pick_fb_y);
                 } else if (!pick_reg.valid(picked)) {
                     LUMEN_APP_LOG_WARN(
                         "Scene 拾取: 像素 ({}, {}) R32 编码 {} 解码为无效实体 "
@@ -2308,8 +2304,7 @@ static int run_pbr(int, char **) {
                             pick_reg.try_get<lumen::scene::IDComponent>(
                                 picked)) {
                         core_id_str = std::format(
-                            "{:016x}",
-                            static_cast<std::uint64_t>(idc->id));
+                            "{:016x}", static_cast<std::uint64_t>(idc->id));
                     }
                     std::string mesh_note;
                     if (const auto *smr =
@@ -2320,18 +2315,47 @@ static int run_pbr(int, char **) {
                             " | SubMeshRenderer primitiveIndex={} "
                             "meshPrimitiveCount={}",
                             smr->primitiveIndex,
-                            smr->mesh != nullptr
-                                ? smr->mesh->primitives.size()
-                                : 0U);
+                            smr->mesh != nullptr ? smr->mesh->primitives.size()
+                                                 : 0U);
                     } else if (const auto *mr =
                                    pick_reg.try_get<
                                        lumen::scene::MeshRendererComponent>(
                                        picked)) {
                         mesh_note = std::format(
                             " | MeshRenderer meshPrimitiveCount={}",
-                            mr->mesh != nullptr
-                                ? mr->mesh->primitives.size()
-                                : 0U);
+                            mr->mesh != nullptr ? mr->mesh->primitives.size()
+                                                : 0U);
+                    } else if (const auto *smir =
+                                   pick_reg.try_get<
+                                       lumen::scene::
+                                           SubMeshInstanceRefRendererComponent>(
+                                       picked)) {
+                        const std::optional<
+                            lumen::asset::SubMeshInstanceRef::ResolvedPrim>
+                            rp = smir->submeshRef.resolve();
+                        mesh_note =
+                            rp.has_value()
+                                ? std::format(
+                                      " | SubMeshInstanceRef primIndex={} "
+                                      "indexCount={}",
+                                      smir->submeshRef.primitiveIndex,
+                                      rp->primitive->indexCount)
+                                : " | SubMeshInstanceRef（资产已卸载，无法解析）";
+                    } else if (const auto *mir =
+                                   pick_reg.try_get<
+                                       lumen::scene::
+                                           MeshInstanceRefRendererComponent>(
+                                       picked)) {
+                        const std::optional<lumen::asset::MeshInstanceRef::Resolved>
+                            rr = mir->meshRef.resolve();
+                        mesh_note =
+                            rr.has_value()
+                                ? std::format(
+                                      " | MeshInstanceRef meshIndex={} "
+                                      "primitives={}",
+                                      mir->meshRef.meshIndex,
+                                      rr->mesh->primitives.size())
+                                : " | MeshInstanceRef（资产已卸载）";
                     }
                     LUMEN_APP_LOG_INFO(
                         "Scene 拾取: 像素 ({}, {}) R32 编码={} "
@@ -2371,6 +2395,7 @@ static int run_pbr(int, char **) {
             reinterpret_cast<void *>(idMapVizTexId));
     }
     lumen::ui::imgui_backend_shutdown();
+    lumen::asset::AssetRegistry::instance().clear_all();
 
     for (VkImageView fv : envFaceViews) {
         destroy_image_view(dev, fv);

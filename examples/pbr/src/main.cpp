@@ -5,6 +5,7 @@
 
 #include "ibl_bake.hpp"
 
+#include "asset/asset_registry.hpp"
 #include "core/logger.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
@@ -20,6 +21,7 @@
 #include "render/resource/descriptor.hpp"
 #include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
+#include "render/pbr_forward_record_render_items.hpp"
 #include "render/resource/image.hpp"
 #include "render/resource/pbr_placeholder_textures.hpp"
 #include "render/resource/texture.hpp"
@@ -27,7 +29,10 @@
 #include "render/shader.hpp"
 #include "render/surface.hpp"
 #include "render/swapchain.hpp"
-#include "gltf/gltf_scene_mesh.hpp"
+#include "scene/scene_mesh_spawn.hpp"
+#include "scene/scene_mesh_asset.hpp"
+#include "scene/render.hpp"
+#include "scene/scene.hpp"
 #include "ui/imgui_backend.hpp"
 #include "ui/imgui_layer.hpp"
 
@@ -40,7 +45,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
+#include <memory>
+#include <ghc/filesystem.hpp>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -244,8 +250,6 @@ static int run_pbr(int, char **) {
             static_cast<std::size_t>(
                 ctx.physical_device_properties()
                     .limits.minUniformBufferOffsetAlignment));
-    const VkDeviceSize helmet_object_ubo_bytes =
-        static_cast<VkDeviceSize>(helmet_obj_stride);
 
     VkDevice dev = ctx.device();
     const VkFormat ibl_fmt = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -267,9 +271,11 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
+    namespace fs = ghc::filesystem;
+
     const std::string helmet_gltf_path =
         lumen::core::get_resource_path(kHelmetGltfRel);
-    if (!std::filesystem::exists(helmet_gltf_path)) {
+    if (!fs::exists(fs::path(helmet_gltf_path))) {
         LUMEN_APP_LOG_ERROR("未找到头盔 glTF: {}（含同级纹理）",
                             helmet_gltf_path);
         return -1;
@@ -284,21 +290,29 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::scene::GltfSceneMesh helmet_asset {};
-    lumen::scene::GltfSceneMeshLoadOptions helmet_load_opts {};
+    lumen::scene::SceneMeshLoadOptions helmet_load_opts {};
     helmet_load_opts.recenterToOrigin = true;
     helmet_load_opts.uniformScaleMaxAxis = 1.8F;
     std::string helmet_load_err;
-    if (!lumen::scene::load_gltf_scene_mesh(ctx, gq, cmdPool, helmet_gltf_path,
-                                            helmet_asset, helmet_load_opts,
-                                            &helmet_load_err)) {
+    const lumen::asset::SceneMeshAssetHandle helmet_handle =
+        lumen::asset::AssetRegistry::instance().load_scene_mesh_handle(
+            ctx, gq, cmdPool, helmet_gltf_path, helmet_load_opts,
+            &helmet_load_err);
+    if (!helmet_handle.valid()) {
         LUMEN_APP_LOG_ERROR("头盔 glTF 加载失败: {}",
                             helmet_load_err.empty() ? "unknown" : helmet_load_err);
         return -1;
     }
+    const std::shared_ptr<lumen::scene::SceneMeshAsset> helmet_asset_sp =
+        lumen::asset::AssetRegistry::instance().try_get_scene_mesh(helmet_handle);
+    if (!helmet_asset_sp) {
+        LUMEN_APP_LOG_ERROR("头盔场景网格句柄解析失败");
+        return -1;
+    }
+    lumen::scene::SceneMeshAsset &helmet_asset = *helmet_asset_sp;
     bool helmet_any_drawable = false;
-    for (const lumen::scene::Mesh &hm : helmet_asset.model) {
-        for (const lumen::scene::Primitive &pp : hm.primitives) {
+    for (const lumen::asset::geometry::Mesh &hm : helmet_asset.model) {
+        for (const lumen::asset::geometry::Primitive &pp : hm.primitives) {
             if (pp.is_drawable()) {
                 helmet_any_drawable = true;
                 break;
@@ -317,13 +331,28 @@ static int run_pbr(int, char **) {
         return -1;
     }
 
-    lumen::render::Material &helmet_mat = helmet_asset.materials.front();
+    lumen::render::Material &helmet_mat =
+        helmet_asset.materials.front()->material;
+
+    lumen::scene::Scene helmet_scene;
+    lumen::scene::SceneMeshSpawnOptions helmet_spawn_opts {};
+    helmet_spawn_opts.owning_scene = helmet_asset_sp;
+    helmet_spawn_opts.scene_mesh_handle = helmet_handle;
+    const lumen::scene::SceneMeshSpawnResult helmet_spawn =
+        lumen::scene::spawn_scene_mesh_hierarchy(helmet_scene, helmet_asset,
+                                                 "HelmetSub", helmet_spawn_opts);
+    const uint32_t helmet_gltf_draw_slots =
+        (std::max)(helmet_spawn.drawable_primitive_instances, 1u);
+    const VkDeviceSize helmet_object_ubo_bytes =
+        static_cast<VkDeviceSize>(helmet_obj_stride) *
+        static_cast<VkDeviceSize>(helmet_gltf_draw_slots);
 
     LUMEN_APP_LOG_INFO(
-        "glTF 头盔已加载: 顶点数={}, 索引数={}, 三角数={}, mesh数={}, 路径={}",
+        "glTF 头盔已加载: 顶点数={}, 索引数={}, 三角数={}, mesh数={}, "
+        "primitive实例={}, 路径={}",
         helmet_asset.statsVertexCount, helmet_asset.statsIndexCount,
         helmet_asset.statsIndexCount / 3U, helmet_asset.model.size(),
-        helmet_gltf_path);
+        helmet_gltf_draw_slots, helmet_gltf_path);
 
     auto commandBuffers = cmdPool.allocate(3);
     if (commandBuffers.size() != 3) {
@@ -1049,7 +1078,6 @@ static int run_pbr(int, char **) {
             const glm::mat4 sky_v = glm::mat4(glm::mat3(view));
 
             VkCommandBuffer cb = cmd_buf.handle();
-            const glm::mat4 helmet_model { 1.0F };
 
             if (!pbrDebugTileGrid) {
                 const float aspect =
@@ -1103,39 +1131,33 @@ static int run_pbr(int, char **) {
                 vkCmdBindVertexBuffers(cb, 0, 1, &hvb, &hv_off);
                 vkCmdBindIndexBuffer(cb, helmet_asset.indexBuffer->handle(), 0,
                                      helmet_asset.indexBuffer->vk_index_type());
-                for (const lumen::scene::Mesh &hm : helmet_asset.model) {
-                    for (const lumen::scene::Primitive &helmet_prim :
-                         hm.primitives) {
-                        if (!helmet_prim.is_drawable()) {
-                            continue;
-                        }
-                        const lumen::render::Material *prim_mat =
-                            helmet_prim.material != nullptr ? helmet_prim.material
-                                                            : &helmet_mat;
+                std::vector<lumen::scene::RenderItem> helmet_items;
+                lumen::scene::collect_render_items(helmet_scene.registry(),
+                                                   helmet_items);
+                lumen::scene::sort_render_items_for_minimal_state_change(
+                    helmet_items);
+                lumen::render::PbrForwardRecordContext pbr_rec_ctx {};
+                pbr_rec_ctx.command_buffer = cb;
+                pbr_rec_ctx.pipeline_layout = helmet_pl.handle();
+                pbr_rec_ctx.frame_descriptor_set = helmet_frame_ds[frameIdx];
+                pbr_rec_ctx.light_descriptor_set = helmet_light_ds[frameIdx];
+                pbr_rec_ctx.object_descriptor_set = helmet_object_ds;
+                pbr_rec_ctx.default_material = &helmet_mat;
+                pbr_rec_ctx.object_dynamic_stride =
+                    static_cast<std::uint32_t>(helmet_obj_stride);
+                pbr_rec_ctx.bind_vertex_and_index_buffers_per_item = false;
+                lumen::render::record_pbr_forward_render_items(
+                    pbr_rec_ctx, helmet_items, helmet_object_ubo,
+                    [&](const lumen::render::Material *) {
+                        return helmet_material_ds;
+                    },
+                    [&](const lumen::scene::RenderItem &,
+                        const lumen::render::Material *mat, std::uint32_t) {
                         lumen::render::PbrMaterialUbo mu_draw {};
-                        lumen::render::pack_pbr_material_ubo(mu_draw, *prim_mat,
+                        lumen::render::pack_pbr_material_ubo(mu_draw, *mat,
                                                              emissiveScale);
                         helmet_material_ubo.update(mu_draw);
-                        lumen::render::PbrObjectUbo ou {};
-                        ou.model = helmet_model;
-                        const glm::mat3 n3 = glm::mat3(helmet_model);
-                        ou.normalMatrix =
-                            glm::mat4(glm::transpose(glm::inverse(n3)));
-                        helmet_object_ubo.update(ou, 0);
-                        std::array<VkDescriptorSet, 4> pbr_sets {
-                            helmet_frame_ds[frameIdx], helmet_material_ds,
-                            helmet_object_ds, helmet_light_ds[frameIdx]
-                        };
-                        const uint32_t dyn0 = 0;
-                        vkCmdBindDescriptorSets(
-                            cb, VK_PIPELINE_BIND_POINT_GRAPHICS, helmet_pl.handle(),
-                            0, static_cast<uint32_t>(pbr_sets.size()),
-                            pbr_sets.data(), 1, &dyn0);
-                        vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
-                                         helmet_prim.first_index,
-                                         helmet_prim.base_vertex, 0);
-                    }
-                }
+                    });
             } else {
                 constexpr int k_dbg_tile_cols = 4;
                 constexpr int k_dbg_tile_rows = 4;
@@ -1200,41 +1222,34 @@ static int run_pbr(int, char **) {
                                          0,
                                          helmet_asset.indexBuffer
                                              ->vk_index_type());
-                    for (const lumen::scene::Mesh &hm : helmet_asset.model) {
-                        for (const lumen::scene::Primitive &helmet_prim :
-                             hm.primitives) {
-                            if (!helmet_prim.is_drawable()) {
-                                continue;
-                            }
-                            const lumen::render::Material *prim_mat =
-                                helmet_prim.material != nullptr
-                                    ? helmet_prim.material
-                                    : &helmet_mat;
+                    std::vector<lumen::scene::RenderItem> helmet_items_tile;
+                    lumen::scene::collect_render_items(
+                        helmet_scene.registry(), helmet_items_tile);
+                    lumen::scene::sort_render_items_for_minimal_state_change(
+                        helmet_items_tile);
+                    lumen::render::PbrForwardRecordContext pbr_tile_ctx {};
+                    pbr_tile_ctx.command_buffer = cb;
+                    pbr_tile_ctx.pipeline_layout = helmet_pl.handle();
+                    pbr_tile_ctx.frame_descriptor_set = helmet_frame_ds[frameIdx];
+                    pbr_tile_ctx.light_descriptor_set =
+                        helmet_light_ds[frameIdx];
+                    pbr_tile_ctx.object_descriptor_set = helmet_object_ds;
+                    pbr_tile_ctx.default_material = &helmet_mat;
+                    pbr_tile_ctx.object_dynamic_stride =
+                        static_cast<std::uint32_t>(helmet_obj_stride);
+                    pbr_tile_ctx.bind_vertex_and_index_buffers_per_item = false;
+                    lumen::render::record_pbr_forward_render_items(
+                        pbr_tile_ctx, helmet_items_tile, helmet_object_ubo,
+                        [&](const lumen::render::Material *) {
+                            return helmet_material_ds;
+                        },
+                        [&](const lumen::scene::RenderItem &,
+                            const lumen::render::Material *mat, std::uint32_t) {
                             lumen::render::PbrMaterialUbo mu_tile_prim {};
                             lumen::render::pack_pbr_material_ubo(
-                                mu_tile_prim, *prim_mat, emissiveScale);
+                                mu_tile_prim, *mat, emissiveScale);
                             helmet_material_ubo.update(mu_tile_prim);
-                            lumen::render::PbrObjectUbo ou_tile {};
-                            ou_tile.model = helmet_model;
-                            const glm::mat3 n3t = glm::mat3(helmet_model);
-                            ou_tile.normalMatrix =
-                                glm::mat4(glm::transpose(glm::inverse(n3t)));
-                            helmet_object_ubo.update(ou_tile, 0);
-                            std::array<VkDescriptorSet, 4> pbr_sets_tile {
-                                helmet_frame_ds[frameIdx], helmet_material_ds,
-                                helmet_object_ds, helmet_light_ds[frameIdx]
-                            };
-                            const uint32_t dyn_tile = 0;
-                            vkCmdBindDescriptorSets(
-                                cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                helmet_pl.handle(), 0,
-                                static_cast<uint32_t>(pbr_sets_tile.size()),
-                                pbr_sets_tile.data(), 1, &dyn_tile);
-                            vkCmdDrawIndexed(cb, helmet_prim.index_count, 1,
-                                             helmet_prim.first_index,
-                                             helmet_prim.base_vertex, 0);
-                        }
-                    }
+                        });
                 }
             }
         }
@@ -1323,6 +1338,7 @@ static int run_pbr(int, char **) {
             reinterpret_cast<void *>(scene_tex_id));
     }
     lumen::ui::imgui_backend_shutdown();
+    lumen::asset::AssetRegistry::instance().clear_all();
 
     destroy_view(dev, v_env);
     destroy_view(dev, v_irr);

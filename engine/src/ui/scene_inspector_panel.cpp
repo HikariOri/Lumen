@@ -6,9 +6,12 @@
 
 #include "scene/components.hpp"
 #include "scene/id_lookup.hpp"
-#include "scene/mesh.hpp"
+#include "asset/geometry/mesh_asset.hpp"
+#include "render/material/material.hpp"
+#include "render/resource/texture.hpp"
 #include "scene/scene.hpp"
 #include "ui/editor_selection.hpp"
+#include "ui/imgui_backend.hpp"
 #include "ui/imgui_hazel_helpers.hpp"
 
 #include <cinttypes>
@@ -16,6 +19,8 @@
 #include <cstdio>
 
 #include <algorithm>
+#include <optional>
+#include <vector>
 
 #include <ImGuizmo.h>
 #include <entt/entt.hpp>
@@ -41,6 +46,115 @@ static const void *CMP_SUB_MESH { reinterpret_cast<const void *>(
     uintptr_t { 7 }) };
 static const void *CMP_MESH_RENDERER { reinterpret_cast<const void *>(
     uintptr_t { 8 }) };
+static const void *CMP_MESH_INSTANCE_REF { reinterpret_cast<const void *>(
+    uintptr_t { 9 }) };
+static const void *CMP_SUB_MESH_INSTANCE_REF { reinterpret_cast<const void *>(
+    uintptr_t { 10 }) };
+static const void *CMP_SCENE_MESH_HANDLE { reinterpret_cast<const void *>(
+    uintptr_t { 11 }) };
+
+std::vector<void *> g_mat_preview_tex_ids {};
+
+void clear_material_texture_previews() {
+    for (void *id : g_mat_preview_tex_ids) {
+        if (id != nullptr) {
+            imgui_backend_remove_texture(id);
+        }
+    }
+    g_mat_preview_tex_ids.clear();
+}
+
+[[nodiscard]] const char *
+alpha_mode_label(const lumen::render::MaterialAlphaMode m) {
+    using lumen::render::MaterialAlphaMode;
+    switch (m) {
+    case MaterialAlphaMode::Opaque:
+        return "Opaque";
+    case MaterialAlphaMode::Mask:
+        return "Mask";
+    case MaterialAlphaMode::Blend:
+        return "Blend";
+    }
+    return "?";
+}
+
+void draw_texture_slot_preview(const char *slot_label,
+                               const lumen::render::Texture *tex,
+                               const float thumb_px) {
+    ImGui::BulletText("%s", slot_label);
+    ImGui::Indent();
+    if (tex == nullptr || !tex->is_valid()) {
+        ImGui::TextDisabled("（无 / 引擎默认占位）");
+        ImGui::Unindent();
+        return;
+    }
+    void *const tid = imgui_backend_add_texture(
+        tex->sampler(), tex->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (tid == nullptr) {
+        ImGui::TextDisabled("ImGui 注册失败");
+        ImGui::Unindent();
+        return;
+    }
+    g_mat_preview_tex_ids.push_back(tid);
+    ImGui::Image(reinterpret_cast<ImTextureID>(tid),
+                 ImVec2(thumb_px, thumb_px));
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%u × %u", tex->width(), tex->height());
+    ImGui::Unindent();
+}
+
+void draw_pbr_material_inspector(const lumen::render::Material *effective,
+                                 const lumen::render::Material *prim_mat,
+                                 const lumen::render::Material *override_mat) {
+    if (effective == nullptr) {
+        ImGui::TextDisabled("无可解析材质");
+        return;
+    }
+
+    if (override_mat != nullptr) {
+        ImGui::TextDisabled("来源: Material override");
+    } else if (prim_mat != nullptr) {
+        ImGui::TextDisabled("来源: Primitive 默认材质");
+    } else {
+        ImGui::TextDisabled("来源: （未绑定）");
+    }
+
+    constexpr ImGuiColorEditFlags k_ro_color = ImGuiColorEditFlags_Float |
+                                               ImGuiColorEditFlags_NoInputs |
+                                               ImGuiColorEditFlags_NoPicker;
+
+    glm::vec4 bc = effective->baseColorFactor;
+    ImGui::TextUnformatted("Base color（因子）");
+    ImGui::SameLine();
+    ImGui::ColorEdit4("##submat_bc", glm::value_ptr(bc), k_ro_color);
+
+    ImGui::Text("Metallic %.3f   Roughness %.3f", effective->metallicFactor,
+                effective->roughnessFactor);
+
+    const glm::vec3 em = effective->emissiveFactor;
+    ImGui::Text("Emissive 因子 (linear): %.3f, %.3f, %.3f", em.x, em.y, em.z);
+    glm::vec3 em_vis = glm::clamp(em, 0.0F, 1.0F);
+    ImGui::SameLine();
+    ImGui::ColorEdit3("##submat_em", glm::value_ptr(em_vis), k_ro_color);
+
+    ImGui::Text("AO strength %.3f", effective->occlusionStrength);
+    ImGui::Text("Alpha: %s", alpha_mode_label(effective->alphaMode));
+    ImGui::Text("Double sided: %s", effective->doubleSided ? "是" : "否");
+
+    constexpr float k_thumb { 64.0F };
+    if (ImGui::TreeNodeEx("PBR 贴图预览",
+                          ImGuiTreeNodeFlags_DefaultOpen)) {
+        draw_texture_slot_preview("Albedo（sRGB）", effective->baseColorTex,
+                                  k_thumb);
+        draw_texture_slot_preview("Metallic-Roughness", effective->metallicRoughnessTex,
+                                  k_thumb);
+        draw_texture_slot_preview("Normal", effective->normalTex, k_thumb);
+        draw_texture_slot_preview("Occlusion", effective->occlusionTex, k_thumb);
+        draw_texture_slot_preview("Emissive", effective->emissiveTex, k_thumb);
+        ImGui::TreePop();
+    }
+}
 
 void remove_light_components(entt::registry &reg, entt::entity ent) {
     if (reg.all_of<lumen::scene::DirectionalLightComponent>(ent)) {
@@ -74,6 +188,8 @@ void SceneInspectorPanel::on_imgui_render() {
         ImGui::End();
         return;
     }
+
+    clear_material_texture_previews();
 
     // Hazel：顶部实体标签 + 同行「Add Component」
     if (auto *tc = reg.try_get<lumen::scene::TagComponent>(e)) {
@@ -187,7 +303,7 @@ void SceneInspectorPanel::on_imgui_render() {
                     for (std::size_t i = 0; i < showMax; ++i) {
                         const auto &p = prims[i];
                         ImGui::BulletText(
-                            "[%zu] index_count=%u %s", i, p.index_count,
+                            "[%zu] indexCount=%u %s", i, p.indexCount,
                             p.is_drawable() ? "可绘制" : "跳过");
                     }
                     if (prims.size() > showMax) {
@@ -231,9 +347,20 @@ void SceneInspectorPanel::on_imgui_render() {
                     const auto &p = subMeshRenderer
                                         .mesh->primitives[subMeshRenderer
                                                               .primitiveIndex];
-                    ImGui::Text("该 primitive: index_count=%u %s",
-                                p.index_count,
+                    ImGui::Text("该 primitive: indexCount=%u %s",
+                                p.indexCount,
                                 p.is_drawable() ? "可绘制" : "不可绘制");
+                    const lumen::render::Material *const prim_mat =
+                        p.material;
+                    const lumen::render::Material *const ov =
+                        subMeshRenderer.materialOverride;
+                    const lumen::render::Material *const eff =
+                        ov != nullptr ? ov : prim_mat;
+                    if (ImGui::TreeNodeEx("材质",
+                                          ImGuiTreeNodeFlags_DefaultOpen)) {
+                        draw_pbr_material_inspector(eff, prim_mat, ov);
+                        ImGui::TreePop();
+                    }
                 } else {
                     ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.2F, 1.0F),
                                        "下标越界，绘制时会被跳过");
@@ -242,15 +369,108 @@ void SceneInspectorPanel::on_imgui_render() {
                 ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.2F, 1.0F),
                                    "mesh 为空指针");
             }
-            ImGui::Text("Material override: %p",
-                        static_cast<const void *>(
-                            subMeshRenderer.materialOverride));
             ImGui::TextDisabled(
                 "世界矩阵 = 父链 × 局部 Transform；收集绘制见 "
                 "append_submesh_render_items。");
             if (ImGui::Button("Remove##submeshrenderer",
                               ImVec2(-1.0F, 0.0F))) {
                 reg.remove<lumen::scene::SubMeshRendererComponent>(e);
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    if (reg.all_of<lumen::scene::MeshInstanceRefRendererComponent>(e)) {
+        if (imgui_hazel_component_begin("Mesh Renderer (InstanceRef)",
+                                       CMP_MESH_INSTANCE_REF)) {
+            auto &c =
+                reg.get<lumen::scene::MeshInstanceRefRendererComponent>(e);
+            const std::optional<lumen::asset::MeshInstanceRef::Resolved> rr =
+                c.meshRef.resolve();
+            ImGui::Text("meshIndex: %u", c.meshRef.meshIndex);
+            ImGui::Text("scene expired: %s",
+                        c.meshRef.scene.expired() ? "yes" : "no");
+            if (rr.has_value() && rr->mesh != nullptr) {
+                const auto &prims = rr->mesh->primitives;
+                std::size_t drawable = 0;
+                for (const auto &p : prims) {
+                    if (p.is_drawable()) {
+                        ++drawable;
+                    }
+                }
+                ImGui::Text("Primitives: %zu（可绘制 %zu）", prims.size(),
+                            drawable);
+            } else {
+                ImGui::TextColored(ImVec4(1.0F, 0.55F, 0.2F, 1.0F),
+                                   "无法解析（资产已卸载或 meshIndex 无效）");
+            }
+            ImGui::TextDisabled(
+                "收集：`append_mesh_instance_ref_renderer_render_items`。");
+            if (ImGui::Button("Remove##meshinstanceref",
+                              ImVec2(-1.0F, 0.0F))) {
+                reg.remove<lumen::scene::MeshInstanceRefRendererComponent>(e);
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    if (reg.all_of<lumen::scene::SubMeshInstanceRefRendererComponent>(e)) {
+        if (imgui_hazel_component_begin("SubMesh Renderer (InstanceRef)",
+                                       CMP_SUB_MESH_INSTANCE_REF)) {
+            auto &c =
+                reg.get<lumen::scene::SubMeshInstanceRefRendererComponent>(e);
+            ImGui::Text("meshIndex: %u",
+                        c.submeshRef.meshInstance.meshIndex);
+            ImGui::DragScalar("Primitive index", ImGuiDataType_U32,
+                              &c.submeshRef.primitiveIndex, 0.25F, nullptr,
+                              nullptr);
+            const std::optional<lumen::asset::SubMeshInstanceRef::ResolvedPrim>
+                rp = c.submeshRef.resolve();
+            if (rp.has_value()) {
+                ImGui::Text("该 primitive: indexCount=%u %s",
+                            rp->primitive->indexCount,
+                            rp->primitive->is_drawable() ? "可绘制" : "不可绘制");
+                const lumen::render::Material *const prim_mat =
+                    rp->primitive->material;
+                const lumen::render::Material *const ov = c.materialOverride;
+                const lumen::render::Material *const eff =
+                    ov != nullptr ? ov : prim_mat;
+                if (ImGui::TreeNodeEx("材质",
+                                      ImGuiTreeNodeFlags_DefaultOpen)) {
+                    draw_pbr_material_inspector(eff, prim_mat, ov);
+                    ImGui::TreePop();
+                }
+            } else {
+                ImGui::TextColored(ImVec4(1.0F, 0.55F, 0.2F, 1.0F),
+                                   "无法解析（资产已卸载或下标无效）");
+            }
+            ImGui::TextDisabled("收集：`append_submesh_instance_ref_render_items`。");
+            if (ImGui::Button("Remove##submeshinstanceref",
+                              ImVec2(-1.0F, 0.0F))) {
+                reg.remove<lumen::scene::SubMeshInstanceRefRendererComponent>(
+                    e);
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    if (reg.all_of<lumen::scene::SceneMeshAssetHandleComponent>(e)) {
+        if (imgui_hazel_component_begin("Scene mesh (AssetManager)",
+                                       CMP_SCENE_MESH_HANDLE)) {
+            const auto &c =
+                reg.get<lumen::scene::SceneMeshAssetHandleComponent>(e);
+            ImGui::BeginDisabled();
+            char hbuf[32];
+            std::snprintf(hbuf, sizeof(hbuf), "%" PRIu64,
+                          static_cast<std::uint64_t>(c.handle.id));
+            ImGui::InputText("AssetId", hbuf, sizeof(hbuf),
+                             ImGuiInputTextFlags_ReadOnly);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled(
+                "与 `AssetManager::try_get_scene_mesh(handle)` 对应。");
+            if (ImGui::Button("Remove##scenemeshhandle",
+                              ImVec2(-1.0F, 0.0F))) {
+                reg.remove<lumen::scene::SceneMeshAssetHandleComponent>(e);
             }
             ImGui::TreePop();
         }
@@ -363,6 +583,25 @@ void SceneInspectorPanel::on_imgui_render() {
         if (!reg.all_of<lumen::scene::SubMeshRendererComponent>(e)) {
             if (ImGui::MenuItem("SubMesh Renderer")) {
                 reg.emplace<lumen::scene::SubMeshRendererComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!reg.all_of<lumen::scene::MeshInstanceRefRendererComponent>(e)) {
+            if (ImGui::MenuItem("Mesh Renderer (InstanceRef)")) {
+                reg.emplace<lumen::scene::MeshInstanceRefRendererComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!reg.all_of<lumen::scene::SubMeshInstanceRefRendererComponent>(e)) {
+            if (ImGui::MenuItem("SubMesh Renderer (InstanceRef)")) {
+                reg.emplace<
+                    lumen::scene::SubMeshInstanceRefRendererComponent>(e);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!reg.all_of<lumen::scene::SceneMeshAssetHandleComponent>(e)) {
+            if (ImGui::MenuItem("Scene mesh handle (debug)")) {
+                reg.emplace<lumen::scene::SceneMeshAssetHandleComponent>(e);
                 ImGui::CloseCurrentPopup();
             }
         }

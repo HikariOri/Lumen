@@ -21,14 +21,19 @@
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 
+#include "asset/asset_handle.hpp"
+#include "asset/mesh_instance_ref.hpp"
+
 #include "core/id.hpp"
 
 #include "render/material/material.hpp"
 
+namespace lumen::asset::geometry {
+struct Mesh;
+}
+
 namespace lumen {
 namespace scene {
-
-struct Mesh;
 
 /**
  * @brief 实体身份：`Scene::create_entity` 时 `core::generate_random_id()`
@@ -135,12 +140,28 @@ public:
  * 指针不拥有 `Mesh`；生命周期须长于注册表中的实体。
  *
  * @see `scene/render_item.hpp`
- * @see `scene/mesh.hpp`
+ * @see `asset/geometry/mesh_asset.hpp`
  *
  * @ingroup lumen_scene_mesh
  */
 struct MeshRendererComponent {
-    const Mesh *mesh {}; ///< 可为空；渲染前应判空
+    const lumen::asset::geometry::Mesh *mesh {}; ///< 可为空；渲染前应判空
+};
+
+/**
+ * @brief 与 `MeshRendererComponent` 相同语义，但以 `MeshInstanceRef` 持有资源，卸载场景资产后不悬空
+ *
+ * @note 与裸指针版二选一；不要在同一实体上同时挂两种组件。
+ */
+struct MeshInstanceRefRendererComponent {
+    lumen::asset::MeshInstanceRef meshRef {};
+};
+
+/**
+ * @brief 可选：记录 `AssetManager` 中场景网格的稳定句柄（调试用；与弱引用并存）
+ */
+struct SceneMeshAssetHandleComponent {
+    lumen::asset::SceneMeshAssetHandle handle {};
 };
 
 /**
@@ -157,8 +178,16 @@ struct MeshRendererComponent {
  * 隐藏 / 拾取 / 局部编辑时用本组件 + 子实体。
  */
 struct SubMeshRendererComponent {
-    const Mesh *mesh {};
+    const lumen::asset::geometry::Mesh *mesh {};
     std::uint32_t primitiveIndex { 0 };
+    const render::Material *materialOverride {};
+};
+
+/**
+ * @brief `SubMeshRendererComponent` 的弱引用变体（见 `MeshInstanceRefRendererComponent`）
+ */
+struct SubMeshInstanceRefRendererComponent {
+    lumen::asset::SubMeshInstanceRef submeshRef {};
     const render::Material *materialOverride {};
 };
 
