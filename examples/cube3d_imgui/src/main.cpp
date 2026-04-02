@@ -365,7 +365,7 @@ static int run_cube3d_imgui() {
     ImTextureID scene_tex_id =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(), sceneTarget.color_view(),
-            sceneTarget.color_sample_layout()));
+            static_cast<VkImageLayout>(sceneTarget.color_sample_layout())));
 
     LUMEN_APP_LOG_INFO(
         "按 Esc 退出；ImGui 已启用 Docking，可将「视口」停靠到任意边");
@@ -458,7 +458,8 @@ static int run_cube3d_imgui() {
             scene_tex_id = reinterpret_cast<ImTextureID>(
                 lumen::ui::imgui_backend_add_texture(
                     sceneSampler.handle(), sceneTarget.color_view(),
-                    sceneTarget.color_sample_layout()));
+                    static_cast<VkImageLayout>(
+                        sceneTarget.color_sample_layout())));
         }
 
         const uint32_t scene_w = sceneTarget.width();
@@ -594,7 +595,10 @@ static int run_cube3d_imgui() {
 
         cmdBuf.endRenderPass();
 
-        cmdBuf.end();
+        if (cmdBuf.end() != vk::Result::eSuccess) {
+            LUMEN_LOG_ERROR("CommandBuffer::end 失败");
+            continue;
+        }
 
         const vk::Semaphore wait_sem = frameSync.image_available(currentFrame);
         const vk::Semaphore signal_sem = frameSync.render_finished(imageIndex);

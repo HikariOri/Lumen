@@ -12,6 +12,7 @@
 
 #include <glm/mat4x4.hpp>
 #include "render/vulkan.hpp"
+#include "render/resource/buffer.hpp"
 
 #include "asset/geometry/mesh_asset.hpp"
 #include "asset/pbr_material_instance.hpp"
@@ -19,10 +20,8 @@
 namespace lumen::render {
 class CommandPool;
 class Context;
-class IndexBuffer;
 struct Material;
 class Texture;
-class VertexBuffer;
 } // namespace lumen::render
 
 namespace lumen::scene {
