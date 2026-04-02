@@ -29,7 +29,8 @@
 #include <vector>
 
 #include <vk_mem_alloc.h>
-#include <vulkan/vulkan.h>
+
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace platform {
@@ -68,7 +69,7 @@ struct PhysicalDeviceInfo {
     uint32_t driverVersion { 0 };                                ///< 驱动版本
     uint32_t apiVersion { 0 }; ///< Vulkan API 版本
     /// 设备本地显存（VRAM）字节数，0 表示无法确定
-    VkDeviceSize deviceLocalMemoryBytes { 0 };
+    vk::DeviceSize deviceLocalMemoryBytes { 0 };
 };
 
 /**
@@ -145,23 +146,23 @@ public:
      *
      * 枚举可用的 PhysicalDevice，选择合适的设备，
      * 检查队列族的呈现支持，并创建 LogicalDevice。
-     * 如果 surface 是 VK_NULL_HANDLE，则只创建 LogicalDevice
+     * 如果 surface 为空句柄，则只创建 LogicalDevice
      * 的图形队列，不检查呈现支持。
      */
-    bool init_device(VkSurfaceKHR surface = VK_NULL_HANDLE);
+    bool init_device(vk::SurfaceKHR surface = {});
 
     /// 获取 Vulkan Instance
-    [[nodiscard]] VkInstance instance() const { return instance_; }
+    [[nodiscard]] vk::Instance instance() const { return instance_; }
     /// 获取 PhysicalDevice
-    [[nodiscard]] VkPhysicalDevice physical_device() const {
+    [[nodiscard]] vk::PhysicalDevice physical_device() const {
         return physicalDevice_;
     }
     /// 获取 LogicalDevice
-    [[nodiscard]] VkDevice device() const { return device_; }
+    [[nodiscard]] vk::Device device() const { return device_; }
     /// 获取图形队列
-    [[nodiscard]] VkQueue graphics_queue() const { return graphicsQueue_; }
+    [[nodiscard]] vk::Queue graphics_queue() const { return graphicsQueue_; }
     /// 获取呈现队列
-    [[nodiscard]] VkQueue present_queue() const { return presentQueue_; }
+    [[nodiscard]] vk::Queue present_queue() const { return presentQueue_; }
 
     /// 获取图形队列族索引
     [[nodiscard]] uint32_t graphics_queue_family() const {
@@ -173,49 +174,49 @@ public:
     }
 
     /// 物理设备属性（需在 init_device 后调用）
-    [[nodiscard]] const VkPhysicalDeviceProperties &
+    [[nodiscard]] const vk::PhysicalDeviceProperties &
     physical_device_properties() const {
         return physicalDeviceProperties2_.properties;
     }
 
     /// 物理设备属性 2（包括扩展属性）
-    [[nodiscard]] const VkPhysicalDeviceProperties2 &
+    [[nodiscard]] const vk::PhysicalDeviceProperties2 &
     physical_device_properties2() const {
         return physicalDeviceProperties2_;
     }
 
     /// 获取物理设备支持的特性集
-    [[nodiscard]] const VkPhysicalDeviceFeatures &
+    [[nodiscard]] const vk::PhysicalDeviceFeatures &
     physical_device_features() const {
         return physicalDeviceFeatures2_.features;
     }
 
     /// 获取物理设备扩展特性信息（1.1+）
-    [[nodiscard]] const VkPhysicalDeviceFeatures2 &
+    [[nodiscard]] const vk::PhysicalDeviceFeatures2 &
     physical_device_features2() const {
         return physicalDeviceFeatures2_;
     }
 
     /// Vulkan 1.1+ 属性访问
-    [[nodiscard]] const VkPhysicalDeviceVulkan11Properties &
+    [[nodiscard]] const vk::PhysicalDeviceVulkan11Properties &
     physical_device_vulkan11_properties() const {
         return vulkan11Properties_;
     }
-    [[nodiscard]] const VkPhysicalDeviceVulkan12Properties &
+    [[nodiscard]] const vk::PhysicalDeviceVulkan12Properties &
     physical_device_vulkan12_properties() const {
         return vulkan12Properties_;
     }
-    [[nodiscard]] const VkPhysicalDeviceVulkan13Properties &
+    [[nodiscard]] const vk::PhysicalDeviceVulkan13Properties &
     physical_device_vulkan13_properties() const {
         return vulkan13Properties_;
     }
-    [[nodiscard]] const VkPhysicalDeviceVulkan14Properties &
+    [[nodiscard]] const vk::PhysicalDeviceVulkan14Properties &
     physical_device_vulkan14_properties() const {
         return vulkan14Properties_;
     }
 
     /// 获取物理设备内存属性
-    [[nodiscard]] const VkPhysicalDeviceMemoryProperties &
+    [[nodiscard]] const vk::PhysicalDeviceMemoryProperties &
     physical_device_memory_properties() const {
         return physicalDeviceMemoryProperties_;
     }
@@ -224,12 +225,10 @@ public:
     [[nodiscard]] PhysicalDeviceInfo physical_device_info() const;
 
     /// Vulkan Instance 是否已经创建
-    [[nodiscard]] bool has_instance() const {
-        return instance_ != VK_NULL_HANDLE;
-    }
+    [[nodiscard]] bool has_instance() const { return static_cast<bool>(instance_); }
 
     /// LogicalDevice 是否已经创建
-    [[nodiscard]] bool has_device() const { return device_ != VK_NULL_HANDLE; }
+    [[nodiscard]] bool has_device() const { return static_cast<bool>(device_); }
 
     /// 获取 VMA 分配器
     [[nodiscard]] VmaAllocator vma_allocator() const { return vmaAllocator_; }
@@ -246,53 +245,33 @@ private:
     void destroy_();
     void relink_properties_chain_();
     void relink_features_chain_();
-    bool pick_physical_device_(VkSurfaceKHR surface);
-    bool create_logical_device_(VkSurfaceKHR surface);
+    bool pick_physical_device_(vk::SurfaceKHR surface);
+    bool create_logical_device_(vk::SurfaceKHR surface);
     bool create_vma_allocator_();
 
-    VkInstance instance_ { VK_NULL_HANDLE };
-    VkPhysicalDevice physicalDevice_ { VK_NULL_HANDLE };
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkQueue graphicsQueue_ { VK_NULL_HANDLE };
-    VkQueue presentQueue_ { VK_NULL_HANDLE };
+    vk::Instance instance_ {};
+    vk::PhysicalDevice physicalDevice_ {};
+    vk::Device device_ {};
+    vk::Queue graphicsQueue_ {};
+    vk::Queue presentQueue_ {};
     uint32_t graphicsQueueFamily_ { 0 };
     uint32_t presentQueueFamily_ { 0 };
     bool validationEnabled_ { false };
 
-    // Property and feature chain heads
-    VkPhysicalDeviceProperties2 physicalDeviceProperties2_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
-    };
-    VkPhysicalDeviceVulkan11Properties vulkan11Properties_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES
-    };
-    VkPhysicalDeviceVulkan12Properties vulkan12Properties_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES
-    };
-    VkPhysicalDeviceVulkan13Properties vulkan13Properties_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES
-    };
-    VkPhysicalDeviceVulkan14Properties vulkan14Properties_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES
-    };
+    // Property and feature chain heads（sType 由 Vulkan-Hpp 默认构造函数填写）
+    vk::PhysicalDeviceProperties2 physicalDeviceProperties2_ {};
+    vk::PhysicalDeviceVulkan11Properties vulkan11Properties_ {};
+    vk::PhysicalDeviceVulkan12Properties vulkan12Properties_ {};
+    vk::PhysicalDeviceVulkan13Properties vulkan13Properties_ {};
+    vk::PhysicalDeviceVulkan14Properties vulkan14Properties_ {};
 
-    VkPhysicalDeviceFeatures2 physicalDeviceFeatures2_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
-    };
-    VkPhysicalDeviceVulkan11Features vulkan11Features_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES
-    };
-    VkPhysicalDeviceVulkan12Features vulkan12Features_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
-    };
-    VkPhysicalDeviceVulkan13Features vulkan13Features_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
-    };
-    VkPhysicalDeviceVulkan14Features vulkan14Features_ {
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES
-    };
+    vk::PhysicalDeviceFeatures2 physicalDeviceFeatures2_ {};
+    vk::PhysicalDeviceVulkan11Features vulkan11Features_ {};
+    vk::PhysicalDeviceVulkan12Features vulkan12Features_ {};
+    vk::PhysicalDeviceVulkan13Features vulkan13Features_ {};
+    vk::PhysicalDeviceVulkan14Features vulkan14Features_ {};
 
-    VkPhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_ {};
+    vk::PhysicalDeviceMemoryProperties physicalDeviceMemoryProperties_ {};
 
     VmaAllocator vmaAllocator_ { nullptr };
 };

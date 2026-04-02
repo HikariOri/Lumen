@@ -132,14 +132,14 @@ bool OffscreenRenderTarget::resize(uint32_t width, uint32_t height) {
  * - shader sampler input
  * - post-process input attachment
  */
-VkImageView OffscreenRenderTarget::color_view() const {
+vk::ImageView OffscreenRenderTarget::color_view() const {
     return colorImage_.view();
 }
 
 /**
  * @brief 获取 framebuffer（Offscreen 通常单 framebuffer）
  */
-VkFramebuffer OffscreenRenderTarget::framebuffer() const {
+vk::Framebuffer OffscreenRenderTarget::framebuffer() const {
     return framebuffer_.get(0);
 }
 
@@ -153,9 +153,9 @@ VkFramebuffer OffscreenRenderTarget::framebuffer() const {
  * - subpass dependency
  * - final layout transition
  */
-VkRenderPass OffscreenRenderTarget::render_pass() const {
+vk::RenderPass OffscreenRenderTarget::render_pass() const {
     return external_rp_ != nullptr ? external_rp_->handle()
-                                  : renderPass_.handle();
+                                   : renderPass_.handle();
 }
 
 /**
@@ -199,7 +199,7 @@ bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
     colorImage_ = Image();
     depthImage_ = Image();
 
-    VkRenderPass rp_handle = VK_NULL_HANDLE;
+    vk::RenderPass rp_handle {};
     if (external_rp_ != nullptr) {
         if (!external_rp_->is_valid()) {
             LUMEN_LOG_ERROR("OffscreenRenderTarget: 外部 RenderPass 无效");
@@ -226,8 +226,8 @@ bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
     colorInfo.width = width_;
     colorInfo.height = height_;
     colorInfo.format = config_.format;
-    colorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT; // 支持后处理采样
+    colorInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
+                      vk::ImageUsageFlagBits::eSampled; // 支持后处理采样
 
     if (!colorImage_.create(ctx, colorInfo)) {
         LUMEN_LOG_ERROR("OffscreenRenderTarget: 颜色附件创建失败");
@@ -242,8 +242,8 @@ bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
         }
     }
 
-    std::array<VkImageView, 2> attachment_views { colorImage_.view(),
-                                                  VK_NULL_HANDLE };
+    std::array<vk::ImageView, 2> attachment_views { colorImage_.view(),
+                                                    vk::ImageView {} };
     const uint32_t attachment_count = config_.useDepth ? 2U : 1U;
     if (config_.useDepth) {
         attachment_views[1] = depthImage_.view();
@@ -251,8 +251,8 @@ bool OffscreenRenderTarget::create_internal_(const Context &ctx) {
 
     if (!framebuffer_.create_offscreen(
             ctx.device(), rp_handle, width_, height_,
-            std::span<const VkImageView>(attachment_views.data(),
-                                         attachment_count))) {
+            std::span<const vk::ImageView>(attachment_views.data(),
+                                           attachment_count))) {
         LUMEN_LOG_ERROR("OffscreenRenderTarget: Framebuffer 创建失败");
         return false;
     }
@@ -342,22 +342,26 @@ void SwapchainRenderTarget::bind(Swapchain *swapchain,
 /**
  * @brief 获取指定 swapchain image 对应 framebuffer
  */
-VkFramebuffer SwapchainRenderTarget::framebuffer(uint32_t index) const {
-    return framebuffers_ ? framebuffers_->get(index) : VK_NULL_HANDLE;
+vk::Framebuffer SwapchainRenderTarget::framebuffer(uint32_t index) const {
+    return framebuffers_ ? framebuffers_->get(index) : vk::Framebuffer {};
 }
 
 /**
  * @brief swapchain 分辨率（通常跟 window 一致）
  */
-VkExtent2D SwapchainRenderTarget::extent() const {
-    return swapchain_ ? swapchain_->extent() : VkExtent2D { 0, 0 };
+vk::Extent2D SwapchainRenderTarget::extent() const {
+    if (!swapchain_) {
+        return vk::Extent2D { 0, 0 };
+    }
+    return swapchain_->extent();
 }
 
 /**
  * @brief swapchain image format（由 surface 决定）
  */
-VkFormat SwapchainRenderTarget::format() const {
-    return swapchain_ ? swapchain_->image_format() : VK_FORMAT_UNDEFINED;
+vk::Format SwapchainRenderTarget::format() const {
+    return swapchain_ ? swapchain_->image_format()
+                      : vk::Format::eUndefined;
 }
 
 /**

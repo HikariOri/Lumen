@@ -16,7 +16,7 @@
 
 #include <initializer_list>
 #include <vector>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -37,13 +37,13 @@ struct DescriptorBinding {
     uint32_t binding { 0 };
 
     /// 资源类型（UBO / Texture / Sampler / StorageBuffer 等）
-    VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+    vk::DescriptorType type { vk::DescriptorType::eUniformBuffer };
 
     /// array 数量（支持 descriptor array，例如 texture array）
     uint32_t count { 1 };
 
     /// shader 可见阶段（vertex / fragment / compute）
-    VkShaderStageFlags stages { VK_SHADER_STAGE_VERTEX_BIT };
+    vk::ShaderStageFlags stages { vk::ShaderStageFlagBits::eVertex };
 };
 
 /**
@@ -55,7 +55,7 @@ struct DescriptorBinding {
 struct DescriptorPoolSize {
 
     /// descriptor 类型
-    VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
+    vk::DescriptorType type { vk::DescriptorType::eUniformBuffer };
 
     /// 此类型最多可分配多少个 descriptor
     uint32_t count { 0 };
@@ -85,7 +85,7 @@ public:
     /**
      * @brief 创建 descriptor set layout
      *
-     * 内部会转换 DescriptorBinding → VkDescriptorSetLayoutBinding
+     * 内部会转换 DescriptorBinding → `vk::DescriptorSetLayoutBinding`
      *
      * Vulkan API：
      * vkCreateDescriptorSetLayout
@@ -93,20 +93,15 @@ public:
     bool create(const Context &ctx,
                 const std::vector<DescriptorBinding> &bindings);
 
-    /// 获取 Vulkan 原生 handle
-    [[nodiscard]] VkDescriptorSetLayout handle() const { return layout_; }
+    [[nodiscard]] vk::DescriptorSetLayout handle() const { return layout_; }
 
-    /// 是否已创建
-    [[nodiscard]] bool is_valid() const { return layout_ != VK_NULL_HANDLE; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(layout_); }
 
 private:
     void destroy_();
 
-    /// 关联 device（用于 destroy）
-    VkDevice device_ { VK_NULL_HANDLE };
-
-    /// Vulkan descriptor set layout
-    VkDescriptorSetLayout layout_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::DescriptorSetLayout layout_ {};
 };
 
 /**
@@ -148,8 +143,8 @@ public:
      * Vulkan API：
      * vkAllocateDescriptorSets
      */
-    bool allocate(VkDevice device, VkDescriptorSetLayout layout,
-                  VkDescriptorSet &outSet);
+    bool allocate(vk::Device device, vk::DescriptorSetLayout layout,
+                  vk::DescriptorSet &outSet);
 
     /**
      * @brief 重置 pool（释放所有 DescriptorSet）
@@ -161,14 +156,14 @@ public:
      */
     void reset();
 
-    [[nodiscard]] VkDescriptorPool handle() const { return pool_; }
-    [[nodiscard]] bool is_valid() const { return pool_ != VK_NULL_HANDLE; }
+    [[nodiscard]] vk::DescriptorPool handle() const { return pool_; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(pool_); }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkDescriptorPool pool_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::DescriptorPool pool_ {};
 };
 
 /**
@@ -176,8 +171,8 @@ private:
  */
 struct DescriptorWriteBuffer {
     uint32_t binding { 0 };
-    VkDescriptorType type { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER };
-    VkBuffer buffer { VK_NULL_HANDLE };
+    vk::DescriptorType type { vk::DescriptorType::eUniformBuffer };
+    vk::Buffer buffer {};
     size_t offset { 0 };
     size_t range { 0 };
 };
@@ -187,9 +182,9 @@ struct DescriptorWriteBuffer {
  */
 struct DescriptorWriteImage {
     uint32_t binding { 0 };
-    VkImageView imageView { VK_NULL_HANDLE };
-    VkSampler sampler { VK_NULL_HANDLE };
-    VkImageLayout imageLayout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    vk::ImageView imageView {};
+    vk::Sampler sampler {};
+    vk::ImageLayout imageLayout { vk::ImageLayout::eShaderReadOnlyOptimal };
 };
 
 /**
@@ -197,7 +192,7 @@ struct DescriptorWriteImage {
  *
  * 同一 set 上既有 buffer 又有 image 时应优先用本函数，避免多次驱动入口。
  */
-void write_descriptor_set(VkDevice device, VkDescriptorSet set,
+void write_descriptor_set(vk::Device device, vk::DescriptorSet set,
                           std::initializer_list<DescriptorWriteBuffer> buffers,
                           std::initializer_list<DescriptorWriteImage> images);
 
@@ -206,9 +201,9 @@ void write_descriptor_set(VkDevice device, VkDescriptorSet set,
  *
  * 单 binding 便捷封装；同 set 多 binding 请用 write_descriptor_set。
  */
-void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
-                             uint32_t binding, VkDescriptorType type,
-                             VkBuffer buffer, size_t offset, size_t range);
+void write_descriptor_buffer(vk::Device device, vk::DescriptorSet set,
+                             uint32_t binding, vk::DescriptorType type,
+                             vk::Buffer buffer, size_t offset, size_t range);
 
 /**
  * @brief 写入 Image + Sampler 到 DescriptorSet
@@ -216,11 +211,11 @@ void write_descriptor_buffer(VkDevice device, VkDescriptorSet set,
  * 单 binding 便捷封装；同 set 多 binding 请用 write_descriptor_set。
  */
 void write_descriptor_image(
-    VkDevice device, VkDescriptorSet set, uint32_t binding,
-    VkImageView imageView, VkSampler sampler,
+    vk::Device device, vk::DescriptorSet set, uint32_t binding,
+    vk::ImageView imageView, vk::Sampler sampler,
 
     /// 必须匹配 image 当前 layout，否则 shader 读取 undefined
-    VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    vk::ImageLayout imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal);
 
 } // namespace render
 } // namespace lumen

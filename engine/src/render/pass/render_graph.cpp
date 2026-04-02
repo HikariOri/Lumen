@@ -19,7 +19,7 @@
  * 当前实现为“简化同步模型”：
  *
  * - 基于 Image Layout 推导 access / stage
- * - 每次 Layout 变化插入一个 VkImageMemoryBarrier
+ * - 每次 Layout 变化插入一个 `vk::ImageMemoryBarrier`
  *
  * ⚠️ 注意：
  * - 未处理 UAV / storage image 写后读 hazard
@@ -44,22 +44,24 @@ namespace {
  * @brief 根据 RGImage 推导 aspect mask
  *
  * @param img RenderGraph 图像
- * @return VkImageAspectFlags
+ * @return `vk::ImageAspectFlags`
  *
  * @note
- * - 颜色图：VK_IMAGE_ASPECT_COLOR_BIT
+ * - 颜色图：`vk::ImageAspectFlagBits::eColor`
  * - 深度图：DEPTH / DEPTH|STENCIL
  */
-[[nodiscard]] VkImageAspectFlags aspect_mask_for_rg_image(const RGImage &img) {
+[[nodiscard]] vk::ImageAspectFlags aspect_mask_for_rg_image(const RGImage &img) {
     if (!img.isDepth) {
-        return VK_IMAGE_ASPECT_COLOR_BIT;
+        return vk::ImageAspectFlagBits::eColor;
     }
     switch (img.format) {
-    case VK_FORMAT_D16_UNORM_S8_UINT:
-    case VK_FORMAT_D24_UNORM_S8_UINT:
-    case VK_FORMAT_D32_SFLOAT_S8_UINT:
-        return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    default: return VK_IMAGE_ASPECT_DEPTH_BIT;
+    case vk::Format::eD16UnormS8Uint:
+    case vk::Format::eD24UnormS8Uint:
+    case vk::Format::eD32SfloatS8Uint:
+        return vk::ImageAspectFlagBits::eDepth |
+               vk::ImageAspectFlagBits::eStencil;
+    default:
+        return vk::ImageAspectFlagBits::eDepth;
     }
 }
 
@@ -80,9 +82,9 @@ RGImage RGImage::from_texture(const Image &img, bool asDepth) {
     out.image = img.handle();
     out.view = img.view();
     out.format = img.format();
-    out.extent = { img.width(), img.height() };
+    out.extent = vk::Extent2D { img.width(), img.height() };
     out.isDepth = asDepth;
-    out.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    out.currentLayout = vk::ImageLayout::eUndefined;
     return out;
 }
 
@@ -99,14 +101,14 @@ RGImage RGImage::from_swapchain(const Swapchain &swapchain) {
     out.extent = swapchain.extent();
     out.isDepth = false;
     out.perIndexLayouts_.resize(swapchain.image_count(),
-                                VK_IMAGE_LAYOUT_UNDEFINED);
+                                vk::ImageLayout::eUndefined);
     return out;
 }
 
 /**
- * @brief 获取 VkImage
+ * @brief 获取图像句柄
  */
-VkImage RGImage::image_at(uint32_t index) const {
+vk::Image RGImage::image_at(uint32_t index) const {
     if (type == RGImageType::Swapchain && swapchain_) {
         return swapchain_->image(index);
     }
@@ -114,9 +116,9 @@ VkImage RGImage::image_at(uint32_t index) const {
 }
 
 /**
- * @brief 获取 VkImageView
+ * @brief 获取图像视图
  */
-VkImageView RGImage::view_at(uint32_t index) const {
+vk::ImageView RGImage::view_at(uint32_t index) const {
     if (type == RGImageType::Swapchain && swapchain_) {
         return swapchain_->image_view(index);
     }
@@ -126,7 +128,7 @@ VkImageView RGImage::view_at(uint32_t index) const {
 /**
  * @brief 获取当前 Layout
  */
-VkImageLayout RGImage::layout_at(uint32_t index) const {
+vk::ImageLayout RGImage::layout_at(uint32_t index) const {
     if (type == RGImageType::Swapchain && index < perIndexLayouts_.size()) {
         return perIndexLayouts_[index];
     }
@@ -136,7 +138,7 @@ VkImageLayout RGImage::layout_at(uint32_t index) const {
 /**
  * @brief 设置 Layout
  */
-void RGImage::set_layout(uint32_t index, VkImageLayout layout) {
+void RGImage::set_layout(uint32_t index, vk::ImageLayout layout) {
     if (type == RGImageType::Swapchain && index < perIndexLayouts_.size()) {
         perIndexLayouts_[index] = layout;
     } else {
@@ -203,17 +205,17 @@ void RenderGraph::clear() {
  * - 未覆盖所有 Vulkan Layout（仅常用路径）
  * - 未处理 Compute / Transfer pipeline
  */
-void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
-                                    VkImageLayout oldLayout,
-                                    VkImageLayout newLayout, uint32_t index) {
-    if (!img || img->image_at(index) == VK_NULL_HANDLE) {
+void RenderGraph::pipeline_barrier_(vk::CommandBuffer cmd, RGImage *img,
+                                    vk::ImageLayout oldLayout,
+                                    vk::ImageLayout newLayout, uint32_t index) {
+    if (!img || !static_cast<bool>(img->image_at(index))) {
         return;
     }
     if (oldLayout == newLayout) {
         return;
     }
 
-    VkImageMemoryBarrier barrier { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    vk::ImageMemoryBarrier barrier {};
     barrier.oldLayout = oldLayout;
     barrier.newLayout = newLayout;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -225,42 +227,48 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
 
-    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = 0;
+    vk::PipelineStageFlags srcStage =
+        vk::PipelineStageFlagBits::eTopOfPipe;
+    vk::PipelineStageFlags dstStage =
+        vk::PipelineStageFlagBits::eTopOfPipe;
+    barrier.srcAccessMask = {};
+    barrier.dstAccessMask = {};
 
     // --- src ---
-    if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        srcStage = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    if (oldLayout == vk::ImageLayout::eColorAttachmentOptimal) {
+        barrier.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+        srcStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+    } else if (oldLayout ==
+               vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+        barrier.srcAccessMask =
+            vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+        srcStage = vk::PipelineStageFlagBits::eLateFragmentTests;
+    } else if (oldLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+        barrier.srcAccessMask = vk::AccessFlagBits::eShaderRead;
+        srcStage = vk::PipelineStageFlagBits::eFragmentShader;
+    } else if (oldLayout == vk::ImageLayout::ePresentSrcKHR) {
+        srcStage = vk::PipelineStageFlagBits::eBottomOfPipe;
     }
 
     // --- dst ---
-    if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    } else if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    } else if (newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    } else if (newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    if (newLayout == vk::ImageLayout::eColorAttachmentOptimal) {
+        barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+        dstStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+    } else if (newLayout ==
+               vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+        barrier.dstAccessMask =
+            vk::AccessFlagBits::eDepthStencilAttachmentRead |
+            vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+        dstStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
+    } else if (newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+        barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+        dstStage = vk::PipelineStageFlagBits::eFragmentShader;
+    } else if (newLayout == vk::ImageLayout::ePresentSrcKHR) {
+        dstStage = vk::PipelineStageFlagBits::eBottomOfPipe;
     }
 
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
-                         &barrier);
+    cmd.pipelineBarrier(srcStage, dstStage, {}, 0, nullptr, 0, nullptr, 1,
+                        &barrier);
 
     img->set_layout(index, newLayout);
 }
@@ -268,13 +276,14 @@ void RenderGraph::pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
 /**
  * @brief Layout 转换封装
  */
-void RenderGraph::transition_image_(VkCommandBuffer cmd, RGImage *img,
-                                    VkImageLayout newLayout, uint32_t index) {
-    if (!img || img->image_at(index) == VK_NULL_HANDLE) {
+void RenderGraph::transition_image_(vk::CommandBuffer cmd, RGImage *img,
+                                      vk::ImageLayout newLayout,
+                                      uint32_t index) {
+    if (!img || !static_cast<bool>(img->image_at(index))) {
         return;
     }
 
-    VkImageLayout oldLayout = img->layout_at(index);
+    const vk::ImageLayout oldLayout = img->layout_at(index);
     if (oldLayout == newLayout) {
         return;
     }
@@ -385,7 +394,8 @@ bool RenderGraph::compile() {
  * 3. 执行 pass
  * 4. 写资源更新最终 layout
  */
-void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
+void RenderGraph::execute(vk::CommandBuffer cmd,
+                          uint32_t swapchainImageIndex) {
     if (!ctx_ || passes_.empty()) {
         return;
     }
@@ -402,9 +412,10 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
         // --- reads ---
         for (RGImage *img : pass.reads) {
             if (img) {
-                transition_image_(
-                    cmd, img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    img->is_swapchain() ? swapchainImageIndex : 0);
+                transition_image_(cmd, img,
+                                  vk::ImageLayout::eShaderReadOnlyOptimal,
+                                  img->is_swapchain() ? swapchainImageIndex
+                                                      : 0);
             }
         }
 
@@ -416,9 +427,9 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
 
             uint32_t subIndex = img->is_swapchain() ? swapchainImageIndex : 0;
 
-            VkImageLayout targetLayout =
-                img->isDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                             : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            const vk::ImageLayout targetLayout =
+                img->isDepth ? vk::ImageLayout::eDepthStencilAttachmentOptimal
+                             : vk::ImageLayout::eColorAttachmentOptimal;
 
             transition_image_(cmd, img, targetLayout, subIndex);
         }
@@ -436,11 +447,14 @@ void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex) {
 
             uint32_t subIndex = img->is_swapchain() ? swapchainImageIndex : 0;
 
-            VkImageLayout finalLayout =
-                img->is_swapchain() ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-                : img->isDepth
-                    ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                    : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            vk::ImageLayout finalLayout {};
+            if (img->is_swapchain()) {
+                finalLayout = vk::ImageLayout::ePresentSrcKHR;
+            } else if (img->isDepth) {
+                finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+            } else {
+                finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+            }
 
             img->set_layout(subIndex, finalLayout);
         }

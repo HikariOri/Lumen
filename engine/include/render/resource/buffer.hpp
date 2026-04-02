@@ -1,11 +1,11 @@
 /**
  * @file buffer.hpp
- * @brief VkBuffer 封装：顶点、索引、Uniform、Staging
+ * @brief Vulkan Buffer 封装：顶点、索引、Uniform、Staging
  *
  * 封装 Vulkan Buffer + VMA 分配，提供统一的资源生命周期管理。
  *
  * 设计目标：
- * 1. 简化 VkBuffer + VkDeviceMemory（或 VMA Allocation）的管理
+ * 1. 简化 Buffer + VkDeviceMemory（或 VMA Allocation）的管理
  * 2. 提供统一的 CPU/GPU 数据上传接口
  * 3. 支持不同用途的 Buffer（Vertex / Index / Uniform / Staging）
  *
@@ -21,7 +21,7 @@
 #include <type_traits>
 
 #include <vk_mem_alloc.h>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -30,29 +30,14 @@ class Context;
 class CommandPool;
 
 /**
- * @brief Buffer 使用类型
- *
- * 抽象 Vulkan 的 VkBufferUsageFlags
- */
-enum class BufferUsage : uint8_t {
-    Vertex,      ///< 顶点数据（VK_BUFFER_USAGE_VERTEX_BUFFER_BIT）
-    Index,       ///< 索引数据（VK_BUFFER_USAGE_INDEX_BUFFER_BIT）
-    Uniform,     ///< Uniform Buffer（常用于每帧更新）
-    Storage,     ///< Storage Buffer（Compute / SSBO）
-    Staging,     ///< Staging（CPU→GPU 中转）
-    TransferSrc, ///< 拷贝源
-    TransferDst, ///< 拷贝目标
-};
-
-/**
  * @brief Buffer 创建信息
  */
 struct BufferCreateInfo {
     /// Buffer 大小（字节）
     size_t size { 0 };
 
-    /// 使用类型（影响 usage flags）
-    BufferUsage usage { BufferUsage::Vertex };
+    /// Vulkan usage（可用 `|` 组合，如 `eVertexBuffer | eTransferDst`）
+    vk::BufferUsageFlags usage { vk::BufferUsageFlagBits::eVertexBuffer };
 
     /**
      * @brief 是否 Host 可见
@@ -66,11 +51,6 @@ struct BufferCreateInfo {
      *   - 需通过 staging buffer 上传数据
      */
     bool hostVisible { false };
-
-    /**
-     * @brief 与 usage 枚举按位或的额外 Vulkan usage（如 TRANSFER_DST）
-     */
-    VkBufferUsageFlags usageFlagsExtra { 0 };
 
     /**
      * @brief 分配时保持 CPU 映射（仅 hostVisible 时有效）
@@ -96,7 +76,7 @@ struct BufferCreateInfo {
  * create() → 使用 → 析构自动释放
  *
  * 内部：
- * - VkBuffer
+ * - `vk::Buffer`
  * - VmaAllocation（自动管理内存）
  *
  * 注意：
@@ -152,14 +132,14 @@ public:
      */
     void invalidate_mapped_range(size_t byte_offset, size_t byte_count);
 
-    /// 获取 VkBuffer
-    [[nodiscard]] VkBuffer handle() const { return vkBuffer; }
+    /// 获取 `vk::Buffer`
+    [[nodiscard]] vk::Buffer handle() const { return buffer_; }
 
     /// 获取大小
     [[nodiscard]] size_t size() const { return byteSize; }
 
     /// 是否有效
-    [[nodiscard]] bool is_valid() const { return vkBuffer != VK_NULL_HANDLE; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(buffer_); }
 
 protected:
     void destroy_();
@@ -170,15 +150,16 @@ protected:
      * @note 内部一次 `submit_one_shot`；若要在同一 submit 中上传多个 buffer，
      *       应自行 `Buffer::create` + `StagingBuffer` + 录制 `vkCmdCopyBuffer`。
      */
-    bool create_device_local_upload_impl(const Context &ctx, VkQueue transferQueue,
-                                         CommandPool &cmdPool, BufferUsage usage,
+    bool create_device_local_upload_impl(const Context &ctx, vk::Queue transferQueue,
+                                         CommandPool &cmdPool,
+                                         vk::BufferUsageFlags usage,
                                          const void *srcBytes, size_t byteCount);
 
 private:
-    VkDevice vkDevice { VK_NULL_HANDLE };
+    vk::Device device_ {};
     VmaAllocator vmaAllocator { nullptr };
 
-    VkBuffer vkBuffer { VK_NULL_HANDLE };
+    vk::Buffer buffer_ {};
     VmaAllocation vmaAllocation { nullptr };
 
     size_t byteSize { 0 };
@@ -200,7 +181,7 @@ public:
      *
      * 等价于：`create(device-local + TRANSFER_DST)` → staging → `vkCmdCopyBuffer`。
      */
-    bool create_device_local_and_upload(const Context &ctx, VkQueue transferQueue,
+    bool create_device_local_and_upload(const Context &ctx, vk::Queue transferQueue,
                                         CommandPool &cmdPool, const void *srcBytes,
                                         size_t byteCount);
 };
@@ -218,16 +199,16 @@ public:
     /**
      * @brief device-local 索引缓冲 + Staging 上传（单次队列提交）
      */
-    bool create_device_local_and_upload(const Context &ctx, VkQueue transferQueue,
+    bool create_device_local_and_upload(const Context &ctx, vk::Queue transferQueue,
                                         CommandPool &cmdPool, const void *srcBytes,
                                         size_t byteCount);
 
     /**
-     * @brief 转换为 Vulkan 类型
+     * @brief 索引元素类型（`vkCmdBindIndexBuffer`）
      */
-    [[nodiscard]] VkIndexType vk_index_type() const {
-        return indexType == IndexType::Uint16 ? VK_INDEX_TYPE_UINT16
-                                              : VK_INDEX_TYPE_UINT32;
+    [[nodiscard]] vk::IndexType vk_index_type() const {
+        return indexType == IndexType::Uint16 ? vk::IndexType::eUint16
+                                              : vk::IndexType::eUint32;
     }
 
     [[nodiscard]] IndexType index_type() const { return indexType; }

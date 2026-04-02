@@ -80,7 +80,7 @@
 #include <span>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -103,22 +103,22 @@ class Swapchain;
  */
 struct ColorAttachmentDesc {
     /// 图像格式（通常与 Swapchain 一致）
-    VkFormat format { VK_FORMAT_R8G8B8A8_SRGB };
+    vk::Format format { vk::Format::eR8G8B8A8Srgb };
 
     /// 采样数（用于 MSAA）
-    VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
+    vk::SampleCountFlagBits samples { vk::SampleCountFlagBits::e1 };
 
     /// 渲染开始时的操作（清除 / 保留）
-    VkAttachmentLoadOp loadOp { VK_ATTACHMENT_LOAD_OP_CLEAR };
+    vk::AttachmentLoadOp loadOp { vk::AttachmentLoadOp::eClear };
 
     /// 渲染结束时的操作（是否写回）
-    VkAttachmentStoreOp storeOp { VK_ATTACHMENT_STORE_OP_STORE };
+    vk::AttachmentStoreOp storeOp { vk::AttachmentStoreOp::eStore };
 
     /// RenderPass 开始前的布局
-    VkImageLayout initialLayout { VK_IMAGE_LAYOUT_UNDEFINED };
+    vk::ImageLayout initialLayout { vk::ImageLayout::eUndefined };
 
     /// RenderPass 结束后的布局（用于呈现）
-    VkImageLayout finalLayout { VK_IMAGE_LAYOUT_PRESENT_SRC_KHR };
+    vk::ImageLayout finalLayout { vk::ImageLayout::ePresentSrcKHR };
 };
 
 /**
@@ -133,17 +133,17 @@ struct ColorAttachmentDesc {
  * - storeOp = DONT_CARE（性能优化）
  */
 struct DepthAttachmentDesc {
-    VkFormat format { VK_FORMAT_D32_SFLOAT };
-    VkSampleCountFlagBits samples { VK_SAMPLE_COUNT_1_BIT };
-    VkAttachmentLoadOp loadOp { VK_ATTACHMENT_LOAD_OP_CLEAR };
-    VkAttachmentStoreOp storeOp { VK_ATTACHMENT_STORE_OP_DONT_CARE };
+    vk::Format format { vk::Format::eD32Sfloat };
+    vk::SampleCountFlagBits samples { vk::SampleCountFlagBits::e1 };
+    vk::AttachmentLoadOp loadOp { vk::AttachmentLoadOp::eClear };
+    vk::AttachmentStoreOp storeOp { vk::AttachmentStoreOp::eDontCare };
 
     /// 初始布局
-    VkImageLayout initialLayout { VK_IMAGE_LAYOUT_UNDEFINED };
+    vk::ImageLayout initialLayout { vk::ImageLayout::eUndefined };
 
     /// 一般保持为深度最优布局
-    VkImageLayout finalLayout {
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    vk::ImageLayout finalLayout {
+        vk::ImageLayout::eDepthStencilAttachmentOptimal
     };
 };
 
@@ -174,7 +174,7 @@ struct RenderPassConfig {
  * @brief Vulkan 渲染通道封装
  *
  * @details
- * 封装 VkRenderPass 的创建与销毁：
+ * 封装 `vk::RenderPass` 的创建与销毁：
  * - 定义附件（Attachment）
  * - 定义子通道（Subpass）
  * - 设置依赖关系（Dependency）
@@ -186,7 +186,7 @@ struct RenderPassConfig {
  * - 自动销毁（析构）
  *
  * @warning
- * 必须在 VkDevice 销毁前释放
+ * 必须在 `vk::Device` 销毁前释放
  */
 class RenderPass {
 public:
@@ -211,21 +211,21 @@ public:
      * - Subpass 设置
      * - Dependency 同步配置
      */
-    bool create(VkDevice device, const RenderPassConfig &config);
+    bool create(vk::Device device, const RenderPassConfig &config);
 
-    /// 获取底层 VkRenderPass
-    [[nodiscard]] VkRenderPass handle() const { return renderPass_; }
+    /// 获取底层 `vk::RenderPass`
+    [[nodiscard]] vk::RenderPass handle() const { return renderPass_; }
 
     /// 是否有效
     [[nodiscard]] bool is_valid() const {
-        return renderPass_ != VK_NULL_HANDLE;
+        return static_cast<bool>(renderPass_);
     }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkRenderPass renderPass_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::RenderPass renderPass_ {};
 };
 
 /**
@@ -233,7 +233,7 @@ private:
  * @brief Vulkan 帧缓冲封装
  *
  * @details
- * 管理多个 VkFramebuffer（通常与 Swapchain 图像一一对应）：
+ * 管理多个 `vk::Framebuffer`（通常与 Swapchain 图像一一对应）：
  *
  * Framebuffer = RenderPass + ImageView[]
  *
@@ -261,9 +261,9 @@ public:
      * @note
      * Framebuffer 数量 = Swapchain image 数量
      */
-    bool create(VkDevice device, VkRenderPass renderPass,
+    bool create(vk::Device device, vk::RenderPass renderPass,
                 const Swapchain &swapchain,
-                VkImageView depthImageView = VK_NULL_HANDLE);
+                vk::ImageView depthImageView = {});
 
     /**
      * @brief 创建离屏 Framebuffer
@@ -274,15 +274,15 @@ public:
      * - GBuffer
      * - 后处理（Post Process）
      */
-    bool create_offscreen(VkDevice device, VkRenderPass renderPass,
+    bool create_offscreen(vk::Device device, vk::RenderPass renderPass,
                           uint32_t width, uint32_t height,
-                          std::span<const VkImageView> attachments);
+                          std::span<const vk::ImageView> attachments);
 
-    bool create_offscreen(VkDevice device, VkRenderPass renderPass,
+    bool create_offscreen(vk::Device device, vk::RenderPass renderPass,
                           uint32_t width, uint32_t height,
-                          const std::vector<VkImageView> &attachments) {
+                          const std::vector<vk::ImageView> &attachments) {
         return create_offscreen(device, renderPass, width, height,
-                                std::span<const VkImageView>(
+                                std::span<const vk::ImageView>(
                                     attachments.data(), attachments.size()));
     }
 
@@ -307,16 +307,16 @@ public:
     }
 
     /// 获取指定 Framebuffer
-    [[nodiscard]] VkFramebuffer get(uint32_t index) const {
+    [[nodiscard]] vk::Framebuffer get(uint32_t index) const {
         return index < framebuffers_.size() ? framebuffers_[index]
-                                            : VK_NULL_HANDLE;
+                                            : vk::Framebuffer {};
     }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    std::vector<VkFramebuffer> framebuffers_;
+    vk::Device device_ {};
+    std::vector<vk::Framebuffer> framebuffers_;
 };
 
 } // namespace render

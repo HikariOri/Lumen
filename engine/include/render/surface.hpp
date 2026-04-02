@@ -71,7 +71,7 @@ public:
      * ⚠️ 要求：
      * - surface 必须由该 instance 创建
      */
-    Surface(VkInstance instance, VkSurfaceKHR surface) noexcept
+    Surface(vk::Instance instance, vk::SurfaceKHR surface) noexcept
         : instance_(instance), surface_(surface) {}
 
     /**
@@ -88,8 +88,8 @@ public:
      */
     Surface(Surface &&other) noexcept
         : instance_(other.instance_), surface_(other.surface_) {
-        other.instance_ = VK_NULL_HANDLE;
-        other.surface_ = VK_NULL_HANDLE;
+        other.instance_ = nullptr;
+        other.surface_ = nullptr;
     }
 
     /// 禁止拷贝赋值
@@ -106,8 +106,8 @@ public:
             destroy_();
             instance_ = other.instance_;
             surface_ = other.surface_;
-            other.instance_ = VK_NULL_HANDLE;
-            other.surface_ = VK_NULL_HANDLE;
+            other.instance_ = nullptr;
+            other.surface_ = nullptr;
         }
         return *this;
     }
@@ -122,17 +122,11 @@ public:
     /**
      * @brief 获取 VkSurfaceKHR 句柄
      */
-    [[nodiscard]] VkSurfaceKHR handle() const { return surface_; }
+    [[nodiscard]] vk::SurfaceKHR handle() const { return surface_; }
 
-    /**
-     * @brief 隐式转换为 VkSurfaceKHR
-     */
-    [[nodiscard]] explicit operator VkSurfaceKHR() const { return surface_; }
+    [[nodiscard]] explicit operator vk::SurfaceKHR() const { return surface_; }
 
-    /**
-     * @brief 判断 Surface 是否有效
-     */
-    [[nodiscard]] bool is_valid() const { return surface_ != VK_NULL_HANDLE; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(surface_); }
 
 private:
     /**
@@ -147,17 +141,15 @@ private:
      * - instance 必须仍然有效
      */
     void destroy_() {
-        if (instance_ != VK_NULL_HANDLE && surface_ != VK_NULL_HANDLE) {
-            vkDestroySurfaceKHR(instance_, surface_, nullptr);
-            surface_ = VK_NULL_HANDLE;
+        if (instance_ && surface_) {
+            instance_.destroySurfaceKHR(surface_, nullptr);
+            surface_ = nullptr;
         }
     }
 
-    /// 创建该 Surface 的 Instance（销毁时需要）
-    VkInstance instance_ { VK_NULL_HANDLE };
+    vk::Instance instance_ {};
 
-    /// Vulkan Surface 句柄
-    VkSurfaceKHR surface_ { VK_NULL_HANDLE };
+    vk::SurfaceKHR surface_ {};
 };
 
 } // namespace render

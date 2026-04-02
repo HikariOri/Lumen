@@ -19,7 +19,7 @@
 #include <span>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -85,7 +85,7 @@ public:
      * - code 必须是合法 SPIR-V（通常由 glslc / DXC 编译生成）
      * - 数据需满足 uint32_t 对齐要求
      */
-    bool create_from_spirv(VkDevice device, std::span<const uint32_t> code);
+    bool create_from_spirv(vk::Device device, std::span<const uint32_t> code);
 
     /**
      * @brief 从 SPIR-V 字节码创建 ShaderModule（使用 Context）
@@ -121,7 +121,7 @@ public:
      * 📌 常见流程：
      * GLSL/HLSL → (glslc/dxc) → SPIR-V → ShaderModule
      */
-    bool create_from_file(VkDevice device, const char *filePath);
+    bool create_from_file(vk::Device device, const char *filePath);
 
     /**
      * @brief 从文件加载 SPIR-V 并创建 ShaderModule（Context 封装）
@@ -164,19 +164,13 @@ public:
      * - 一个 ShaderModule 可以有多个 entry point
      * - 不同 stage 可以来自不同 module :contentReference[oaicite:2]{index=2}
      */
-    VkPipelineShaderStageCreateInfo
-    stage_create_info(VkShaderStageFlagBits stage,
+    vk::PipelineShaderStageCreateInfo
+    stage_create_info(vk::ShaderStageFlagBits stage,
                       const char *entryPoint = "main") const;
 
-    /**
-     * @brief 获取底层 VkShaderModule 句柄
-     */
-    [[nodiscard]] VkShaderModule handle() const { return module_; }
+    [[nodiscard]] vk::ShaderModule handle() const { return module_; }
 
-    /**
-     * @brief 判断 ShaderModule 是否有效
-     */
-    [[nodiscard]] bool is_valid() const { return module_ != VK_NULL_HANDLE; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(module_); }
 
 private:
     /**
@@ -191,10 +185,9 @@ private:
     void destroy_();
 
     /// 创建该 ShaderModule 的逻辑设备
-    VkDevice device_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
 
-    /// Vulkan ShaderModule 句柄
-    VkShaderModule module_ { VK_NULL_HANDLE };
+    vk::ShaderModule module_ {};
 };
 
 } // namespace render

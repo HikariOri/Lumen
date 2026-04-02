@@ -1,22 +1,6 @@
 /**
  * @file texture.cpp
  * @brief Texture 实现（上传 / Layout 转换 / Mipmap / Cubemap）
- *
- * @details
- * 实现 Texture 的 GPU 资源创建流程，包括：
- *
- * - CPU → GPU 数据上传（Staging Buffer）
- * - VkImage 创建（VMA 分配）
- * - Image Layout 转换（Pipeline Barrier）
- * - Mipmap 生成（vkCmdBlitImage）
- * - Cubemap 构建（6 faces / mip chain）
- *
- * @note
- * 该文件只包含“实现逻辑”，不重复 API 说明（见 texture.hpp）
- *
- * @warning
- * 当前实现使用 vkQueueWaitIdle（同步简单但性能较差）
- * 实际项目建议改为 Fence / 异步提交
  */
 
 #include "render/resource/texture.hpp"
@@ -39,65 +23,48 @@ namespace lumen::render {
 
 namespace {
 
-/**
- * @brief 生成 Cubemap mipmap
- *
- * @details
- * 对 6 个 face 分别执行 mipmap 生成。
- *
- * 每个 face 独立：
- * - 避免 layer 间依赖
- * - 简化 barrier 范围
- *
- * @note
- * baseArrayLayer = face
- *
- * @warning
- * - 必须确保 image 创建时 arrayLayers=6
- * - 必须带 VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
- */
-void generate_mipmaps_cube(VkCommandBuffer cmd, VkImage image, uint32_t dim,
+void generate_mipmaps_cube(vk::CommandBuffer cmd, vk::Image image, uint32_t dim,
                            uint32_t mipLevels) {
     for (uint32_t face = 0; face < 6; ++face) {
         auto mipWidth = static_cast<int32_t>(dim);
         auto mipHeight = static_cast<int32_t>(dim);
         for (uint32_t i = 1; i < mipLevels; ++i) {
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, i - 1, 1, face, 1);
+                cmd, image, vk::ImageLayout::eTransferDstOptimal,
+                vk::ImageLayout::eTransferSrcOptimal, i - 1, 1, face, 1);
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, i, 1, face, 1);
+                cmd, image, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal, i, 1, face, 1);
 
-            VkImageBlit blit {};
-            blit.srcOffsets[0] = { 0, 0, 0 };
-            blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
-            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            vk::ImageBlit blit {};
+            blit.srcOffsets[0] = vk::Offset3D { 0, 0, 0 };
+            blit.srcOffsets[1] = vk::Offset3D { mipWidth, mipHeight, 1 };
+            blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
             blit.srcSubresource.mipLevel = i - 1;
             blit.srcSubresource.baseArrayLayer = face;
             blit.srcSubresource.layerCount = 1;
-            blit.dstOffsets[0] = { 0, 0, 0 };
-            blit.dstOffsets[1] = { std::max(1, mipWidth / 2),
-                                   std::max(1, mipHeight / 2), 1 };
-            blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.dstOffsets[0] = vk::Offset3D { 0, 0, 0 };
+            blit.dstOffsets[1] = vk::Offset3D { std::max(1, mipWidth / 2),
+                                                std::max(1, mipHeight / 2), 1 };
+            blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
             blit.dstSubresource.mipLevel = i;
             blit.dstSubresource.baseArrayLayer = face;
             blit.dstSubresource.layerCount = 1;
 
-            vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                           &blit, VK_FILTER_LINEAR);
+            cmd.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image,
+                          vk::ImageLayout::eTransferDstOptimal, 1, &blit,
+                          vk::Filter::eLinear);
 
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, i - 1, 1, face, 1);
+                cmd, image, vk::ImageLayout::eTransferSrcOptimal,
+                vk::ImageLayout::eShaderReadOnlyOptimal, i - 1, 1, face, 1);
 
             mipWidth = std::max(1, mipWidth / 2);
             mipHeight = std::max(1, mipHeight / 2);
         }
         gpu_image_mipmap::transition_image_subresource(
-            cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels - 1, 1, face,
+            cmd, image, vk::ImageLayout::eTransferDstOptimal,
+            vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels - 1, 1, face,
             1);
     }
 }
@@ -106,14 +73,13 @@ void generate_mipmaps_cube(VkCommandBuffer cmd, VkImage image, uint32_t dim,
 
 bool Texture::create_from_memory(const Context &ctx, const void *data,
                                  size_t imageSizeBytes, uint32_t width,
-                                 uint32_t height, VkQueue transferQueue,
-                                 CommandPool &cmdPool, VkFormat format,
+                                 uint32_t height, vk::Queue transferQueue,
+                                 CommandPool &cmdPool, vk::Format format,
                                  const SamplerConfig &samplerConfig,
                                  bool generateMipmaps) {
     if (!data || imageSizeBytes == 0 || width == 0 || height == 0) {
         return false;
     }
-    // 至少需 width*height 字节（如 R8），常用 RGBA8 为 width*height*4
     if (imageSizeBytes < static_cast<size_t>(width) * height) {
         return false;
     }
@@ -125,26 +91,10 @@ bool Texture::create_from_memory(const Context &ctx, const void *data,
     return create_sampler_(ctx, samplerConfig);
 }
 
-/**
- * @brief 从文件加载纹理（stb_image）
- *
- * @details
- * - 强制转换为 RGBA8
- * - 自动生成 mipmap
- *
- * @note
- * stb 默认：
- * - (0,0) 在左上
- *
- * Vulkan：
- * - (0,0) 在左下
- *
- * → 需要 flip（stbi_set_flip_vertically_on_load）
- */
 bool Texture::create_from_file(const Context &ctx, const char *filePath,
-                               VkQueue transferQueue, CommandPool &cmdPool,
+                               vk::Queue transferQueue, CommandPool &cmdPool,
                                const SamplerConfig &samplerConfig,
-                               VkFormat format) {
+                               vk::Format format) {
     stbi_set_flip_vertically_on_load(1);
     int w {};
     int h {};
@@ -172,8 +122,8 @@ bool Texture::create_from_file(const Context &ctx, const char *filePath,
 }
 
 bool Texture::create_from_ktx_file(const Context &ctx, const char *filePath,
-                                   VkQueue transferQueue, CommandPool &cmdPool,
-                                   VkFormat format,
+                                   vk::Queue transferQueue, CommandPool &cmdPool,
+                                   vk::Format format,
                                    const SamplerConfig &samplerConfig) {
     std::vector<std::uint8_t> rgba;
     std::uint32_t texWidth = 0;
@@ -197,35 +147,10 @@ bool Texture::create_from_ktx_file(const Context &ctx, const char *filePath,
     return create_sampler_(ctx, samplerConfig);
 }
 
-/**
- * @brief 从像素数据创建 GPU 纹理（内部实现）
- *
- * @param data 像素数据
- * @param imageSizeBytes 数据大小
- * @param texWidth 宽度
- * @param texHeight 高度
- * @param format 图像格式
- * @param doMipmaps 是否生成 mip
- *
- * @details
- * 完整流程：
- * 1. 创建 staging buffer（CPU → GPU）
- * 2. 创建 VkImage（VMA 分配）
- * 3. UNDEFINED → TRANSFER_DST
- * 4. 拷贝 buffer → image
- * 5. 生成 mip（可选）
- * 6. 转换为 SHADER_READ_ONLY
- *
- * @note
- * 使用 `CommandPool::submit_one_shot` 提交并等待完成
- *
- * @warning
- * - 同步方式简单但低效；大量上传时可改为 fence / 异步
- */
 bool Texture::create_from_pixels_(const Context &ctx, const void *data,
                                   size_t imageSizeBytes, uint32_t texWidth,
-                                  uint32_t texHeight, VkFormat format,
-                                  VkQueue transferQueue, CommandPool &cmdPool,
+                                  uint32_t texHeight, vk::Format format,
+                                  vk::Queue transferQueue, CommandPool &cmdPool,
                                   bool doMipmaps) {
     VmaAllocator vma = ctx.vma_allocator();
     if (vma == nullptr) {
@@ -247,84 +172,85 @@ bool Texture::create_from_pixels_(const Context &ctx, const void *data,
     }
     staging.upload(data, imageSizeBytes);
 
-    // Create image
-    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = texWidth;
-    imageInfo.extent.height = texHeight;
-    imageInfo.extent.depth = 1;
+    vk::ImageCreateInfo imageInfo {};
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent = vk::Extent3D { texWidth, texHeight, 1 };
     imageInfo.mipLevels = mipLevels_;
     imageInfo.arrayLayers = 1;
     imageInfo.format = format_;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imageInfo.usage = vk::ImageUsageFlagBits::eTransferSrc |
+                      vk::ImageUsageFlagBits::eTransferDst |
+                      vk::ImageUsageFlagBits::eSampled;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
-                                     &image_, &allocation_, nullptr);
-    if (result != VK_SUCCESS) {
+    VkImage vk_handle {};
+    const VkResult vma_rc = vmaCreateImage(
+        vma_allocator_,
+        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo), &allocCreate,
+        &vk_handle, &allocation_, nullptr);
+    if (static_cast<vk::Result>(vma_rc) != vk::Result::eSuccess) {
         LUMEN_LOG_ERROR("纹理 Image/VMA 创建失败: {} ({}x{})",
-                        static_cast<int>(result), texWidth, texHeight);
-        device_ = VK_NULL_HANDLE;
+                        static_cast<int>(vma_rc), texWidth, texHeight);
+        device_ = nullptr;
         vma_allocator_ = nullptr;
-        image_ = VK_NULL_HANDLE;
+        image_ = nullptr;
         allocation_ = nullptr;
         return false;
     }
+    image_ = vk_handle;
 
-    // ImageView
-    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vk::ImageViewCreateInfo viewInfo {};
     viewInfo.image = image_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = vk::ImageViewType::e2D;
     viewInfo.format = format_;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = mipLevels_;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
-    if (result != VK_SUCCESS) {
+    vk::ImageView view {};
+    if (device_.createImageView(&viewInfo, nullptr, &view) !=
+        vk::Result::eSuccess) {
         destroy_();
         return false;
     }
+    imageView_ = view;
 
-    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](vk::CommandBuffer cmd) {
             gpu_image_mipmap::transition_image_layout(
-                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, mipLevels_);
+                cmd, image_, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal, 0, mipLevels_);
 
-            VkBufferImageCopy region {};
+            vk::BufferImageCopy region {};
             region.bufferOffset = 0;
             region.bufferRowLength = 0;
             region.bufferImageHeight = 0;
-            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.aspectMask =
+                vk::ImageAspectFlagBits::eColor;
             region.imageSubresource.mipLevel = 0;
             region.imageSubresource.baseArrayLayer = 0;
             region.imageSubresource.layerCount = 1;
-            region.imageOffset = { .x = 0, .y = 0, .z = 0 };
-            region.imageExtent = { .width = texWidth,
-                                   .height = texHeight,
-                                   .depth = 1 };
+            region.imageOffset = vk::Offset3D { 0, 0, 0 };
+            region.imageExtent = vk::Extent3D { texWidth, texHeight, 1 };
 
-            vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                   &region);
+            cmd.copyBufferToImage(staging.handle(), image_,
+                                  vk::ImageLayout::eTransferDstOptimal, 1,
+                                  &region);
 
             if (mipLevels_ > 1) {
                 gpu_image_mipmap::generate_mipmaps(cmd, image_, texWidth,
-                                                   texHeight, mipLevels_);
+                                                     texHeight, mipLevels_);
             } else {
                 gpu_image_mipmap::transition_image_layout(
-                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1);
+                    cmd, image_, vk::ImageLayout::eTransferDstOptimal,
+                    vk::ImageLayout::eShaderReadOnlyOptimal, 0, 1);
             }
         })) {
         destroy_();
@@ -356,41 +282,43 @@ bool Texture::create(const Context &ctx, const ImageCreateInfo &info,
             gpu_image_mipmap::calculate_mip_levels(info.width, info.height);
     }
 
-    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = info.width;
-    imageInfo.extent.height = info.height;
-    imageInfo.extent.depth = 1;
+    vk::ImageCreateInfo imageInfo {};
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent =
+        vk::Extent3D { info.width, info.height, std::max(1U, info.depth) };
     imageInfo.mipLevels = mipLevels_;
     imageInfo.arrayLayers = info.arrayLayers;
     imageInfo.format = info.format;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = info.usage | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imageInfo.usage = info.usage | vk::ImageUsageFlagBits::eSampled;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
     if (info.type == ImageType::TexCube) {
-        imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        imageInfo.flags = vk::ImageCreateFlagBits::eCubeCompatible;
     }
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
-                                     &image_, &allocation_, nullptr);
-    if (result != VK_SUCCESS) {
-        device_ = VK_NULL_HANDLE;
+    VkImage vk_handle {};
+    const VkResult vma_rc = vmaCreateImage(
+        vma_allocator_,
+        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo), &allocCreate,
+        &vk_handle, &allocation_, nullptr);
+    if (static_cast<vk::Result>(vma_rc) != vk::Result::eSuccess) {
+        device_ = nullptr;
         vma_allocator_ = nullptr;
-        image_ = VK_NULL_HANDLE;
+        image_ = nullptr;
         allocation_ = nullptr;
         return false;
     }
+    image_ = vk_handle;
 
-    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vk::ImageViewCreateInfo viewInfo {};
     viewInfo.image = image_;
-    viewInfo.viewType = (info.type == ImageType::TexCube)
-                            ? VK_IMAGE_VIEW_TYPE_CUBE
-                            : VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = info.type == ImageType::TexCube ? vk::ImageViewType::eCube
+                                                        : vk::ImageViewType::e2D;
     viewInfo.format = info.format;
     viewInfo.subresourceRange.aspectMask = info.aspectMask;
     viewInfo.subresourceRange.baseMipLevel = 0;
@@ -398,19 +326,21 @@ bool Texture::create(const Context &ctx, const ImageCreateInfo &info,
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = info.arrayLayers;
 
-    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
-    if (result != VK_SUCCESS) {
+    vk::ImageView view {};
+    if (device_.createImageView(&viewInfo, nullptr, &view) !=
+        vk::Result::eSuccess) {
         destroy_();
         return false;
     }
+    imageView_ = view;
 
     return create_sampler_(ctx, samplerConfig);
 }
 
 bool Texture::create_cubemap_from_rgba8_faces(
     const Context &ctx, const void *const faces[6], uint32_t faceSize,
-    VkQueue transferQueue, CommandPool &cmdPool,
-    const SamplerConfig &samplerConfig, VkFormat format) {
+    vk::Queue transferQueue, CommandPool &cmdPool,
+    const SamplerConfig &samplerConfig, vk::Format format) {
     for (uint32_t i = 0; i < 6; ++i) {
         if (faces[i] == nullptr) {
             return false;
@@ -419,8 +349,8 @@ bool Texture::create_cubemap_from_rgba8_faces(
     if (faceSize == 0) {
         return false;
     }
-    if (format != VK_FORMAT_R8G8B8A8_SRGB &&
-        format != VK_FORMAT_R8G8B8A8_UNORM) {
+    if (format != vk::Format::eR8G8B8A8Srgb &&
+        format != vk::Format::eR8G8B8A8Unorm) {
         return false;
     }
 
@@ -435,7 +365,7 @@ bool Texture::create_cubemap_from_rgba8_faces(
     device_ = ctx.device();
     vma_allocator_ = ctx.vma_allocator();
     if (vma_allocator_ == nullptr) {
-        device_ = VK_NULL_HANDLE;
+        device_ = nullptr;
         return false;
     }
 
@@ -449,85 +379,86 @@ bool Texture::create_cubemap_from_rgba8_faces(
     }
     staging.upload(concat.data(), total_bytes);
 
-    // 2. Create images
-    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = faceSize;
-    imageInfo.extent.height = faceSize;
-    imageInfo.extent.depth = 1;
+    vk::ImageCreateInfo imageInfo {};
+    imageInfo.flags = vk::ImageCreateFlagBits::eCubeCompatible;
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent = vk::Extent3D { faceSize, faceSize, 1 };
     imageInfo.mipLevels = mipLevels_;
     imageInfo.arrayLayers = 6;
     imageInfo.format = format_;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imageInfo.usage = vk::ImageUsageFlagBits::eTransferSrc |
+                      vk::ImageUsageFlagBits::eTransferDst |
+                      vk::ImageUsageFlagBits::eSampled;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
-                                     &image_, &allocation_, nullptr);
-    if (result != VK_SUCCESS) {
-        device_ = VK_NULL_HANDLE;
+    VkImage vk_handle {};
+    const VkResult vma_rc = vmaCreateImage(
+        vma_allocator_,
+        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo), &allocCreate,
+        &vk_handle, &allocation_, nullptr);
+    if (static_cast<vk::Result>(vma_rc) != vk::Result::eSuccess) {
+        device_ = nullptr;
         vma_allocator_ = nullptr;
-        image_ = VK_NULL_HANDLE;
+        image_ = nullptr;
         allocation_ = nullptr;
         return false;
     }
+    image_ = vk_handle;
 
-    // 3. Create image views
-    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vk::ImageViewCreateInfo viewInfo {};
     viewInfo.image = image_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.viewType = vk::ImageViewType::eCube;
     viewInfo.format = format_;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = mipLevels_;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
-    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
-    if (result != VK_SUCCESS) {
+    vk::ImageView view {};
+    if (device_.createImageView(&viewInfo, nullptr, &view) !=
+        vk::Result::eSuccess) {
         destroy_();
         return false;
     }
+    imageView_ = view;
 
-    // 3. Copy buffer to image
-    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](vk::CommandBuffer cmd) {
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0, 6);
+                cmd, image_, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal, 0, 1, 0, 6);
 
             for (uint32_t f = 0; f < 6; ++f) {
-                VkBufferImageCopy region {};
-                region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
+                vk::BufferImageCopy region {};
+                region.bufferOffset =
+                    static_cast<vk::DeviceSize>(f * face_bytes);
                 region.bufferRowLength = 0;
                 region.bufferImageHeight = 0;
-                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.aspectMask =
+                    vk::ImageAspectFlagBits::eColor;
                 region.imageSubresource.mipLevel = 0;
                 region.imageSubresource.baseArrayLayer = f;
                 region.imageSubresource.layerCount = 1;
-                region.imageOffset = { .x = 0, .y = 0, .z = 0 };
-                region.imageExtent = { .width = faceSize,
-                                       .height = faceSize,
-                                       .depth = 1 };
+                region.imageOffset = vk::Offset3D { 0, 0, 0 };
+                region.imageExtent = vk::Extent3D { faceSize, faceSize, 1 };
 
-                vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                       &region);
+                cmd.copyBufferToImage(staging.handle(), image_,
+                                      vk::ImageLayout::eTransferDstOptimal, 1,
+                                      &region);
             }
 
             if (mipLevels_ > 1) {
                 generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
             } else {
                 gpu_image_mipmap::transition_image_subresource(
-                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
+                    cmd, image_, vk::ImageLayout::eTransferDstOptimal,
+                    vk::ImageLayout::eShaderReadOnlyOptimal, 0, 1, 0, 6);
             }
         })) {
         destroy_();
@@ -543,21 +474,19 @@ bool Texture::create_cubemap_from_rgba8_faces(
 
 bool Texture::create_cubemap_from_rgba8_mip_chain(
     const Context &ctx, const CubemapRgba8MipLevel *mip_levels,
-    size_t mip_level_count, VkQueue transferQueue, CommandPool &cmdPool,
-    const SamplerConfig &samplerConfig, VkFormat format) {
-    // 各种 Check
+    size_t mip_level_count, vk::Queue transferQueue, CommandPool &cmdPool,
+    const SamplerConfig &samplerConfig, vk::Format format) {
     if (mip_levels == nullptr || mip_level_count == 0) {
         return false;
     }
-    if (format != VK_FORMAT_R8G8B8A8_SRGB &&
-        format != VK_FORMAT_R8G8B8A8_UNORM) {
+    if (format != vk::Format::eR8G8B8A8Srgb &&
+        format != vk::Format::eR8G8B8A8Unorm) {
         return false;
     }
     const uint32_t base = mip_levels[0].face_size;
     if (base == 0) {
         return false;
     }
-    // Check mipmap 是否合理
     for (size_t i = 0; i < mip_level_count; ++i) {
         const uint32_t expected =
             std::max(1U, base >> static_cast<uint32_t>(i));
@@ -573,7 +502,6 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
 
     destroy_();
 
-    // 计算总 size
     size_t staging_total = 0;
     for (size_t i = 0; i < mip_level_count; ++i) {
         const auto fs = static_cast<size_t>(mip_levels[i].face_size);
@@ -587,7 +515,7 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
     device_ = ctx.device();
     vma_allocator_ = ctx.vma_allocator();
     if (vma_allocator_ == nullptr) {
-        device_ = VK_NULL_HANDLE;
+        device_ = nullptr;
         return false;
     }
 
@@ -611,87 +539,88 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
         staging.upload(concat.data(), staging_total);
     }
 
-    // Create image
-    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = base;
-    imageInfo.extent.height = base;
-    imageInfo.extent.depth = 1;
+    vk::ImageCreateInfo imageInfo {};
+    imageInfo.flags = vk::ImageCreateFlagBits::eCubeCompatible;
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent = vk::Extent3D { base, base, 1 };
     imageInfo.mipLevels = mipLevels_;
     imageInfo.arrayLayers = 6;
     imageInfo.format = format_;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage =
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imageInfo.usage = vk::ImageUsageFlagBits::eTransferDst |
+                      vk::ImageUsageFlagBits::eSampled;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
-                                     &image_, &allocation_, nullptr);
-    if (result != VK_SUCCESS) {
-        device_ = VK_NULL_HANDLE;
+    VkImage vk_handle {};
+    const VkResult vma_rc = vmaCreateImage(
+        vma_allocator_,
+        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo), &allocCreate,
+        &vk_handle, &allocation_, nullptr);
+    if (static_cast<vk::Result>(vma_rc) != vk::Result::eSuccess) {
+        device_ = nullptr;
         vma_allocator_ = nullptr;
-        image_ = VK_NULL_HANDLE;
+        image_ = nullptr;
         allocation_ = nullptr;
         return false;
     }
+    image_ = vk_handle;
 
-    // Create image view
-    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vk::ImageViewCreateInfo viewInfo {};
     viewInfo.image = image_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.viewType = vk::ImageViewType::eCube;
     viewInfo.format = format_;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = mipLevels_;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
-    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
-    if (result != VK_SUCCESS) {
+    vk::ImageView view {};
+    if (device_.createImageView(&viewInfo, nullptr, &view) !=
+        vk::Result::eSuccess) {
         destroy_();
         return false;
     }
+    imageView_ = view;
 
-    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](vk::CommandBuffer cmd) {
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, mipLevels_, 0, 6);
+                cmd, image_, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal, 0, mipLevels_, 0, 6);
 
-            VkDeviceSize buffer_offset = 0;
+            vk::DeviceSize buffer_offset = 0;
             for (uint32_t mip = 0; mip < mipLevels_; ++mip) {
                 const uint32_t fs = mip_levels[mip].face_size;
                 for (uint32_t f = 0; f < 6u; ++f) {
-                    VkBufferImageCopy region {};
+                    vk::BufferImageCopy region {};
                     region.bufferOffset = buffer_offset;
                     region.bufferRowLength = 0;
                     region.bufferImageHeight = 0;
                     region.imageSubresource.aspectMask =
-                        VK_IMAGE_ASPECT_COLOR_BIT;
+                        vk::ImageAspectFlagBits::eColor;
                     region.imageSubresource.mipLevel = mip;
                     region.imageSubresource.baseArrayLayer = f;
                     region.imageSubresource.layerCount = 1;
-                    region.imageOffset = { .x = 0, .y = 0, .z = 0 };
-                    region.imageExtent = { .width = fs,
-                                           .height = fs,
-                                           .depth = 1 };
+                    region.imageOffset = vk::Offset3D { 0, 0, 0 };
+                    region.imageExtent = vk::Extent3D { fs, fs, 1 };
 
-                    vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                           1, &region);
-                    buffer_offset += static_cast<VkDeviceSize>(fs) *
-                                     static_cast<VkDeviceSize>(fs) * 4u;
+                    cmd.copyBufferToImage(staging.handle(), image_,
+                                          vk::ImageLayout::eTransferDstOptimal,
+                                          1, &region);
+                    buffer_offset +=
+                        static_cast<vk::DeviceSize>(fs) *
+                        static_cast<vk::DeviceSize>(fs) * 4u;
                 }
             }
 
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, mipLevels_, 0, 6);
+                cmd, image_, vk::ImageLayout::eTransferDstOptimal,
+                vk::ImageLayout::eShaderReadOnlyOptimal, 0, mipLevels_, 0, 6);
         })) {
         destroy_();
         return false;
@@ -706,7 +635,7 @@ bool Texture::create_cubemap_from_rgba8_mip_chain(
 
 bool Texture::create_cubemap_from_rgba32f_faces(
     const Context &ctx, const void *const faces[6], uint32_t faceSize,
-    VkQueue transferQueue, CommandPool &cmdPool,
+    vk::Queue transferQueue, CommandPool &cmdPool,
     const SamplerConfig &samplerConfig) {
     for (uint32_t i = 0; i < 6; ++i) {
         if (faces[i] == nullptr) {
@@ -724,13 +653,13 @@ bool Texture::create_cubemap_from_rgba32f_faces(
         static_cast<size_t>(faceSize) * faceSize * kBytesPerTexel;
     const size_t total_bytes = face_bytes * 6U;
     mipLevels_ = gpu_image_mipmap::calculate_mip_levels(faceSize, faceSize);
-    format_ = VK_FORMAT_R32G32B32A32_SFLOAT;
+    format_ = vk::Format::eR32G32B32A32Sfloat;
     width_ = faceSize;
     height_ = faceSize;
     device_ = ctx.device();
     vma_allocator_ = ctx.vma_allocator();
     if (vma_allocator_ == nullptr) {
-        device_ = VK_NULL_HANDLE;
+        device_ = nullptr;
         return false;
     }
 
@@ -744,82 +673,86 @@ bool Texture::create_cubemap_from_rgba32f_faces(
     }
     staging.upload(concat.data(), total_bytes);
 
-    VkImageCreateInfo imageInfo { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = faceSize;
-    imageInfo.extent.height = faceSize;
-    imageInfo.extent.depth = 1;
+    vk::ImageCreateInfo imageInfo {};
+    imageInfo.flags = vk::ImageCreateFlagBits::eCubeCompatible;
+    imageInfo.imageType = vk::ImageType::e2D;
+    imageInfo.extent = vk::Extent3D { faceSize, faceSize, 1 };
     imageInfo.mipLevels = mipLevels_;
     imageInfo.arrayLayers = 6;
     imageInfo.format = format_;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = vk::ImageTiling::eOptimal;
+    imageInfo.initialLayout = vk::ImageLayout::eUndefined;
+    imageInfo.usage = vk::ImageUsageFlagBits::eTransferSrc |
+                      vk::ImageUsageFlagBits::eTransferDst |
+                      vk::ImageUsageFlagBits::eSampled;
+    imageInfo.sharingMode = vk::SharingMode::eExclusive;
+    imageInfo.samples = vk::SampleCountFlagBits::e1;
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
 
-    VkResult result = vmaCreateImage(vma_allocator_, &imageInfo, &allocCreate,
-                                     &image_, &allocation_, nullptr);
-    if (result != VK_SUCCESS) {
-        device_ = VK_NULL_HANDLE;
+    VkImage vk_handle {};
+    const VkResult vma_rc = vmaCreateImage(
+        vma_allocator_,
+        reinterpret_cast<const VkImageCreateInfo *>(&imageInfo), &allocCreate,
+        &vk_handle, &allocation_, nullptr);
+    if (static_cast<vk::Result>(vma_rc) != vk::Result::eSuccess) {
+        device_ = nullptr;
         vma_allocator_ = nullptr;
-        image_ = VK_NULL_HANDLE;
+        image_ = nullptr;
         allocation_ = nullptr;
         return false;
     }
+    image_ = vk_handle;
 
-    VkImageViewCreateInfo viewInfo { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vk::ImageViewCreateInfo viewInfo {};
     viewInfo.image = image_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    viewInfo.viewType = vk::ImageViewType::eCube;
     viewInfo.format = format_;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = mipLevels_;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
-    result = vkCreateImageView(device_, &viewInfo, nullptr, &imageView_);
-    if (result != VK_SUCCESS) {
+    vk::ImageView view {};
+    if (device_.createImageView(&viewInfo, nullptr, &view) !=
+        vk::Result::eSuccess) {
         destroy_();
         return false;
     }
+    imageView_ = view;
 
-    if (!cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
+    if (!cmdPool.submit_one_shot(transferQueue, [&](vk::CommandBuffer cmd) {
             gpu_image_mipmap::transition_image_subresource(
-                cmd, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 1, 0, 6);
+                cmd, image_, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eTransferDstOptimal, 0, 1, 0, 6);
 
             for (uint32_t f = 0; f < 6; ++f) {
-                VkBufferImageCopy region {};
-                region.bufferOffset = static_cast<VkDeviceSize>(f * face_bytes);
+                vk::BufferImageCopy region {};
+                region.bufferOffset =
+                    static_cast<vk::DeviceSize>(f * face_bytes);
                 region.bufferRowLength = 0;
                 region.bufferImageHeight = 0;
-                region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.imageSubresource.aspectMask =
+                    vk::ImageAspectFlagBits::eColor;
                 region.imageSubresource.mipLevel = 0;
                 region.imageSubresource.baseArrayLayer = f;
                 region.imageSubresource.layerCount = 1;
-                region.imageOffset = { .x = 0, .y = 0, .z = 0 };
-                region.imageExtent = { .width = faceSize,
-                                       .height = faceSize,
-                                       .depth = 1 };
+                region.imageOffset = vk::Offset3D { 0, 0, 0 };
+                region.imageExtent = vk::Extent3D { faceSize, faceSize, 1 };
 
-                vkCmdCopyBufferToImage(cmd, staging.handle(), image_,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                       &region);
+                cmd.copyBufferToImage(staging.handle(), image_,
+                                      vk::ImageLayout::eTransferDstOptimal, 1,
+                                      &region);
             }
 
             if (mipLevels_ > 1) {
                 generate_mipmaps_cube(cmd, image_, faceSize, mipLevels_);
             } else {
                 gpu_image_mipmap::transition_image_subresource(
-                    cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1, 0, 6);
+                    cmd, image_, vk::ImageLayout::eTransferDstOptimal,
+                    vk::ImageLayout::eShaderReadOnlyOptimal, 0, 1, 0, 6);
             }
         })) {
         destroy_();
@@ -833,19 +766,9 @@ bool Texture::create_cubemap_from_rgba32f_faces(
     return true;
 }
 
-/**
- * @brief 创建 Vulkan Sampler
- *
- * @details
- * - 自动 clamp anisotropy 到设备上限
- * - maxLod 默认 = mipLevels
- *
- * @note
- * anisotropyEnable 仅在 >0 时开启
- */
 bool Texture::create_sampler_(const Context &ctx, const SamplerConfig &config) {
     const auto &props = ctx.physical_device_properties();
-    VkSamplerCreateInfo samplerInfo { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    vk::SamplerCreateInfo samplerInfo {};
     samplerInfo.magFilter = config.magFilter;
     samplerInfo.minFilter = config.minFilter;
     samplerInfo.mipmapMode = config.mipmapMode;
@@ -855,52 +778,40 @@ bool Texture::create_sampler_(const Context &ctx, const SamplerConfig &config) {
     samplerInfo.maxAnisotropy =
         std::min(config.maxAnisotropy, props.limits.maxSamplerAnisotropy);
     samplerInfo.minLod = config.minLod;
-    samplerInfo.maxLod = (config.maxLod == VK_LOD_CLAMP_NONE)
+    samplerInfo.maxLod = (config.maxLod == SamplerConfig {}.maxLod)
                              ? static_cast<float>(mipLevels_)
                              : config.maxLod;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    if (samplerInfo.maxAnisotropy > 0.0F) {
-        samplerInfo.anisotropyEnable = VK_TRUE;
-    }
+    samplerInfo.borderColor = config.borderColor;
+    samplerInfo.anisotropyEnable =
+        config.maxAnisotropy > 1.0F ? vk::True : vk::False;
 
-    VkResult result =
-        vkCreateSampler(device_, &samplerInfo, nullptr, &sampler_);
-    return result == VK_SUCCESS;
+    vk::Sampler samp {};
+    if (device_.createSampler(&samplerInfo, nullptr, &samp) !=
+        vk::Result::eSuccess) {
+        return false;
+    }
+    sampler_ = samp;
+    return true;
 }
 
-/**
- * @brief 释放 GPU 资源
- *
- * @details
- * 释放顺序：
- * 1. sampler
- * 2. image view
- * 3. image（VMA）
- *
- * @note
- * 该函数被：
- * - 析构函数
- * - move assignment
- * 调用
- */
 void Texture::destroy_() {
-    if (sampler_ != VK_NULL_HANDLE) {
-        vkDestroySampler(device_, sampler_, nullptr);
-        sampler_ = VK_NULL_HANDLE;
+    if (sampler_) {
+        device_.destroySampler(sampler_);
+        sampler_ = nullptr;
     }
-    if (imageView_ != VK_NULL_HANDLE) {
-        vkDestroyImageView(device_, imageView_, nullptr);
-        imageView_ = VK_NULL_HANDLE;
+    if (imageView_) {
+        device_.destroyImageView(imageView_);
+        imageView_ = nullptr;
     }
-    if (image_ != VK_NULL_HANDLE && vma_allocator_ != nullptr &&
-        allocation_ != nullptr) {
-        vmaDestroyImage(vma_allocator_, image_, allocation_);
-        image_ = VK_NULL_HANDLE;
+    if (image_ && vma_allocator_ != nullptr && allocation_ != nullptr) {
+        vmaDestroyImage(vma_allocator_, static_cast<VkImage>(image_),
+                        allocation_);
+        image_ = nullptr;
         allocation_ = nullptr;
     }
     vma_allocator_ = nullptr;
-    device_ = VK_NULL_HANDLE;
-    format_ = VK_FORMAT_UNDEFINED;
+    device_ = nullptr;
+    format_ = vk::Format::eUndefined;
     width_ = 0;
     height_ = 0;
     mipLevels_ = 0;
@@ -914,12 +825,13 @@ Texture::Texture(Texture &&other) noexcept
       imageView_ { other.imageView_ }, sampler_ { other.sampler_ },
       format_ { other.format_ }, width_ { other.width_ },
       height_ { other.height_ }, mipLevels_ { other.mipLevels_ } {
-    other.device_ = VK_NULL_HANDLE;
+
+    other.device_ = nullptr;
     other.vma_allocator_ = nullptr;
-    other.image_ = VK_NULL_HANDLE;
+    other.image_ = nullptr;
     other.allocation_ = nullptr;
-    other.imageView_ = VK_NULL_HANDLE;
-    other.sampler_ = VK_NULL_HANDLE;
+    other.imageView_ = nullptr;
+    other.sampler_ = nullptr;
 }
 
 Texture &Texture::operator=(Texture &&other) noexcept {
@@ -937,12 +849,12 @@ Texture &Texture::operator=(Texture &&other) noexcept {
     width_ = other.width_;
     height_ = other.height_;
     mipLevels_ = other.mipLevels_;
-    other.device_ = VK_NULL_HANDLE;
+    other.device_ = nullptr;
     other.vma_allocator_ = nullptr;
-    other.image_ = VK_NULL_HANDLE;
+    other.image_ = nullptr;
     other.allocation_ = nullptr;
-    other.imageView_ = VK_NULL_HANDLE;
-    other.sampler_ = VK_NULL_HANDLE;
+    other.imageView_ = nullptr;
+    other.sampler_ = nullptr;
     return *this;
 }
 

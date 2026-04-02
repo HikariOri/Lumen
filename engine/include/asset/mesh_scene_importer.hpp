@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen::render {
 class CommandPool;

@@ -9,11 +9,11 @@
 
 namespace lumen::render {
 
-bool FrameSync::create(VkDevice device, uint32_t framesInFlight) {
+bool FrameSync::create(vk::Device device, uint32_t framesInFlight) {
     return create(device, framesInFlight, framesInFlight);
 }
 
-bool FrameSync::create(VkDevice device, uint32_t swapchainImageCount,
+bool FrameSync::create(vk::Device device, uint32_t swapchainImageCount,
                        uint32_t framesInFlight) {
     if (!imageAvailable_.empty() || !inFlightFences_.empty()) {
         destroy_();
@@ -25,30 +25,30 @@ bool FrameSync::create(VkDevice device, uint32_t swapchainImageCount,
     renderFinished_.resize(swapchainImageCount);
     inFlightFences_.resize(framesInFlight);
 
-    VkSemaphoreCreateInfo semaphoreInfo {
-        VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-    };
+    vk::SemaphoreCreateInfo semaphoreInfo {};
 
     for (uint32_t i { 0 }; i < swapchainImageCount; ++i) {
-        if (vkCreateSemaphore(device_, &semaphoreInfo, nullptr,
-                              &imageAvailable_[i]) != VK_SUCCESS) {
+        if (device_.createSemaphore(&semaphoreInfo, nullptr,
+                                    &imageAvailable_[i]) !=
+            vk::Result::eSuccess) {
             destroy_();
             return false;
         }
 
-        if (vkCreateSemaphore(device_, &semaphoreInfo, nullptr,
-                              &renderFinished_[i]) != VK_SUCCESS) {
+        if (device_.createSemaphore(&semaphoreInfo, nullptr,
+                                    &renderFinished_[i]) !=
+            vk::Result::eSuccess) {
             destroy_();
             return false;
         }
     }
 
-    VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    vk::FenceCreateInfo fenceInfo {};
+    fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
     for (uint32_t i { 0 }; i < framesInFlight; ++i) {
-        if (vkCreateFence(device_, &fenceInfo, nullptr, &inFlightFences_[i]) !=
-            VK_SUCCESS) {
+        if (device_.createFence(&fenceInfo, nullptr, &inFlightFences_[i]) !=
+            vk::Result::eSuccess) {
             LUMEN_LOG_ERROR("FrameSync Fence 创建失败");
             destroy_();
             return false;
@@ -66,58 +66,71 @@ bool FrameSync::wait_fence(uint32_t frameIndex, uint64_t timeoutNs) {
         return false;
     }
 
-    VkResult result = vkWaitForFences(device_, 1, &inFlightFences_[frameIndex],
-                                      VK_TRUE, timeoutNs);
+    const vk::Fence fence = inFlightFences_[frameIndex];
+    const vk::Result result =
+        device_.waitForFences(1, &fence, vk::True, timeoutNs);
 
-    // 有限超时用于轮询事件时，VK_TIMEOUT 是预期情况，勿刷日志。
-    return result == VK_SUCCESS;
+    return result == vk::Result::eSuccess;
 }
 
 bool FrameSync::reset_fence(uint32_t frameIndex) {
     if (frameIndex >= inFlightFences_.size()) {
         return false;
     }
-    return vkResetFences(device_, 1, &inFlightFences_[frameIndex]) ==
-           VK_SUCCESS;
+    const vk::Fence fence = inFlightFences_[frameIndex];
+    return device_.resetFences(1, &fence) == vk::Result::eSuccess;
 }
 
 bool FrameSync::recreate_in_flight_fence_signaled(uint32_t frameIndex) {
-    if (frameIndex >= inFlightFences_.size() || device_ == VK_NULL_HANDLE) {
+    if (frameIndex >= inFlightFences_.size() || !device_) {
         return false;
     }
-    vkDestroyFence(device_, inFlightFences_[frameIndex], nullptr);
-    VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    return vkCreateFence(device_, &fenceInfo, nullptr,
-                         &inFlightFences_[frameIndex]) == VK_SUCCESS;
+    device_.destroyFence(inFlightFences_[frameIndex], nullptr);
+    vk::FenceCreateInfo fenceInfo {};
+    fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+    return device_.createFence(&fenceInfo, nullptr,
+                               &inFlightFences_[frameIndex]) ==
+           vk::Result::eSuccess;
 }
 
-VkSemaphore FrameSync::image_available(uint32_t imageIndex) const {
+vk::Semaphore FrameSync::image_available(uint32_t imageIndex) const {
     return imageIndex < imageAvailable_.size() ? imageAvailable_[imageIndex]
-                                               : VK_NULL_HANDLE;
+                                               : vk::Semaphore {};
 }
 
-VkSemaphore FrameSync::render_finished(uint32_t imageIndex) const {
+vk::Semaphore FrameSync::render_finished(uint32_t imageIndex) const {
     return imageIndex < renderFinished_.size() ? renderFinished_[imageIndex]
-                                               : VK_NULL_HANDLE;
+                                               : vk::Semaphore {};
 }
 
-VkFence FrameSync::in_flight_fence(uint32_t frameIndex) const {
+vk::Fence FrameSync::in_flight_fence(uint32_t frameIndex) const {
     return frameIndex < inFlightFences_.size() ? inFlightFences_[frameIndex]
-                                               : VK_NULL_HANDLE;
+                                               : vk::Fence {};
 }
 
 void FrameSync::destroy_() {
+    if (!device_) {
+        imageAvailable_.clear();
+        renderFinished_.clear();
+        inFlightFences_.clear();
+        return;
+    }
     for (auto s : imageAvailable_) {
-        vkDestroySemaphore(device_, s, nullptr);
+        if (s) {
+            device_.destroySemaphore(s, nullptr);
+        }
     }
 
     for (auto s : renderFinished_) {
-        vkDestroySemaphore(device_, s, nullptr);
+        if (s) {
+            device_.destroySemaphore(s, nullptr);
+        }
     }
 
     for (auto f : inFlightFences_) {
-        vkDestroyFence(device_, f, nullptr);
+        if (f) {
+            device_.destroyFence(f, nullptr);
+        }
     }
 
     imageAvailable_.clear();
@@ -132,7 +145,7 @@ FrameSync::FrameSync(FrameSync &&other) noexcept
       imageAvailable_ { std::move(other.imageAvailable_) },
       renderFinished_ { std::move(other.renderFinished_) },
       inFlightFences_ { std::move(other.inFlightFences_) } {
-    other.device_ = VK_NULL_HANDLE;
+    other.device_ = nullptr;
 }
 
 FrameSync &FrameSync::operator=(FrameSync &&other) noexcept {
@@ -147,7 +160,7 @@ FrameSync &FrameSync::operator=(FrameSync &&other) noexcept {
     renderFinished_ = std::move(other.renderFinished_);
     inFlightFences_ = std::move(other.inFlightFences_);
 
-    other.device_ = VK_NULL_HANDLE;
+    other.device_ = nullptr;
 
     return *this;
 }

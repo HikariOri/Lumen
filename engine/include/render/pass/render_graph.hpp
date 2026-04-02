@@ -19,8 +19,8 @@
  *
  * 3. Execute：
  *    - 自动插入：
- *      - VkImageLayout 转换
- *      - Pipeline Barrier
+ *      - `vk::ImageLayout` 转换
+ *      - Pipeline Barrier（`vk::CommandBuffer::pipelineBarrier`）
  *    - 按顺序执行 Pass
  *
  * ---
@@ -42,7 +42,7 @@
 #include <string>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/resource/image.hpp"
 #include "render/swapchain.hpp"
@@ -92,20 +92,20 @@ struct RGImage {
     RGImageType type { RGImageType::Texture };
 
     /// Texture 模式使用
-    VkImage image { VK_NULL_HANDLE };
-    VkImageView view { VK_NULL_HANDLE };
+    vk::Image image {};
+    vk::ImageView view {};
 
-    VkFormat format { VK_FORMAT_UNDEFINED };
-    VkExtent2D extent { 0, 0 };
+    vk::Format format { vk::Format::eUndefined };
+    vk::Extent2D extent { 0, 0 };
 
     /// 是否为深度资源
     bool isDepth { false };
 
     /// 当前 Layout（仅 Texture）
-    VkImageLayout currentLayout { VK_IMAGE_LAYOUT_UNDEFINED };
+    vk::ImageLayout currentLayout { vk::ImageLayout::eUndefined };
 
     /// Swapchain：每张图的 Layout
-    std::vector<VkImageLayout> perIndexLayouts_;
+    std::vector<vk::ImageLayout> perIndexLayouts_;
 
     /// Swapchain 引用（非 owning）
     const Swapchain *swapchain_ { nullptr };
@@ -121,24 +121,24 @@ struct RGImage {
     static RGImage from_swapchain(const Swapchain &swapchain);
 
     /**
-     * @brief 获取 VkImage
+     * @brief 获取图像句柄
      */
-    [[nodiscard]] VkImage image_at(uint32_t index = 0) const;
+    [[nodiscard]] vk::Image image_at(uint32_t index = 0) const;
 
     /**
-     * @brief 获取 VkImageView
+     * @brief 获取图像视图
      */
-    [[nodiscard]] VkImageView view_at(uint32_t index = 0) const;
+    [[nodiscard]] vk::ImageView view_at(uint32_t index = 0) const;
 
     /**
      * @brief 获取当前 Layout
      */
-    [[nodiscard]] VkImageLayout layout_at(uint32_t index) const;
+    [[nodiscard]] vk::ImageLayout layout_at(uint32_t index) const;
 
     /**
      * @brief 设置 Layout
      */
-    void set_layout(uint32_t index, VkImageLayout layout);
+    void set_layout(uint32_t index, vk::ImageLayout layout);
 
     /**
      * @brief 是否为 Swapchain 资源
@@ -161,11 +161,11 @@ struct RGImage {
  * @typedef RGPassExecuteFn
  * @brief Pass 执行函数
  *
- * @param cmd Vulkan 命令缓冲
+ * @param cmd 命令缓冲（Vulkan-Hpp）
  * @param swapchainImageIndex 当前帧索引
  */
 using RGPassExecuteFn =
-    std::function<void(VkCommandBuffer cmd, uint32_t swapchainImageIndex)>;
+    std::function<void(vk::CommandBuffer cmd, uint32_t swapchainImageIndex)>;
 
 /**
  * @struct RGPass
@@ -265,7 +265,7 @@ public:
      * - compile 过期会自动重新编译
      * - compile 失败不会执行任何 Pass
      */
-    void execute(VkCommandBuffer cmd, uint32_t swapchainImageIndex = 0);
+    void execute(vk::CommandBuffer cmd, uint32_t swapchainImageIndex = 0);
 
     /**
      * @brief 清空所有 Pass
@@ -281,14 +281,14 @@ private:
     /**
      * @brief Layout 转换
      */
-    void transition_image_(VkCommandBuffer cmd, RGImage *img,
-                           VkImageLayout newLayout, uint32_t index);
+    void transition_image_(vk::CommandBuffer cmd, RGImage *img,
+                           vk::ImageLayout newLayout, uint32_t index);
 
     /**
      * @brief 插入 Pipeline Barrier
      */
-    void pipeline_barrier_(VkCommandBuffer cmd, RGImage *img,
-                           VkImageLayout oldLayout, VkImageLayout newLayout,
+    void pipeline_barrier_(vk::CommandBuffer cmd, RGImage *img,
+                           vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
                            uint32_t index);
 
     /**
@@ -298,7 +298,6 @@ private:
      */
     [[nodiscard]] std::vector<size_t> topo_sort_() const;
 
-private:
     const Context *ctx_ { nullptr };
 
     std::vector<RGPass> passes_;

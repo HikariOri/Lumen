@@ -31,21 +31,22 @@ constexpr std::uint32_t kBytesPerRgba8Pixel = 4U;
 std::vector<DescriptorBinding> pbr_frame_ibl_descriptor_bindings() {
     return {
         { .binding = 0,
-          .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .type = vk::DescriptorType::eUniformBuffer,
           .count = 1,
-          .stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eVertex |
+                    vk::ShaderStageFlagBits::eFragment },
         { .binding = 1,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 2,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 3,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
     };
 }
 
@@ -55,29 +56,29 @@ std::vector<DescriptorBinding> pbr_frame_ibl_descriptor_bindings() {
 std::vector<DescriptorBinding> pbr_material_descriptor_bindings() {
     return {
         { .binding = 0,
-          .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .type = vk::DescriptorType::eUniformBuffer,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 1,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 2,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 3,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 4,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
         { .binding = 5,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
     };
 }
 
@@ -86,10 +87,10 @@ std::vector<DescriptorBinding> pbr_material_descriptor_bindings() {
  */
 std::vector<DescriptorBinding> pbr_object_descriptor_bindings() {
     return { { .binding = 0,
-               .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+               .type = vk::DescriptorType::eUniformBufferDynamic,
                .count = 1,
-               .stages = VK_SHADER_STAGE_VERTEX_BIT |
-                         VK_SHADER_STAGE_FRAGMENT_BIT } };
+               .stages = vk::ShaderStageFlagBits::eVertex |
+                         vk::ShaderStageFlagBits::eFragment } };
 }
 
 /**
@@ -97,23 +98,23 @@ std::vector<DescriptorBinding> pbr_object_descriptor_bindings() {
  */
 std::vector<DescriptorBinding> pbr_light_descriptor_bindings() {
     return { { .binding = 0,
-               .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+               .type = vk::DescriptorType::eUniformBuffer,
                .count = 1,
-               .stages = VK_SHADER_STAGE_FRAGMENT_BIT } };
+               .stages = vk::ShaderStageFlagBits::eFragment } };
 }
 
 /**
  * @brief 实现 @ref write_pbr_frame_ibl_descriptor_set
  */
 void write_pbr_frame_ibl_descriptor_set(
-    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer frameUbo,
+    vk::Device device, vk::DescriptorSet descriptorSet, vk::Buffer frameUbo,
     std::size_t frameUboRange, const Texture &irradianceCube,
     const Texture &prefilterCube, const Texture &brdfLut) {
 
     write_descriptor_set(
         device, descriptorSet,
         { { .binding = 0,
-            .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .type = vk::DescriptorType::eUniformBuffer,
             .buffer = frameUbo,
             .offset = 0,
             .range = frameUboRange } },
@@ -135,7 +136,7 @@ void write_pbr_frame_ibl_descriptor_set(
  * @brief 实现 @ref write_pbr_material_descriptor_set
  */
 void write_pbr_material_descriptor_set(
-    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer materialUbo,
+    vk::Device device, vk::DescriptorSet descriptorSet, vk::Buffer materialUbo,
     std::size_t materialUboRange, const Material &material,
     const PbrPlaceholderTextures &placeholders) {
 
@@ -163,7 +164,7 @@ void write_pbr_material_descriptor_set(
 
     write_descriptor_set(device, descriptorSet,
                          { { .binding = 0,
-                             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                             .type = vk::DescriptorType::eUniformBuffer,
                              .buffer = materialUbo,
                              .offset = 0,
                              .range = materialUboRange } },
@@ -192,13 +193,13 @@ void write_pbr_material_descriptor_set(
 /**
  * @brief 实现 @ref write_pbr_object_descriptor_set_dynamic
  */
-void write_pbr_object_descriptor_set_dynamic(VkDevice device,
-                                             VkDescriptorSet descriptorSet,
-                                             VkBuffer objectUbo,
+void write_pbr_object_descriptor_set_dynamic(vk::Device device,
+                                             vk::DescriptorSet descriptorSet,
+                                             vk::Buffer objectUbo,
                                              std::size_t perObjectRange) {
     write_descriptor_set(device, descriptorSet,
                          { { .binding = 0,
-                             .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                             .type = vk::DescriptorType::eUniformBufferDynamic,
                              .buffer = objectUbo,
                              .offset = 0,
                              .range = perObjectRange } },
@@ -208,12 +209,12 @@ void write_pbr_object_descriptor_set_dynamic(VkDevice device,
 /**
  * @brief 实现 @ref write_pbr_light_descriptor_set
  */
-void write_pbr_light_descriptor_set(VkDevice device,
-                                    VkDescriptorSet descriptorSet,
-                                    VkBuffer lightUbo,
+void write_pbr_light_descriptor_set(vk::Device device,
+                                    vk::DescriptorSet descriptorSet,
+                                    vk::Buffer lightUbo,
                                     std::size_t lightUboRange) {
     write_descriptor_buffer(device, descriptorSet, 0,
-                            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, lightUbo, 0,
+                            vk::DescriptorType::eUniformBuffer, lightUbo, 0,
                             lightUboRange);
 }
 
@@ -222,7 +223,7 @@ void write_pbr_light_descriptor_set(VkDevice device,
  */
 bool create_metallic_roughness_texture_from_grayscale_files(
     Texture &outTexture, const Context &ctx, const char *metallicPath,
-    const char *roughnessPath, VkQueue transferQueue,
+    const char *roughnessPath, vk::Queue transferQueue,
     CommandPool &commandPool) {
 
     int metalWidth = 0;
@@ -284,7 +285,7 @@ bool create_metallic_roughness_texture_from_grayscale_files(
         ctx, outRgba.data(), outRgba.size(),
         static_cast<std::uint32_t>(outWidth),
         static_cast<std::uint32_t>(outHeight), transferQueue, commandPool,
-        VK_FORMAT_R8G8B8A8_UNORM, {}, true);
+        vk::Format::eR8G8B8A8Unorm, {}, true);
 }
 
 } // namespace lumen::render

@@ -36,7 +36,7 @@ constexpr uint32_t kEnvFace { 512 };
 constexpr uint32_t kIrradianceFace { 32 };
 constexpr uint32_t kPrefilterFace { 128 };
 constexpr uint32_t kBrdfLutSize { 512 };
-constexpr VkFormat kIblFormat { VK_FORMAT_R32G32B32A32_SFLOAT };
+constexpr vk::Format kIblFormat { vk::Format::eR32G32B32A32Sfloat };
 
 // 单位立方体 36 顶点（位置），与 LearnOpenGL 天空盒一致
 constexpr std::array<float, 36U * 3U> kCubePositions { {
@@ -134,7 +134,8 @@ void barrier_color_attachment_to_shader_read(
     uint32_t mip_count, uint32_t base_layer, uint32_t layer_count) {
     VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     b.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    b.newLayout =
+        static_cast<VkImageLayout>(vk::ImageLayout::eShaderReadOnlyOptimal);
     b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     b.image = img;
@@ -154,20 +155,21 @@ void barrier_color_attachment_to_shader_read(
 } // namespace
 
 bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
-              VkQueue queue, const char *hdr_path, IblTextures &out,
+              vk::Queue queue, const char *hdr_path, IblTextures &out,
               std::string &err) {
-    VkDevice dev = ctx.device();
+    const vk::Device dev = ctx.device();
+    const VkDevice dev_vk = static_cast<VkDevice>(dev);
     const auto proj = capture_projection_vk();
     const auto views = capture_views();
 
     lumen::render::SamplerConfig linearClamp {};
-    linearClamp.minFilter = VK_FILTER_LINEAR;
-    linearClamp.magFilter = VK_FILTER_LINEAR;
-    linearClamp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    linearClamp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    linearClamp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    linearClamp.minFilter = vk::Filter::eLinear;
+    linearClamp.magFilter = vk::Filter::eLinear;
+    linearClamp.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    linearClamp.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    linearClamp.addressModeW = vk::SamplerAddressMode::eClampToEdge;
     linearClamp.maxAnisotropy = 1.0F;
-    linearClamp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    linearClamp.mipmapMode = vk::SamplerMipmapMode::eLinear;
     linearClamp.maxLod = 32.0F;
 
     std::string load_err;
@@ -185,8 +187,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     irrInfo.arrayLayers = 6;
     irrInfo.format = kIblFormat;
     irrInfo.type = lumen::render::ImageType::TexCube;
-    irrInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                    VK_IMAGE_USAGE_SAMPLED_BIT;
+    irrInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
+                    vk::ImageUsageFlagBits::eSampled;
     irrInfo.generateMipmaps = false;
     if (!out.irradiance.create(ctx, irrInfo, linearClamp)) {
         err = "创建 Irradiance 目标失败";
@@ -204,8 +206,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     preInfo.arrayLayers = 6;
     preInfo.format = kIblFormat;
     preInfo.type = lumen::render::ImageType::TexCube;
-    preInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                    VK_IMAGE_USAGE_SAMPLED_BIT;
+    preInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
+                    vk::ImageUsageFlagBits::eSampled;
     preInfo.generateMipmaps = false;
     if (!out.prefilter.create(ctx, preInfo, linearClamp)) {
         err = "创建 Prefilter 目标失败";
@@ -219,8 +221,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     lutInfo.arrayLayers = 1;
     lutInfo.format = kIblFormat;
     lutInfo.type = lumen::render::ImageType::Tex2D;
-    lutInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                    VK_IMAGE_USAGE_SAMPLED_BIT;
+    lutInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
+                    vk::ImageUsageFlagBits::eSampled;
     lutInfo.generateMipmaps = false;
     if (!out.brdf_lut.create(ctx, lutInfo, linearClamp)) {
         err = "创建 BRDF LUT 失败";
@@ -230,10 +232,10 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     lumen::render::RenderPassConfig rpc {};
     rpc.useDepth = false;
     rpc.colorAttachment.format = kIblFormat;
-    rpc.colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    rpc.colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    rpc.colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    rpc.colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
     rpc.colorAttachment.finalLayout =
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        vk::ImageLayout::eColorAttachmentOptimal;
 
     lumen::render::RenderPass rp;
     if (!rp.create(dev, rpc)) {
@@ -269,9 +271,9 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     lumen::render::DescriptorSetLayout dsl_env;
     std::vector<lumen::render::DescriptorBinding> bind_env = {
         { .binding = 0,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
     };
     if (!dsl_env.create(ctx, bind_env)) {
         err = "DescriptorSetLayout 创建失败";
@@ -280,17 +282,17 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
 
     lumen::render::DescriptorPool dpool;
     if (!dpool.create(ctx,
-                      { { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                      { { .type = vk::DescriptorType::eCombinedImageSampler,
                           .count = 4 } },
                       4)) {
         err = "DescriptorPool 创建失败";
         return false;
     }
 
-    VkDescriptorSet ds_irr { VK_NULL_HANDLE };
-    VkDescriptorSet ds_pre { VK_NULL_HANDLE };
-    if (!dpool.allocate(dev, dsl_env.handle(), ds_irr) ||
-        !dpool.allocate(dev, dsl_env.handle(), ds_pre)) {
+    vk::DescriptorSet ds_irr {};
+    vk::DescriptorSet ds_pre {};
+    if (!dpool.allocate(ctx.device(), dsl_env.handle(), ds_irr) ||
+        !dpool.allocate(ctx.device(), dsl_env.handle(), ds_pre)) {
         err = "DescriptorSet 分配失败";
         return false;
     }
@@ -308,22 +310,21 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
             .sampler = out.environment.sampler(),
             .imageLayout = out.environment.descriptor_layout() } });
 
-    VkPushConstantRange pc_irr {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = sizeof(glm::mat4),
-    };
+    vk::PushConstantRange pc_irr {};
+    pc_irr.stageFlags = vk::ShaderStageFlagBits::eVertex;
+    pc_irr.offset = 0;
+    pc_irr.size = sizeof(glm::mat4);
     lumen::render::PipelineLayout pl_irr;
     if (!pl_irr.create(ctx, { dsl_env.handle() }, { pc_irr })) {
         err = "PipelineLayout (irr) 失败";
         return false;
     }
 
-    VkPushConstantRange pc_pre {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset = 0,
-        .size = sizeof(glm::mat4) + sizeof(float) * 4,
-    };
+    vk::PushConstantRange pc_pre {};
+    pc_pre.stageFlags = vk::ShaderStageFlagBits::eVertex |
+                        vk::ShaderStageFlagBits::eFragment;
+    pc_pre.offset = 0;
+    pc_pre.size = sizeof(glm::mat4) + sizeof(float) * 4;
     lumen::render::PipelineLayout pl_pre;
     if (!pl_pre.create(ctx, { dsl_env.handle() }, { pc_pre })) {
         err = "PipelineLayout (pre) 失败";
@@ -337,25 +338,25 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     }
 
     lumen::render::GraphicsPipelineConfig cfg_irr {};
-    cfg_irr.shaderStages.push_back({ sm_cube_vs.handle(),
-                                     VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    cfg_irr.shaderStages.push_back({ sm_irr_fs.handle(),
-                                     VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    cfg_irr.shaderStages.push_back(
+        { sm_cube_vs.handle(), vk::ShaderStageFlagBits::eVertex, "main" });
+    cfg_irr.shaderStages.push_back(
+        { sm_irr_fs.handle(), vk::ShaderStageFlagBits::eFragment, "main" });
     cfg_irr.vertexBindings.push_back(
         { .binding = 0,
           .stride = sizeof(float) * 3,
-          .inputRate = lumen::render::VertexInputRate::PerVertex });
+          .inputRate = vk::VertexInputRate::eVertex });
     cfg_irr.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .format = lumen::render::VertexAttributeFormat::F32Vec3,
+          .format = vk::Format::eR32G32B32Sfloat,
           .offset = 0 });
     cfg_irr.depthTest = false;
     cfg_irr.depthWrite = false;
     // 烘焙使用负高度视口（与 CPU 环境 cubemap 面内上下一致）时，视口空间绕序会反转；
     // 若仍用 FRONT_BIT（原“内看天空盒”设定），可见面会被全部剔除 → 整面黑。改用 BACK_BIT。
-    cfg_irr.cullMode = VK_CULL_MODE_BACK_BIT;
-    cfg_irr.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    cfg_irr.cullMode = vk::CullModeFlagBits::eBack;
+    cfg_irr.frontFace = vk::FrontFace::eClockwise;
 
     lumen::render::GraphicsPipeline pipe_irr;
     if (!pipe_irr.create(ctx, pl_irr, rp, 0, cfg_irr)) {
@@ -365,10 +366,10 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
 
     lumen::render::GraphicsPipelineConfig cfg_pre = cfg_irr;
     cfg_pre.shaderStages.clear();
-    cfg_pre.shaderStages.push_back({ sm_pre_vs.handle(),
-                                     VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    cfg_pre.shaderStages.push_back({ sm_pre_fs.handle(),
-                                     VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    cfg_pre.shaderStages.push_back(
+        { sm_pre_vs.handle(), vk::ShaderStageFlagBits::eVertex, "main" });
+    cfg_pre.shaderStages.push_back(
+        { sm_pre_fs.handle(), vk::ShaderStageFlagBits::eFragment, "main" });
 
     lumen::render::GraphicsPipeline pipe_pre;
     if (!pipe_pre.create(ctx, pl_pre, rp, 0, cfg_pre)) {
@@ -377,13 +378,13 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     }
 
     lumen::render::GraphicsPipelineConfig cfg_brdf {};
-    cfg_brdf.shaderStages.push_back({ sm_brdf_vs.handle(),
-                                      VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    cfg_brdf.shaderStages.push_back({ sm_brdf_fs.handle(),
-                                      VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    cfg_brdf.shaderStages.push_back(
+        { sm_brdf_vs.handle(), vk::ShaderStageFlagBits::eVertex, "main" });
+    cfg_brdf.shaderStages.push_back(
+        { sm_brdf_fs.handle(), vk::ShaderStageFlagBits::eFragment, "main" });
     cfg_brdf.depthTest = false;
     cfg_brdf.depthWrite = false;
-    cfg_brdf.cullMode = VK_CULL_MODE_NONE;
+    cfg_brdf.cullMode = vk::CullModeFlagBits::eNone;
 
     lumen::render::GraphicsPipeline pipe_brdf;
     if (!pipe_brdf.create(ctx, pl_brdf, rp, 0, cfg_brdf)) {
@@ -400,14 +401,16 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     }
 
     auto buffers = cmdPool.allocate(1);
-    if (buffers.empty() || !buffers[0].is_valid()) {
-        err = "CommandBuffer 分配失败";
+    if (buffers.empty() || !buffers[0]) {
+        err = "命令缓冲分配失败";
         return false;
     }
-    lumen::render::CommandBuffer cmd = std::move(buffers[0]);
+    vk::CommandBuffer cmd = buffers[0];
 
-    if (!cmd.begin()) {
-        err = "CommandBuffer::begin 失败";
+    vk::CommandBufferBeginInfo beginInfo {};
+    beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+    if (cmd.begin(&beginInfo) != vk::Result::eSuccess) {
+        err = "vk::CommandBuffer::begin 失败";
         return false;
     }
 
@@ -419,17 +422,17 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     auto destroy_transient_attachments = [&]() {
         for (VkFramebuffer f : transient_fbs) {
             if (f != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(dev, f, nullptr);
+                vkDestroyFramebuffer(dev_vk, f, nullptr);
             }
         }
         transient_fbs.clear();
         for (VkImageView v : transient_views) {
-            destroy_view(dev, v);
+            destroy_view(dev_vk, v);
         }
         transient_views.clear();
     };
 
-    VkCommandBuffer cb = cmd.handle();
+    VkCommandBuffer cb = static_cast<VkCommandBuffer>(cmd);
 
     barrier_undefined_to_color_attachment(cb, out.irradiance.image(), 0, 1, 0,
                                           6);
@@ -438,9 +441,9 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     clear.color = { { 0.0F, 0.0F, 0.0F, 1.0F } };
 
     for (uint32_t face = 0; face < 6; ++face) {
-        VkImageView att =
-            create_face_mip_view(dev, out.irradiance.image(), kIblFormat, face,
-                                 0);
+        VkImageView att = create_face_mip_view(
+            dev_vk, out.irradiance.image(), static_cast<VkFormat>(kIblFormat),
+            face, 0);
         if (att == VK_NULL_HANDLE) {
             err = "Irradiance ImageView 失败";
             return false;
@@ -453,8 +456,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
         fbi.width = kIrradianceFace;
         fbi.height = kIrradianceFace;
         fbi.layers = 1;
-        if (vkCreateFramebuffer(dev, &fbi, nullptr, &fb) != VK_SUCCESS) {
-            destroy_view(dev, att);
+        if (vkCreateFramebuffer(dev_vk, &fbi, nullptr, &fb) != VK_SUCCESS) {
+            destroy_view(dev_vk, att);
             err = "Framebuffer 创建失败";
             return false;
         }
@@ -474,8 +477,10 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pl_irr.handle(), 0, 1, &ds, 0, nullptr);
         const glm::mat4 vp = proj * views[face];
-        vkCmdPushConstants(cb, pl_irr.handle(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(glm::mat4), glm::value_ptr(vp));
+        vkCmdPushConstants(
+            cb, pl_irr.handle(),
+            static_cast<VkShaderStageFlags>(vk::ShaderStageFlagBits::eVertex), 0,
+            sizeof(glm::mat4), glm::value_ptr(vp));
         const float fs = static_cast<float>(kIrradianceFace);
         // 负高度视口：与 CPU HDR→Cubemap（cubemap_file_loader 面内 v 递增方向）对齐，
         // 否则 Irradiance / Prefilter 相对 Environment 会上下颠倒。
@@ -508,7 +513,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
                       static_cast<float>(prefilter_mips - 1);
         for (uint32_t face = 0; face < 6; ++face) {
             VkImageView att = create_face_mip_view(
-                dev, out.prefilter.image(), kIblFormat, face, mip);
+                dev_vk, out.prefilter.image(), static_cast<VkFormat>(kIblFormat),
+                face, mip);
             if (att == VK_NULL_HANDLE) {
                 err = "Prefilter ImageView 失败";
                 return false;
@@ -521,8 +527,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
             fbi.width = dim;
             fbi.height = dim;
             fbi.layers = 1;
-            if (vkCreateFramebuffer(dev, &fbi, nullptr, &fb) != VK_SUCCESS) {
-                destroy_view(dev, att);
+            if (vkCreateFramebuffer(dev_vk, &fbi, nullptr, &fb) != VK_SUCCESS) {
+                destroy_view(dev_vk, att);
                 err = "Prefilter Framebuffer 失败";
                 return false;
             }
@@ -578,11 +584,11 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
         VkImageViewCreateInfo vi { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
         vi.image = out.brdf_lut.image();
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = kIblFormat;
+        vi.format = static_cast<VkFormat>(kIblFormat);
         vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         vi.subresourceRange.levelCount = 1;
         vi.subresourceRange.layerCount = 1;
-        if (vkCreateImageView(dev, &vi, nullptr, &att) != VK_SUCCESS) {
+        if (vkCreateImageView(dev_vk, &vi, nullptr, &att) != VK_SUCCESS) {
             err = "BRDF ImageView 失败";
             return false;
         }
@@ -594,8 +600,8 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
         fbi.width = kBrdfLutSize;
         fbi.height = kBrdfLutSize;
         fbi.layers = 1;
-        if (vkCreateFramebuffer(dev, &fbi, nullptr, &fb) != VK_SUCCESS) {
-            destroy_view(dev, att);
+        if (vkCreateFramebuffer(dev_vk, &fbi, nullptr, &fb) != VK_SUCCESS) {
+            destroy_view(dev_vk, att);
             err = "BRDF Framebuffer 失败";
             return false;
         }
@@ -631,38 +637,32 @@ bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmdPool,
     barrier_color_attachment_to_shader_read(cb, out.brdf_lut.image(), 0, 1, 0,
                                             1);
 
-    if (!cmd.end()) {
-        destroy_transient_attachments();
-        err = "CommandBuffer::end 失败";
-        return false;
-    }
+    static_cast<void>(cmd.end());
 
     VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
     sub.commandBufferCount = 1;
-    VkCommandBuffer cbc = cmd.handle();
+    VkCommandBuffer cbc = static_cast<VkCommandBuffer>(cmd);
     sub.pCommandBuffers = &cbc;
 
     VkFence fence { VK_NULL_HANDLE };
     VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    if (vkCreateFence(dev, &fi, nullptr, &fence) != VK_SUCCESS) {
+    if (vkCreateFence(dev_vk, &fi, nullptr, &fence) != VK_SUCCESS) {
         destroy_transient_attachments();
         err = "Fence 创建失败";
         return false;
     }
     if (vkQueueSubmit(queue, 1, &sub, fence) != VK_SUCCESS) {
-        vkDestroyFence(dev, fence, nullptr);
+        vkDestroyFence(dev_vk, fence, nullptr);
         destroy_transient_attachments();
         err = "IBL vkQueueSubmit 失败";
         return false;
     }
-    vkWaitForFences(dev, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkDestroyFence(dev, fence, nullptr);
+    vkWaitForFences(dev_vk, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(dev_vk, fence, nullptr);
 
     destroy_transient_attachments();
 
-    std::vector<lumen::render::CommandBuffer> free_list;
-    free_list.push_back(std::move(cmd));
-    cmdPool.free(free_list);
+    cmdPool.free(std::vector<vk::CommandBuffer> { cmd });
 
     LUMEN_APP_LOG_INFO("IBL 烘焙完成（Irradiance / Prefilter / BRDF LUT）");
     return true;

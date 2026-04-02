@@ -67,8 +67,8 @@ void ImGuiLayer::attach(platform::EventPump &pump) {
 
 void ImGuiLayer::begin_frame() { imgui_backend_new_frame(); }
 
-void ImGuiLayer::end_frame(VkCommandBuffer cmd) const {
-    imgui_backend_render(cmd);
+void ImGuiLayer::end_frame(vk::CommandBuffer cmd) const {
+    imgui_backend_render(static_cast<VkCommandBuffer>(cmd));
 }
 
 void ImGuiLayer::on_event(platform::DispatchableEvent &de) {

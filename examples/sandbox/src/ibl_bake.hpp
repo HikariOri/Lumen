@@ -9,7 +9,7 @@
 #include "render/resource/texture.hpp"
 
 #include <string>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen::render {
 class Context;
@@ -31,7 +31,7 @@ struct IblTextures {
  * LUT）
  */
 bool bake_ibl(lumen::render::Context &ctx, lumen::render::CommandPool &cmd_pool,
-              VkQueue queue, const char *hdr_path, IblTextures &out,
+              vk::Queue queue, const char *hdr_path, IblTextures &out,
               std::string &err);
 
 } // namespace pbr

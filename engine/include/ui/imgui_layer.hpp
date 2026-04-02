@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace platform {
@@ -55,7 +55,7 @@ public:
     /**
      * @brief Hazel `ImGuiLayer::End`：须在 swapchain 的 RenderPass **内**调用
      */
-    void end_frame(VkCommandBuffer cmd) const;
+    void end_frame(vk::CommandBuffer cmd) const;
 
     /**
      * @brief 对应 Hazel `m_BlockEvents`：为 false 时不根据 `WantCapture*` 写 `handled`

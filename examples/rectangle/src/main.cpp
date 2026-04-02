@@ -91,7 +91,7 @@ static int run_triangle() {
 
     lumen::render::Framebuffer framebuffers;
     if (!framebuffers.create(ctx.device(), renderPass.handle(), swapchain,
-                             VK_NULL_HANDLE)) {
+                             vk::ImageView {})) {
         LUMEN_APP_LOG_ERROR("Framebuffer 创建失败");
         return -1;
     }
@@ -150,28 +150,28 @@ static int run_triangle() {
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
     pipeConfig.shaderStages.push_back({ .module = vertShader.handle(),
-                                        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                                        .stage = vk::ShaderStageFlagBits::eVertex,
                                         .entryPoint = "main" });
     pipeConfig.shaderStages.push_back({ .module = fragShader.handle(),
-                                        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        .stage = vk::ShaderStageFlagBits::eFragment,
                                         .entryPoint = "main" });
     pipeConfig.vertexBindings.push_back(
         { .binding = 0,
           .stride = sizeof(Vertex),
-          .inputRate = lumen::render::VertexInputRate::PerVertex });
+          .inputRate = vk::VertexInputRate::eVertex });
     pipeConfig.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .format = lumen::render::VertexAttributeFormat::F32Vec2,
+          .format = vk::Format::eR32G32Sfloat,
           .offset = offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { .location = 1,
           .binding = 0,
-          .format = lumen::render::VertexAttributeFormat::F32Vec4,
+          .format = vk::Format::eR32G32B32A32Sfloat,
           .offset = offsetof(Vertex, color) });
     pipeConfig.depthTest = false;
     pipeConfig.depthWrite = false;
-    pipeConfig.cullMode = VK_CULL_MODE_NONE;
+    pipeConfig.cullMode = vk::CullModeFlagBits::eNone;
 
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
@@ -238,7 +238,7 @@ static int run_triangle() {
             lumen::render::recreate_swapchain_resources(
                 ctx, swapchain, framebuffers, frameSync, renderPass,
                 static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight),
-                kMaxFramesInFlight, VK_NULL_HANDLE);
+                kMaxFramesInFlight, vk::ImageView {});
             needRecreateSwapchain = false;
             continue;
         }
@@ -255,96 +255,93 @@ static int run_triangle() {
         }
 
         const uint32_t imageIndex = swapchain.acquire_next_image(
-            frameSync.image_available(currentFrame), VK_NULL_HANDLE,
+            frameSync.image_available(currentFrame), {},
             kAcquireTimeoutNs);
         if (imageIndex == UINT32_MAX) {
             continue;
         }
 
         auto &cmdBuf = cmdBuffers[currentFrame];
-        if (!cmdBuf.reset()) {
+        cmdBuf.reset({});
+
+        vk::CommandBufferBeginInfo frameBegin {};
+        frameBegin.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+        if (cmdBuf.begin(&frameBegin) != vk::Result::eSuccess) {
             continue;
         }
 
-        if (!cmdBuf.begin()) {
-            continue;
-        }
+        std::array<vk::ClearValue, 1> clearValues {};
+        clearValues[0].color.float32[0] = 0.06F;
+        clearValues[0].color.float32[1] = 0.07F;
+        clearValues[0].color.float32[2] = 0.10F;
+        clearValues[0].color.float32[3] = 1.0F;
 
-        VkRenderPassBeginInfo rpBegin {
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-        };
+        vk::RenderPassBeginInfo rpBegin {};
         rpBegin.renderPass = renderPass.handle();
         rpBegin.framebuffer = framebuffers.get(imageIndex);
-        rpBegin.renderArea.offset = { .x = 0, .y = 0 };
+        rpBegin.renderArea.offset = vk::Offset2D { 0, 0 };
         rpBegin.renderArea.extent = swapchain.extent();
-        VkClearValue clearColor {};
-        clearColor.color = { { 0.06F, 0.07F, 0.10F, 1.0F } };
-        rpBegin.clearValueCount = 1;
-        rpBegin.pClearValues = &clearColor;
+        rpBegin.clearValueCount =
+            static_cast<uint32_t>(clearValues.size());
+        rpBegin.pClearValues = clearValues.data();
 
-        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        cmdBuf.beginRenderPass(rpBegin, vk::SubpassContents::eInline);
 
-        VkViewport viewport {};
-        viewport.x = 0.0F;
-        viewport.y = 0.0F;
-        viewport.width = static_cast<float>(swapchain.extent().width);
-        viewport.height = static_cast<float>(swapchain.extent().height);
-        viewport.minDepth = 0.0F;
-        viewport.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+        const vk::Viewport viewport {
+            0.0F, 0.0F,
+            static_cast<float>(swapchain.extent().width),
+            static_cast<float>(swapchain.extent().height),
+            0.0F, 1.0F};
+        cmdBuf.setViewport(0, { viewport });
 
-        VkRect2D scissor {};
-        scissor.offset = { .x = 0, .y = 0 };
-        scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
+        const vk::Rect2D scissor { vk::Offset2D { 0, 0 },
+                                   swapchain.extent() };
+        cmdBuf.setScissor(0, { scissor });
 
-        vkCmdBindPipeline(cmdBuf,
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
+        cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                            pipeline.handle());
 
-        VkBuffer vb = vertexBuffer.handle();
-        VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
-        vkCmdDraw(cmdBuf, 6, 1, 0, 0);
+        const vk::Buffer vb = vertexBuffer.handle();
+        const vk::DeviceSize vbo { 0 };
+        cmdBuf.bindVertexBuffers(0, { vb }, { vbo });
+        cmdBuf.draw(6, 1, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuf);
+        cmdBuf.endRenderPass();
 
-        if (!cmdBuf.end()) {
-            continue;
-        }
+        cmdBuf.end();
 
-        VkSemaphore waitSem = frameSync.image_available(currentFrame);
-        VkSemaphore signalSem = frameSync.render_finished(imageIndex);
+        const vk::Semaphore wait_sem = frameSync.image_available(currentFrame);
+        const vk::Semaphore signal_sem = frameSync.render_finished(imageIndex);
+        const std::array<vk::PipelineStageFlags, 1> wait_stages {
+            vk::PipelineStageFlagBits::eColorAttachmentOutput};
 
-        VkCommandBuffer submit_buf = cmdBuf.handle();
-        VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-        VkPipelineStageFlags waitStage =
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        vk::SubmitInfo submitInfo {};
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &waitSem;
-        submitInfo.pWaitDstStageMask = &waitStage;
+        submitInfo.pWaitSemaphores = &wait_sem;
+        submitInfo.pWaitDstStageMask = wait_stages.data();
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &submit_buf;
+        submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &signalSem;
+        submitInfo.pSignalSemaphores = &signal_sem;
 
         if (!frameSync.reset_fence(currentFrame)) {
-            LUMEN_LOG_ERROR("vkResetFences 失败 currentFrame={}", currentFrame);
+            LUMEN_LOG_ERROR("FrameSync::reset_fence 失败 currentFrame={}",
+                            currentFrame);
             continue;
         }
-        if (vkQueueSubmit(ctx.graphics_queue(), 1, &submitInfo,
-                          frameSync.in_flight_fence(currentFrame)) !=
-            VK_SUCCESS) {
+        if (ctx.graphics_queue().submit(
+                1, &submitInfo, frameSync.in_flight_fence(currentFrame)) !=
+            vk::Result::eSuccess) {
             continue;
         }
 
-        const VkResult presentResult =
+        const vk::Result presentResult =
             swapchain.present(ctx.present_queue(), imageIndex,
                               frameSync.render_finished(imageIndex));
-        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (presentResult == vk::Result::eErrorOutOfDateKHR) {
             needRecreateSwapchain = true;
-        } else if (presentResult != VK_SUCCESS &&
-                   presentResult != VK_SUBOPTIMAL_KHR) {
+        } else if (presentResult != vk::Result::eSuccess &&
+                   presentResult != vk::Result::eSuboptimalKHR) {
             LUMEN_APP_LOG_WARN("Present 失败 result={}",
                                static_cast<int>(presentResult));
         }

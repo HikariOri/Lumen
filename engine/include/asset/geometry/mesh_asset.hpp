@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include <glm/vec3.hpp>
 
@@ -45,7 +45,7 @@ struct Primitive {
     render::VertexLayout layout {};
     const render::Material *material {};
 
-    VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
+    vk::PrimitiveTopology topology { vk::PrimitiveTopology::eTriangleList };
 
     glm::vec3 localPivot { 0.0F, 0.0F, 0.0F };
     glm::vec3 localAabbHalfExtent { 0.0F, 0.0F, 0.0F };

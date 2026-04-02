@@ -61,7 +61,7 @@ namespace lumen::render {
  * @retval true 所有纹理创建成功
  * @retval false 任意失败
  */
-bool PbrPlaceholderTextures::create(const Context &ctx, VkQueue transfer_queue,
+bool PbrPlaceholderTextures::create(const Context &ctx, vk::Queue transfer_queue,
                                     CommandPool &cmd_pool) {
 
     // -------------------------------------------------------------------------
@@ -102,8 +102,8 @@ bool PbrPlaceholderTextures::create(const Context &ctx, VkQueue transfer_queue,
      * - 1×1 纹理其实无所谓，但统一行为
      */
     SamplerConfig linear_repeat {};
-    linear_repeat.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    linear_repeat.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    linear_repeat.addressModeU = vk::SamplerAddressMode::eRepeat;
+    linear_repeat.addressModeV = vk::SamplerAddressMode::eRepeat;
 
     // -------------------------------------------------------------------------
     // 3. 创建 GPU 纹理
@@ -121,27 +121,27 @@ bool PbrPlaceholderTextures::create(const Context &ctx, VkQueue transfer_queue,
     /// Albedo（sRGB）
     const bool a = albedo_.create_from_memory(
         ctx, white_rgba, 4, 1, 1, transfer_queue, cmd_pool,
-        VK_FORMAT_R8G8B8A8_SRGB, linear_repeat, false);
+        vk::Format::eR8G8B8A8Srgb, linear_repeat, false);
 
     /// Normal（Linear）
     const bool n = normal_.create_from_memory(
         ctx, flat_normal_rgba, 4, 1, 1, transfer_queue, cmd_pool,
-        VK_FORMAT_R8G8B8A8_UNORM, linear_repeat, false);
+        vk::Format::eR8G8B8A8Unorm, linear_repeat, false);
 
     /// Metallic-Roughness（Linear）
     const bool mr = metallic_roughness_.create_from_memory(
         ctx, default_mr_rgba, 4, 1, 1, transfer_queue, cmd_pool,
-        VK_FORMAT_R8G8B8A8_UNORM, linear_repeat, false);
+        vk::Format::eR8G8B8A8Unorm, linear_repeat, false);
 
     /// AO（Linear）
     const bool ao = ao_.create_from_memory(
         ctx, white_ao_rgba, 4, 1, 1, transfer_queue, cmd_pool,
-        VK_FORMAT_R8G8B8A8_UNORM, linear_repeat, false);
+        vk::Format::eR8G8B8A8Unorm, linear_repeat, false);
 
     /// Emissive（Linear）
     const bool e = emissive_.create_from_memory(
         ctx, black_emissive_rgba, 4, 1, 1, transfer_queue, cmd_pool,
-        VK_FORMAT_R8G8B8A8_UNORM, linear_repeat, false);
+        vk::Format::eR8G8B8A8Unorm, linear_repeat, false);
 
     // -------------------------------------------------------------------------
     // 4. 汇总结果

@@ -5,7 +5,6 @@
 #include "ui/light_viewport_gizmos.hpp"
 
 #include "core/logger.hpp"
-#include "render/command_buffer.hpp"
 #include "render/context.hpp"
 
 #include <algorithm>
@@ -60,9 +59,9 @@ void LightViewportGizmos::destroy() {
     dbg_vert_shader_ = render::ShaderModule {};
     icon_frag_shader_ = render::ShaderModule {};
     icon_vert_shader_ = render::ShaderModule {};
-    icon_sets_[0] = VK_NULL_HANDLE;
-    icon_sets_[1] = VK_NULL_HANDLE;
-    icon_sets_[2] = VK_NULL_HANDLE;
+    icon_sets_[0] = nullptr;
+    icon_sets_[1] = nullptr;
+    icon_sets_[2] = nullptr;
     line_vertex_buffers_.clear();
     line_scratch_.clear();
     icons_ready_ = false;
@@ -84,8 +83,7 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
         return false;
     }
 
-    frames_in_flight_ =
-        std::max(1u, std::min(8u, info.max_frames_in_flight));
+    frames_in_flight_ = std::max(1u, std::min(8u, info.max_frames_in_flight));
     icon_half_extent_ = info.icon_half_extent;
     if (icon_half_extent_ < 1e-4f) {
         icon_half_extent_ = 0.18f;
@@ -94,9 +92,9 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     const render::Context &ctx = *info.ctx;
 
     if (!icon_vert_shader_.create_from_file(ctx.device(),
-                                             info.spirv_light_icon_vert) ||
+                                            info.spirv_light_icon_vert) ||
         !icon_frag_shader_.create_from_file(ctx.device(),
-                                             info.spirv_light_icon_frag) ||
+                                            info.spirv_light_icon_frag) ||
         !dbg_vert_shader_.create_from_file(ctx.device(),
                                            info.spirv_light_debug_vert) ||
         !dbg_frag_shader_.create_from_file(ctx.device(),
@@ -106,12 +104,13 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
         return false;
     }
 
-    if (!tex_directional_.create_from_file(
-            ctx, info.png_directional_icon, info.graphics_queue, *info.cmd_pool) ||
+    if (!tex_directional_.create_from_file(ctx, info.png_directional_icon,
+                                           info.graphics_queue,
+                                           *info.cmd_pool) ||
         !tex_point_.create_from_file(ctx, info.png_point_icon,
-                                      info.graphics_queue, *info.cmd_pool) ||
-        !tex_spot_.create_from_file(ctx, info.png_spot_icon, info.graphics_queue,
-                                    *info.cmd_pool)) {
+                                     info.graphics_queue, *info.cmd_pool) ||
+        !tex_spot_.create_from_file(ctx, info.png_spot_icon,
+                                    info.graphics_queue, *info.cmd_pool)) {
         LUMEN_LOG_WARN("LightViewportGizmos: 光源图标纹理加载失败");
         destroy();
         return false;
@@ -135,58 +134,58 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
     icon_index_buffer_.set_index_type(render::IndexBuffer::IndexType::Uint32);
 
     if (!icon_desc_layout_.create(
-            ctx, { { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                    VK_SHADER_STAGE_FRAGMENT_BIT } })) {
+            ctx, { { 0, vk::DescriptorType::eCombinedImageSampler, 1,
+                     vk::ShaderStageFlagBits::eFragment } })) {
         destroy();
         return false;
     }
 
-    if (!icon_pipeline_layout_.create(ctx, { icon_desc_layout_.handle() },
-                                        { VkPushConstantRange {
-                                              VK_SHADER_STAGE_VERTEX_BIT, 0,
-                                              sizeof(glm::mat4) } })) {
+    if (!icon_pipeline_layout_.create(
+            ctx, { icon_desc_layout_.handle() },
+            { vk::PushConstantRange { vk::ShaderStageFlagBits::eVertex, 0,
+                                      sizeof(glm::mat4) } })) {
         destroy();
         return false;
     }
 
     if (!icon_desc_pool_.create(
-            ctx, { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3 } }, 3)) {
+            ctx, { { vk::DescriptorType::eCombinedImageSampler, 3 } }, 3)) {
         destroy();
         return false;
     }
-    for (uint32_t i = 0; i < 3; ++i) {
+    for (auto & icon_set : icon_sets_) {
         if (!icon_desc_pool_.allocate(ctx.device(), icon_desc_layout_.handle(),
-                                      icon_sets_[i])) {
+                                      icon_set)) {
             destroy();
             return false;
         }
     }
-    render::write_descriptor_image(
-        ctx.device(), icon_sets_[0], 0, tex_directional_.view(),
-        tex_directional_.sampler());
+    render::write_descriptor_image(ctx.device(), icon_sets_[0], 0,
+                                   tex_directional_.view(),
+                                   tex_directional_.sampler());
     render::write_descriptor_image(ctx.device(), icon_sets_[1], 0,
                                    tex_point_.view(), tex_point_.sampler());
     render::write_descriptor_image(ctx.device(), icon_sets_[2], 0,
                                    tex_spot_.view(), tex_spot_.sampler());
 
     render::GraphicsPipelineConfig icon_cfg {};
-    icon_cfg.shaderStages.push_back(
-        { icon_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    icon_cfg.shaderStages.push_back(
-        { icon_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
+    icon_cfg.shaderStages.push_back({ icon_vert_shader_.handle(),
+                                      vk::ShaderStageFlagBits::eVertex,
+                                      "main" });
+    icon_cfg.shaderStages.push_back({ icon_frag_shader_.handle(),
+                                      vk::ShaderStageFlagBits::eFragment,
+                                      "main" });
     icon_cfg.vertexBindings.push_back(
-        { 0, sizeof(BillboardVertex), render::VertexInputRate::PerVertex });
+        { 0, sizeof(BillboardVertex), vk::VertexInputRate::eVertex });
     icon_cfg.vertexAttributes.push_back(
-        { 0, 0, render::VertexAttributeFormat::F32Vec2,
-          offsetof(BillboardVertex, pos) });
+        { 0, 0, vk::Format::eR32G32Sfloat, offsetof(BillboardVertex, pos) });
     icon_cfg.vertexAttributes.push_back(
-        { 1, 0, render::VertexAttributeFormat::F32Vec2,
-          offsetof(BillboardVertex, uv) });
+        { 1, 0, vk::Format::eR32G32Sfloat, offsetof(BillboardVertex, uv) });
     icon_cfg.depthTest = true;
     icon_cfg.depthWrite = false;
-    icon_cfg.depthCompareOp = VK_COMPARE_OP_LESS;
-    icon_cfg.cullMode = VK_CULL_MODE_NONE;
-    icon_cfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    icon_cfg.depthCompareOp = vk::CompareOp::eLess;
+    icon_cfg.cullMode = vk::CullModeFlagBits::eNone;
+    icon_cfg.frontFace = vk::FrontFace::eCounterClockwise;
     icon_cfg.alphaBlend = true;
     if (!icon_pipeline_.create(ctx, icon_pipeline_layout_.handle(),
                                info.scene_render_pass, info.subpass_index,
@@ -199,31 +198,31 @@ bool LightViewportGizmos::create(const LightViewportGizmosCreateInfo &info) {
 
     if (!dbg_pipeline_layout_.create(
             ctx, {},
-            { VkPushConstantRange { VK_SHADER_STAGE_VERTEX_BIT, 0,
-                                    sizeof(glm::mat4) } })) {
+            { vk::PushConstantRange { vk::ShaderStageFlagBits::eVertex, 0,
+                                      sizeof(glm::mat4) } })) {
         destroy();
         return false;
     }
 
     render::GraphicsPipelineConfig dbg_cfg {};
-    dbg_cfg.shaderStages.push_back(
-        { dbg_vert_shader_.handle(), VK_SHADER_STAGE_VERTEX_BIT, "main" });
-    dbg_cfg.shaderStages.push_back(
-        { dbg_frag_shader_.handle(), VK_SHADER_STAGE_FRAGMENT_BIT, "main" });
-    dbg_cfg.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    dbg_cfg.shaderStages.push_back({ dbg_vert_shader_.handle(),
+                                     vk::ShaderStageFlagBits::eVertex,
+                                     "main" });
+    dbg_cfg.shaderStages.push_back({ dbg_frag_shader_.handle(),
+                                     vk::ShaderStageFlagBits::eFragment,
+                                     "main" });
+    dbg_cfg.topology = vk::PrimitiveTopology::eLineList;
     dbg_cfg.vertexBindings.push_back(
-        { 0, sizeof(LineV), render::VertexInputRate::PerVertex });
+        { 0, sizeof(LineV), vk::VertexInputRate::eVertex });
     dbg_cfg.vertexAttributes.push_back(
-        { 0, 0, render::VertexAttributeFormat::F32Vec3,
-          offsetof(LineV, position) });
+        { 0, 0, vk::Format::eR32G32B32Sfloat, offsetof(LineV, position) });
     dbg_cfg.vertexAttributes.push_back(
-        { 1, 0, render::VertexAttributeFormat::F32Vec4,
-          offsetof(LineV, color) });
+        { 1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(LineV, color) });
     dbg_cfg.depthTest = true;
     dbg_cfg.depthWrite = false;
-    dbg_cfg.depthCompareOp = VK_COMPARE_OP_LESS;
-    dbg_cfg.cullMode = VK_CULL_MODE_NONE;
-    dbg_cfg.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    dbg_cfg.depthCompareOp = vk::CompareOp::eLess;
+    dbg_cfg.cullMode = vk::CullModeFlagBits::eNone;
+    dbg_cfg.frontFace = vk::FrontFace::eCounterClockwise;
     dbg_cfg.alphaBlend = true;
     if (!dbg_pipeline_.create(ctx, dbg_pipeline_layout_.handle(),
                               info.scene_render_pass, info.subpass_index,
@@ -268,32 +267,32 @@ void LightViewportGizmos::prepare_frame(const entt::registry &registry,
     line_vertex_count_ = static_cast<uint32_t>(line_scratch_.size());
 }
 
-void LightViewportGizmos::record(VkCommandBuffer cmd, uint32_t frame_index,
+void LightViewportGizmos::record(vk::CommandBuffer cmd, uint32_t frame_index,
                                  const glm::mat4 &view, const glm::mat4 &proj,
                                  const entt::registry &registry) const {
     if (draw_icons_this_frame_) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          icon_pipeline_.handle());
-        VkBuffer lib_vb = icon_vertex_buffer_.handle();
-        VkDeviceSize off0 { 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, &lib_vb, &off0);
-        vkCmdBindIndexBuffer(cmd, icon_index_buffer_.handle(), 0,
-                             icon_index_buffer_.vk_index_type());
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                         icon_pipeline_.handle());
+        const vk::Buffer lib_vb = icon_vertex_buffer_.handle();
+        const vk::DeviceSize off0 { 0 };
+        cmd.bindVertexBuffers(0, { lib_vb }, { off0 });
+        cmd.bindIndexBuffer(icon_index_buffer_.handle(), vk::DeviceSize { 0 },
+                            icon_index_buffer_.vk_index_type());
         (void)registry;
     }
 
     if (debug_ready_ && line_vertex_count_ > 0 &&
         frame_index < line_vertex_buffers_.size()) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          dbg_pipeline_.handle());
+        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                         dbg_pipeline_.handle());
         const glm::mat4 vp = proj * view;
-        vkCmdPushConstants(cmd, dbg_pipeline_layout_.handle(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
-                           glm::value_ptr(vp));
-        VkBuffer ldb = line_vertex_buffers_[frame_index].handle();
-        VkDeviceSize z { 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, &ldb, &z);
-        vkCmdDraw(cmd, line_vertex_count_, 1, 0, 0);
+        cmd.pushConstants(dbg_pipeline_layout_.handle(),
+                          vk::ShaderStageFlagBits::eVertex, 0,
+                          sizeof(glm::mat4), glm::value_ptr(vp));
+        const vk::Buffer ldb = line_vertex_buffers_[frame_index].handle();
+        const vk::DeviceSize z { 0 };
+        cmd.bindVertexBuffers(0, { ldb }, { z });
+        cmd.draw(line_vertex_count_, 1, 0, 0);
     }
 }
 

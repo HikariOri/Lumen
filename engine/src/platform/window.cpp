@@ -75,22 +75,23 @@ std::vector<const char *> Window::get_vulkan_instance_extensions() const {
     return result;
 }
 
-VkSurfaceKHR Window::create_vulkan_surface(VkInstance instance) const {
-    if (!window_ || instance == VK_NULL_HANDLE) {
+vk::SurfaceKHR Window::create_vulkan_surface(vk::Instance instance) const {
+    if (!window_ || !instance) {
         LUMEN_LOG_WARN("window 或 instance 未初始化");
-        return VK_NULL_HANDLE;
+        return {};
     }
 
-    VkSurfaceKHR surface { VK_NULL_HANDLE };
-    if (!SDL_Vulkan_CreateSurface(window_, instance, nullptr, &surface)) {
+    VkSurfaceKHR surface {};
+    if (!SDL_Vulkan_CreateSurface(window_, static_cast<VkInstance>(instance),
+                                 nullptr, &surface)) {
         LUMEN_LOG_ERROR("Vulkan Surface 创建失败: {}", SDL_GetError());
-        return VK_NULL_HANDLE;
+        return {};
     }
     LUMEN_LOG_DEBUG("Vulkan Surface 创建成功");
-    return surface;
+    return vk::SurfaceKHR { surface };
 }
 
-VkSurfaceKHR
+vk::SurfaceKHR
 Window::create_vulkan_surface(const render::Context &context) const {
     return create_vulkan_surface(context.instance());
 }

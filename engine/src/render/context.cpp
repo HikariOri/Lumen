@@ -10,7 +10,7 @@
  * - Properties / Features 查询（基于 pNext 链）
  *
  * 设计特点：
- * - 使用 Vulkan 1.1+ 的 VkPhysicalDeviceFeatures2 / Properties2
+ * - 使用 Vulkan 1.1+ 的 PhysicalDeviceFeatures2 / Properties2（Vulkan-Hpp）
  * - 统一通过 pNext chain 管理扩展能力
  * - 支持无 Surface（离屏渲染）
  */
@@ -23,6 +23,7 @@
 #include <cstring>
 #include <set>
 #include <stdexcept>
+#include <string>
 
 namespace lumen::render {
 
@@ -42,9 +43,15 @@ const char *kValidationLayerName = "VK_LAYER_KHRONOS_validation";
  */
 bool check_validation_layer_support(const std::vector<const char *> &layers) {
     uint32_t count { 0 };
-    vkEnumerateInstanceLayerProperties(&count, nullptr);
-    std::vector<VkLayerProperties> available(count);
-    vkEnumerateInstanceLayerProperties(&count, available.data());
+    if (vk::enumerateInstanceLayerProperties(&count, nullptr) !=
+        vk::Result::eSuccess) {
+        return false;
+    }
+    std::vector<vk::LayerProperties> available(count);
+    if (count > 0 && vk::enumerateInstanceLayerProperties(
+                        &count, available.data()) != vk::Result::eSuccess) {
+        return false;
+    }
 
     for (const char *name : layers) {
         bool found { false };
@@ -87,15 +94,6 @@ void merge_unique_instance_extensions(std::vector<const char *> &into,
 
 /**
  * @brief 重新构建 PhysicalDeviceProperties2 的 pNext 链
- *
- * 链结构：
- * VkPhysicalDeviceProperties2
- *   → VkPhysicalDeviceVulkan11Properties
- *     → VkPhysicalDeviceVulkan12Properties
- *       → VkPhysicalDeviceVulkan13Properties
- *         → VkPhysicalDeviceVulkan14Properties
- *
- * 用于一次性查询所有版本扩展属性。
  */
 void Context::relink_properties_chain_() {
     physicalDeviceProperties2_.pNext = &vulkan11Properties_;
@@ -107,19 +105,6 @@ void Context::relink_properties_chain_() {
 
 /**
  * @brief 重新构建 PhysicalDeviceFeatures2 的 pNext 链
- *
- * Vulkan 1.1+ 使用结构链查询和启用特性：
- * 每个结构体描述一组“细粒度 feature”，通过 pNext 串联。
- *
- * 查询阶段：
- *   vkGetPhysicalDeviceFeatures2 → 返回支持情况（VK_TRUE / VK_FALSE）
- *
- * 启用阶段：
- *   VkDeviceCreateInfo.pNext → 指定要启用的 features
- *
- * ⚠️ 注意：
- * - 支持 ≠ 自动启用
- * - 必须显式在 DeviceCreateInfo 中启用
  */
 void Context::relink_features_chain_() {
     physicalDeviceFeatures2_.pNext = &vulkan11Features_;
@@ -129,20 +114,8 @@ void Context::relink_features_chain_() {
     vulkan14Features_.pNext = nullptr;
 }
 
-/**
- * @brief 创建 Vulkan Instance
- *
- * 流程：
- * 1. 检查 validation layer 支持情况
- * 2. 构造 VkApplicationInfo
- * 3. 配置扩展（Debug Utils）
- * 4. 创建 VkInstance
- *
- * @param config 上下文配置
- * @return 是否成功
- */
 bool Context::init_instance(const ContextConfig &config) {
-    if (instance_ != VK_NULL_HANDLE) {
+    if (instance_) {
         LUMEN_LOG_DEBUG("instance 已经被创建过，直接返回");
         return true;
     }
@@ -160,7 +133,7 @@ bool Context::init_instance(const ContextConfig &config) {
         }
     }
 
-    VkApplicationInfo appInfo { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+    vk::ApplicationInfo appInfo {};
     appInfo.pApplicationName = config.appName.c_str();
     appInfo.applicationVersion = config.appVersion;
     appInfo.pEngineName = config.engineName.c_str();
@@ -182,16 +155,17 @@ bool Context::init_instance(const ContextConfig &config) {
         }
     }
 
-    VkInstanceCreateInfo createInfo { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+    vk::InstanceCreateInfo createInfo {};
     createInfo.pApplicationInfo = &appInfo;
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
     createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
     createInfo.ppEnabledLayerNames = layers.empty() ? nullptr : layers.data();
 
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &instance_);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("vkCreateInstance failed: {}",
+    const vk::Result result =
+        vk::createInstance(&createInfo, nullptr, &instance_);
+    if (result != vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("vk::createInstance failed: {}",
                         static_cast<int>(result));
         return false;
     }
@@ -208,54 +182,37 @@ bool Context::init_instance(const ContextConfig &config,
     return init_instance(merged);
 }
 
-/**
- * @brief 选择合适的 Physical Device（GPU）
- *
- * 策略：
- * - 必须支持 Graphics Queue
- * - 若提供 surface，则必须支持 Present
- *
- * 成功后初始化：
- * - queue family index
- * - properties（含 Vulkan 1.1+）
- * - features（含 Vulkan 1.1+）
- * - memory properties
- *
- * @param surface 可选，用于判断 present 支持
- * @return 是否找到可用设备
- */
-bool Context::pick_physical_device_(VkSurfaceKHR surface) {
+bool Context::pick_physical_device_(vk::SurfaceKHR surface) {
     uint32_t count { 0 };
-    vkEnumeratePhysicalDevices(instance_, &count, nullptr);
+    if (instance_.enumeratePhysicalDevices(&count, nullptr) !=
+        vk::Result::eSuccess) {
+        return false;
+    }
     if (count == 0) {
         return false;
     }
 
-    std::vector<VkPhysicalDevice> devices(count);
-    vkEnumeratePhysicalDevices(instance_, &count, devices.data());
+    std::vector<vk::PhysicalDevice> devices(count);
+    if (instance_.enumeratePhysicalDevices(&count, devices.data()) !=
+        vk::Result::eSuccess) {
+        return false;
+    }
 
-    for (VkPhysicalDevice dev : devices) {
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(dev, &props);
+    for (vk::PhysicalDevice dev : devices) {
+        vk::PhysicalDeviceProperties props = dev.getProperties();
 
-        uint32_t queueFamilyCount { 0 };
-        vkGetPhysicalDeviceQueueFamilyProperties(dev, &queueFamilyCount,
-                                                 nullptr);
-        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(dev, &queueFamilyCount,
-                                                 queueFamilies.data());
+        auto queueFamilies = dev.getQueueFamilyProperties();
 
         uint32_t gfxIdx { UINT32_MAX };
         uint32_t presentIdx { UINT32_MAX };
 
-        for (uint32_t i { 0 }; i < queueFamilyCount; ++i) {
-            if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        for (uint32_t i { 0 }; i < queueFamilies.size(); ++i) {
+            if (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics) {
                 gfxIdx = i;
             }
-            if (surface != VK_NULL_HANDLE) {
-                VkBool32 presentSupport { VK_FALSE };
-                vkGetPhysicalDeviceSurfaceSupportKHR(dev, i, surface,
-                                                     &presentSupport);
+            if (surface) {
+                vk::Bool32 presentSupport { VK_FALSE };
+                dev.getSurfaceSupportKHR(i, surface, &presentSupport);
                 if (presentSupport) {
                     presentIdx = i;
                 }
@@ -263,43 +220,27 @@ bool Context::pick_physical_device_(VkSurfaceKHR surface) {
         }
 
         if (gfxIdx != UINT32_MAX &&
-            (surface == VK_NULL_HANDLE || presentIdx != UINT32_MAX)) {
+            (!surface || presentIdx != UINT32_MAX)) {
             LUMEN_LOG_DEBUG("选中物理设备: {}, 队列族 gfx={} present={}",
-                            props.deviceName, gfxIdx, presentIdx);
+                            std::string(props.deviceName.data()), gfxIdx,
+                            presentIdx);
             physicalDevice_ = dev;
             graphicsQueueFamily_ = gfxIdx;
-            presentQueueFamily_ =
-                surface != VK_NULL_HANDLE ? presentIdx : gfxIdx;
+            presentQueueFamily_ = surface ? presentIdx : gfxIdx;
 
-            // Properties2 + Vulkan 1.1-1.4 链
             relink_properties_chain_();
-            vulkan11Properties_.pNext = &vulkan12Properties_;
-            vulkan12Properties_.pNext = &vulkan13Properties_;
-            vulkan13Properties_.pNext = &vulkan14Properties_;
-            vulkan14Properties_.pNext = nullptr;
-            vkGetPhysicalDeviceProperties2(dev, &physicalDeviceProperties2_);
+            dev.getProperties2(&physicalDeviceProperties2_);
 
-            // Features2 + Vulkan 1.1-1.4 链
             relink_features_chain_();
-            vkGetPhysicalDeviceFeatures2(dev, &physicalDeviceFeatures2_);
+            dev.getFeatures2(&physicalDeviceFeatures2_);
 
-            vkGetPhysicalDeviceMemoryProperties(
-                dev, &physicalDeviceMemoryProperties_);
+            physicalDeviceMemoryProperties_ = dev.getMemoryProperties();
             return true;
         }
     }
     return false;
 }
 
-/**
- * @brief 创建 VMA 内存分配器
- *
- * 封装 Vulkan 内存管理：
- * - 自动选择内存类型
- * - 简化 vkAllocateMemory
- *
- * @return 是否成功
- */
 bool Context::create_vma_allocator_() {
     if (vmaAllocator_ != nullptr) {
         return true;
@@ -324,34 +265,15 @@ bool Context::create_vma_allocator_() {
     return true;
 }
 
-/**
- * @brief 创建 Logical Device（逻辑设备）
- *
- * 内容：
- * - 创建 Graphics / Present 队列
- * - 启用 Swapchain 扩展
- * - 通过 pNext 链启用 Vulkan 1.1+ 特性
- *
- * 特点：
- * - 不再使用 pEnabledFeatures（旧接口）
- * - 使用 VkPhysicalDeviceFeatures2 + pNext
- *
- * ⚠️ 注意：
- * 这里只启用了 samplerAnisotropy，其他 feature 默认关闭
- *
- * @param surface 可选，用于 present queue
- * @return 是否成功
- */
-bool Context::create_logical_device_(VkSurfaceKHR surface) {
+bool Context::create_logical_device_(vk::SurfaceKHR surface) {
+    (void)surface;
     float queuePriority { 1.0F };
-    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueFamilies { graphicsQueueFamily_,
                                         presentQueueFamily_ };
 
     for (uint32_t family : uniqueFamilies) {
-        VkDeviceQueueCreateInfo info {
-            VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
-        };
+        vk::DeviceQueueCreateInfo info {};
         info.queueFamilyIndex = family;
         info.queueCount = 1;
         info.pQueuePriorities = &queuePriority;
@@ -362,12 +284,10 @@ bool Context::create_logical_device_(VkSurfaceKHR surface) {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
 
-    // Vulkan 1.1+ 使用 pNext 特性链，不再用 pEnabledFeatures
-    // 仅启用需要的特性，版本化特性保持查询结果（支持则启用）
     physicalDeviceFeatures2_.features.samplerAnisotropy = VK_TRUE;
     relink_features_chain_();
 
-    VkDeviceCreateInfo createInfo { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    vk::DeviceCreateInfo createInfo {};
     createInfo.queueCreateInfoCount =
         static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
@@ -376,15 +296,15 @@ bool Context::create_logical_device_(VkSurfaceKHR surface) {
         static_cast<uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-    VkResult result =
-        vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("vkCreateDevice 失败: {}", static_cast<int>(result));
+    const vk::Result result =
+        physicalDevice_.createDevice(&createInfo, nullptr, &device_);
+    if (result != vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("createDevice 失败: {}", static_cast<int>(result));
         return false;
     }
 
-    vkGetDeviceQueue(device_, graphicsQueueFamily_, 0, &graphicsQueue_);
-    vkGetDeviceQueue(device_, presentQueueFamily_, 0, &presentQueue_);
+    graphicsQueue_ = device_.getQueue(graphicsQueueFamily_, 0);
+    presentQueue_ = device_.getQueue(presentQueueFamily_, 0);
     LUMEN_LOG_DEBUG("逻辑设备创建成功");
     return true;
 }
@@ -399,41 +319,30 @@ const char *device_type_name(PhysicalDeviceType type) {
     }
 }
 
-/**
- * @brief 获取当前 Physical Device 信息
- *
- * 包括：
- * - 名称 / Vendor / Device ID
- * - Vulkan API 版本
- * - GPU 类型（独显 / 集显等）
- * - 显存大小（device local）
- *
- * @return PhysicalDeviceInfo
- */
 PhysicalDeviceInfo Context::physical_device_info() const {
     PhysicalDeviceInfo info {};
-    if (physicalDevice_ == VK_NULL_HANDLE) {
+    if (!physicalDevice_) {
         return info;
     }
 
     const auto &p = physicalDeviceProperties2_.properties;
-    info.deviceName = p.deviceName;
+    info.deviceName = std::string(p.deviceName.data());
     info.vendorId = p.vendorID;
     info.deviceId = p.deviceID;
     info.driverVersion = p.driverVersion;
     info.apiVersion = p.apiVersion;
 
     switch (p.deviceType) {
-    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+    case vk::PhysicalDeviceType::eIntegratedGpu:
         info.deviceType = PhysicalDeviceType::Integrated;
         break;
-    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+    case vk::PhysicalDeviceType::eDiscreteGpu:
         info.deviceType = PhysicalDeviceType::Discrete;
         break;
-    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+    case vk::PhysicalDeviceType::eVirtualGpu:
         info.deviceType = PhysicalDeviceType::Virtual;
         break;
-    case VK_PHYSICAL_DEVICE_TYPE_CPU:
+    case vk::PhysicalDeviceType::eCpu:
         info.deviceType = PhysicalDeviceType::Cpu;
         break;
     default: info.deviceType = PhysicalDeviceType::Other; break;
@@ -442,37 +351,23 @@ PhysicalDeviceInfo Context::physical_device_info() const {
     for (uint32_t i { 0 }; i < physicalDeviceMemoryProperties_.memoryHeapCount;
          ++i) {
         const auto &heap = physicalDeviceMemoryProperties_.memoryHeaps[i];
-        if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+        if (heap.flags & vk::MemoryHeapFlagBits::eDeviceLocal) {
             info.deviceLocalMemoryBytes += heap.size;
         }
     }
     return info;
 }
 
-/**
- * @brief 等待设备空闲（同步点）
- */
 void Context::wait_idle() const {
-    if (device_ != VK_NULL_HANDLE) {
-        vkDeviceWaitIdle(device_);
+    if (device_) {
+        device_.waitIdle();
     }
 }
 
-/**
- * @brief 初始化逻辑设备（高层接口）
- *
- * 流程：
- * 1. pick physical device
- * 2. create logical device
- * 3. create VMA
- *
- * @param surface 可选 surface
- * @return 是否成功
- */
-bool Context::init_device(VkSurfaceKHR surface) {
+bool Context::init_device(vk::SurfaceKHR surface) {
     if (!has_instance())
         return false;
-    if (device_ != VK_NULL_HANDLE)
+    if (device_)
         return true;
 
     if (!pick_physical_device_(surface)) {
@@ -482,26 +377,20 @@ bool Context::init_device(VkSurfaceKHR surface) {
     if (!create_logical_device_(surface))
         return false;
     if (!create_vma_allocator_()) {
-        vkDestroyDevice(device_, nullptr);
-        device_ = VK_NULL_HANDLE;
-        graphicsQueue_ = VK_NULL_HANDLE;
-        presentQueue_ = VK_NULL_HANDLE;
+        device_.destroy(nullptr);
+        device_ = nullptr;
+        graphicsQueue_ = nullptr;
+        presentQueue_ = nullptr;
         return false;
     }
-    auto info = physical_device_info();
-    LUMEN_LOG_INFO("Vulkan 设备初始化完成: {} ({})", info.deviceName,
-                   device_type_name(info.deviceType));
+    auto devInfo = physical_device_info();
+    LUMEN_LOG_INFO("Vulkan 设备初始化完成: {} ({})", devInfo.deviceName,
+                   device_type_name(devInfo.deviceType));
     return true;
 }
 
 Context::~Context() { destroy_(); }
 
-/**
- * @brief Move 构造：转移 Vulkan 资源所有权
- *
- * 注意：
- * - 必须重新 relink pNext 链（因为指针失效）
- */
 Context::Context(Context &&other) noexcept
     : instance_ { other.instance_ }, physicalDevice_ { other.physicalDevice_ },
       device_ { other.device_ }, graphicsQueue_ { other.graphicsQueue_ },
@@ -524,11 +413,11 @@ Context::Context(Context &&other) noexcept
     relink_properties_chain_();
     relink_features_chain_();
     other.vmaAllocator_ = nullptr;
-    other.instance_ = VK_NULL_HANDLE;
-    other.physicalDevice_ = VK_NULL_HANDLE;
-    other.device_ = VK_NULL_HANDLE;
-    other.graphicsQueue_ = VK_NULL_HANDLE;
-    other.presentQueue_ = VK_NULL_HANDLE;
+    other.instance_ = nullptr;
+    other.physicalDevice_ = nullptr;
+    other.device_ = nullptr;
+    other.graphicsQueue_ = nullptr;
+    other.presentQueue_ = nullptr;
 }
 
 Context &Context::operator=(Context &&other) noexcept {
@@ -559,43 +448,32 @@ Context &Context::operator=(Context &&other) noexcept {
     relink_properties_chain_();
     relink_features_chain_();
     other.vmaAllocator_ = nullptr;
-    other.instance_ = VK_NULL_HANDLE;
-    other.physicalDevice_ = VK_NULL_HANDLE;
-    other.device_ = VK_NULL_HANDLE;
-    other.graphicsQueue_ = VK_NULL_HANDLE;
-    other.presentQueue_ = VK_NULL_HANDLE;
+    other.instance_ = nullptr;
+    other.physicalDevice_ = nullptr;
+    other.device_ = nullptr;
+    other.graphicsQueue_ = nullptr;
+    other.presentQueue_ = nullptr;
     return *this;
 }
 
-/**
- * @brief 销毁所有 Vulkan 资源
- *
- * 顺序：
- * 1. VMA
- * 2. Device
- * 3. Instance
- *
- * ⚠️ 必须保证：
- * - Device 在 Instance 之前销毁
- */
 void Context::destroy_() {
     if (vmaAllocator_ != nullptr) {
         LUMEN_LOG_DEBUG("销毁 vma");
         vmaDestroyAllocator(vmaAllocator_);
         vmaAllocator_ = nullptr;
     }
-    if (device_ != VK_NULL_HANDLE) {
+    if (device_) {
         LUMEN_LOG_DEBUG("销毁逻辑设备");
-        vkDestroyDevice(device_, nullptr);
-        device_ = VK_NULL_HANDLE;
-        graphicsQueue_ = VK_NULL_HANDLE;
-        presentQueue_ = VK_NULL_HANDLE;
+        device_.destroy(nullptr);
+        device_ = nullptr;
+        graphicsQueue_ = nullptr;
+        presentQueue_ = nullptr;
     }
-    physicalDevice_ = VK_NULL_HANDLE;
-    if (instance_ != VK_NULL_HANDLE) {
+    physicalDevice_ = nullptr;
+    if (instance_) {
         LUMEN_LOG_DEBUG("销毁 Vulkan instance");
-        vkDestroyInstance(instance_, nullptr);
-        instance_ = VK_NULL_HANDLE;
+        instance_.destroy(nullptr);
+        instance_ = nullptr;
     }
 }
 

@@ -7,7 +7,7 @@
 
 #include <string_view>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "scene/scene_mesh_asset.hpp"
 

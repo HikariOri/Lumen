@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/context.hpp"
 
@@ -121,20 +121,20 @@ public:
     /**
      * @brief 创建 Vulkan Surface
      *
-     * @param instance 已创建的 VkInstance
-     * @return 成功返回 VkSurfaceKHR，失败返回 VK_NULL_HANDLE
+     * @param instance 已创建的 `vk::Instance`
+     * @return 成功返回 `vk::SurfaceKHR`，失败返回空句柄
      *
      * @note
      * - 依赖 SDL_Vulkan_CreateSurface
      * - 仅在窗口有效时调用
      * - 典型用法：`render::Surface surface(ctx, window)`，无需直接调用本函数
      */
-    VkSurfaceKHR create_vulkan_surface(VkInstance instance) const;
+    vk::SurfaceKHR create_vulkan_surface(vk::Instance instance) const;
 
     /**
      * @brief 创建 Vulkan Surface（`create_vulkan_surface(context.instance())`）
      */
-    VkSurfaceKHR create_vulkan_surface(const render::Context &context) const;
+    vk::SurfaceKHR create_vulkan_surface(const render::Context &context) const;
 
     /**
      * @brief 轮询窗口事件

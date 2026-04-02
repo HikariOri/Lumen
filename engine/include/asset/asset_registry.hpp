@@ -8,7 +8,7 @@
 #include <memory>
 #include <string_view>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "asset/asset_manager.hpp"
 #include "asset/font_registry.hpp"

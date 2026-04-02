@@ -4,7 +4,7 @@
  *
  * @details
  * 描述交错顶点在单个 vertex buffer binding 内的 stride 与各 `location` 的
- * `VkFormat`、字节偏移。用于
+ * `vk::Format`、字节偏移。用于
  * `Primitive::layout`，使「画什么」与管线顶点输入声明一致。
  *
  * 使用定长 `std::array` 存储 attribute，避免每个 `Primitive` 附带 `std::vector`
@@ -26,7 +26,7 @@
 #include <cstdint>
 
 #include <glm/glm.hpp>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen::render {
 
@@ -35,8 +35,8 @@ namespace lumen::render {
  */
 struct VertexAttribute {
     std::uint32_t location {}; ///< 着色器中 `layout(location = …)` 对应槽位
-    VkFormat format {};        ///< 分量类型与维数（如 `vec3` →
-                               ///< `VK_FORMAT_R32G32B32_SFLOAT`）
+    vk::Format format {};      ///< 分量类型与维数（如 `vec3` →
+                               ///< `vk::Format::eR32G32B32Sfloat`）
     std::uint32_t offset {};   ///< 相对当前 binding 起始的字节偏移
 };
 
@@ -96,22 +96,22 @@ struct VertexLayout {
     L.stride = static_cast<std::uint32_t>(sizeof(V));
     L.add_attribute(VertexAttribute {
         .location = 0,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .format = vk::Format::eR32G32B32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(V, position)),
     });
     L.add_attribute(VertexAttribute {
         .location = 1,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .format = vk::Format::eR32G32B32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(V, normal)),
     });
     L.add_attribute(VertexAttribute {
         .location = 2,
-        .format = VK_FORMAT_R32G32_SFLOAT,
+        .format = vk::Format::eR32G32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(V, uv)),
     });
     L.add_attribute(VertexAttribute {
         .location = 3,
-        .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+        .format = vk::Format::eR32G32B32A32Sfloat,
         .offset = static_cast<std::uint32_t>(offsetof(V, tangent)),
     });
     return L;

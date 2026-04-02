@@ -5,7 +5,7 @@
  * 本模块定义渲染管线中的“输出目标（Render Target）抽象层”，用于统一管理：
  *
  * 1. 离屏渲染（Offscreen Rendering）
- *    - 渲染到 VkImage（非屏幕呈现）
+ *    - 渲染到 `vk::Image`（非屏幕呈现）
  *    - 用于：
  *        • 视口（Editor Viewport）
  *        • 后处理链（Post Processing）
@@ -13,7 +13,7 @@
  *        • ImGui 纹理预览
  *
  * 2. 屏幕渲染（Swapchain Rendering）
- *    - 渲染到 VkSwapchainImage
+ *    - 渲染到 swapchain 图像
  *    - 用于最终 Present 到窗口系统
  *
  * 核心设计原则：
@@ -33,7 +33,7 @@
 
 #include <cstdint>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/context.hpp"
 #include "render/pass/render_pass.hpp"
@@ -52,7 +52,7 @@ namespace render {
  * --------------------------------------
  * - format 必须与 RenderPass attachment format 匹配
  * - colorFinalLayout 决定“是否可被 shader 采样”
- * - depth attachment 通常为 VK_FORMAT_D32_SFLOAT
+ * - depth attachment 通常为 `vk::Format::eD32Sfloat`
  */
 struct OffscreenRenderTargetConfig {
     /// 渲染分辨率（离屏 framebuffer 尺寸）
@@ -60,7 +60,7 @@ struct OffscreenRenderTargetConfig {
     uint32_t height { 0 };
 
     /// 颜色附件格式（影响 RenderPass / Image / Framebuffer）
-    VkFormat format { VK_FORMAT_R8G8B8A8_SRGB };
+    vk::Format format { vk::Format::eR8G8B8A8Srgb };
 
     /// 是否创建 depth buffer（用于 3D 场景）
     bool useDepth { true };
@@ -70,17 +70,17 @@ struct OffscreenRenderTargetConfig {
      *
      * 常见取值：
      * --------------------------------------
-     * - VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+     * - `vk::ImageLayout::eShaderReadOnlyOptimal`
      *     → ImGui / PostProcess 采样
      *
-     * - VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+     * - `vk::ImageLayout::eColorAttachmentOptimal`
      *     → 仅用于渲染，不采样
      *
      * @note 注意：
      * 如果要用于 ImGui::Image 或 shader texture sampler，
      * 必须保证 transition 到该 layout
      */
-    VkImageLayout colorFinalLayout { VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    vk::ImageLayout colorFinalLayout { vk::ImageLayout::eShaderReadOnlyOptimal };
 };
 
 /**
@@ -91,10 +91,10 @@ struct OffscreenRenderTargetConfig {
  *
  * 包含：
  * --------------------------------------
- * - VkImage（color / depth）
- * - VkImageView
- * - VkFramebuffer
- * - VkRenderPass
+ * - `vk::Image`（color / depth）
+ * - `vk::ImageView`
+ * - `vk::Framebuffer`
+ * - `vk::RenderPass`
  *
  * 使用场景：
  * --------------------------------------
@@ -163,7 +163,7 @@ public:
      * - ImGui::Image
      * - shader sampler binding
      */
-    [[nodiscard]] VkImageView color_view() const;
+    [[nodiscard]] vk::ImageView color_view() const;
 
     /**
      * @brief 获取底层 Image（RenderGraph 使用）
@@ -178,19 +178,19 @@ public:
     /**
      * @brief 采样前目标 layout
      */
-    [[nodiscard]] VkImageLayout color_sample_layout() const {
+    [[nodiscard]] vk::ImageLayout color_sample_layout() const {
         return config_.colorFinalLayout;
     }
 
     /**
      * @brief Framebuffer（通常单层 or 多层）
      */
-    [[nodiscard]] VkFramebuffer framebuffer() const;
+    [[nodiscard]] vk::Framebuffer framebuffer() const;
 
     /**
      * @brief RenderPass（定义 attachment / subpass / dependency）
      */
-    [[nodiscard]] VkRenderPass render_pass() const;
+    [[nodiscard]] vk::RenderPass render_pass() const;
 
     /**
      * @brief 与 `render_pass()` 同一对象，供 `GraphicsPipeline::create` 等需要 `RenderPass&` 的 API
@@ -202,11 +202,11 @@ public:
     /**
      * @brief 当前渲染分辨率
      */
-    [[nodiscard]] VkExtent2D extent() const { return { width_, height_ }; }
+    [[nodiscard]] vk::Extent2D extent() const { return { width_, height_ }; }
 
     [[nodiscard]] uint32_t width() const { return width_; }
     [[nodiscard]] uint32_t height() const { return height_; }
-    [[nodiscard]] VkFormat format() const { return config_.format; }
+    [[nodiscard]] vk::Format format() const { return config_.format; }
 
     /**
      * @brief 是否有效（资源已创建）
@@ -216,7 +216,7 @@ public:
                                ? external_rp_->is_valid()
                                : renderPass_.is_valid();
         return rp_ok && framebuffer_.count() > 0 &&
-               framebuffer_.get(0) != VK_NULL_HANDLE;
+               static_cast<bool>(framebuffer_.get(0));
     }
 
 private:
@@ -224,7 +224,7 @@ private:
     bool create_internal_(const Context &ctx);
 
     const Context *ctx_ { nullptr };
-    /// 非空时不持有 `VkRenderPass`，仅借用；须长于本对象
+    /// 非空时不持有 `RenderPass` 的独占权，仅借用；须长于本对象
     const RenderPass *external_rp_ { nullptr };
     bool owns_render_pass_ { true };
 
@@ -245,7 +245,7 @@ private:
  *
  * 与 Offscreen RenderTarget 的关键区别：
  * --------------------------------------
- * - Offscreen → 用户管理 VkImage
+ * - Offscreen → 用户管理离屏图像
  * - Swapchain → Vulkan 管理 present image
  *
  * 该类仅负责：
@@ -275,17 +275,17 @@ public:
      *
      * @param index swapchain image index
      */
-    [[nodiscard]] VkFramebuffer framebuffer(uint32_t index) const;
+    [[nodiscard]] vk::Framebuffer framebuffer(uint32_t index) const;
 
     /**
      * @brief swapchain 分辨率
      */
-    [[nodiscard]] VkExtent2D extent() const;
+    [[nodiscard]] vk::Extent2D extent() const;
 
     /**
      * @brief swapchain format
      */
-    [[nodiscard]] VkFormat format() const;
+    [[nodiscard]] vk::Format format() const;
 
     /**
      * @brief image 数量（双/三缓冲）

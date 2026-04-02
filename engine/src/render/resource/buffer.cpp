@@ -16,26 +16,8 @@
 #include "render/context.hpp"
 
 #include <cstring>
-#include <utility>
 
 namespace lumen::render {
-
-namespace {
-
-VkBufferUsageFlags to_usage_flags(BufferUsage usage) {
-    switch (usage) {
-    case BufferUsage::Vertex: return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    case BufferUsage::Index: return VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    case BufferUsage::Uniform: return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    case BufferUsage::Storage: return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    case BufferUsage::Staging:
-    case BufferUsage::TransferSrc: return VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    case BufferUsage::TransferDst: return VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    }
-    std::unreachable();
-}
-
-} // namespace
 
 bool Buffer::create(const Context &ctx, const BufferCreateInfo &createInfo) {
     if (createInfo.size == 0) {
@@ -58,16 +40,15 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &createInfo) {
         destroy_();
     }
 
-    vkDevice = ctx.device();
+    device_ = ctx.device();
     vmaAllocator = vma;
     byteSize = createInfo.size;
     persistentMappedBase = nullptr;
 
-    VkBufferCreateInfo bufferInfo { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    vk::BufferCreateInfo bufferInfo {};
     bufferInfo.size = createInfo.size;
-    bufferInfo.usage =
-        to_usage_flags(createInfo.usage) | createInfo.usageFlagsExtra;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    bufferInfo.usage = createInfo.usage;
+    bufferInfo.sharingMode = vk::SharingMode::eExclusive;
 
     VmaAllocationCreateInfo allocCreate {};
     allocCreate.usage = VMA_MEMORY_USAGE_AUTO;
@@ -81,20 +62,24 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &createInfo) {
         allocCreate.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
 
-    VkResult result = vmaCreateBuffer(vmaAllocator, &bufferInfo, &allocCreate,
-                                      &vkBuffer, &vmaAllocation, nullptr);
+    VkBuffer vk_buf {};
+    VkResult result = vmaCreateBuffer(
+        vmaAllocator,
+        reinterpret_cast<const VkBufferCreateInfo *>(&bufferInfo),
+        &allocCreate, &vk_buf, &vmaAllocation, nullptr);
 
     if (result != VK_SUCCESS) {
         LUMEN_LOG_ERROR("Buffer 创建失败: {} size={}", static_cast<int>(result),
                         createInfo.size);
 
-        vkDevice = VK_NULL_HANDLE;
+        device_ = nullptr;
         vmaAllocator = nullptr;
-        vkBuffer = VK_NULL_HANDLE;
+        buffer_ = nullptr;
         vmaAllocation = nullptr;
         byteSize = 0;
         return false;
     }
+    buffer_ = vk_buf;
 
     if (createInfo.persistentlyMapped) {
         VmaAllocationInfo ai {};
@@ -102,10 +87,11 @@ bool Buffer::create(const Context &ctx, const BufferCreateInfo &createInfo) {
         persistentMappedBase = ai.pMappedData;
         if (persistentMappedBase == nullptr) {
             LUMEN_LOG_ERROR("Buffer 创建失败: 持久映射未返回 pMappedData");
-            vmaDestroyBuffer(vmaAllocator, vkBuffer, vmaAllocation);
-            vkDevice = VK_NULL_HANDLE;
+            vmaDestroyBuffer(vmaAllocator, static_cast<VkBuffer>(buffer_),
+                             vmaAllocation);
+            device_ = nullptr;
             vmaAllocator = nullptr;
-            vkBuffer = VK_NULL_HANDLE;
+            buffer_ = nullptr;
             vmaAllocation = nullptr;
             byteSize = 0;
             return false;
@@ -197,31 +183,31 @@ void Buffer::invalidate_mapped_range(const size_t byte_offset,
 void Buffer::destroy_() {
     persistentMappedBase = nullptr;
 
-    if (vkBuffer != VK_NULL_HANDLE && vmaAllocator != nullptr &&
-        vmaAllocation != nullptr) {
+    if (buffer_ && vmaAllocator != nullptr && vmaAllocation != nullptr) {
 
-        vmaDestroyBuffer(vmaAllocator, vkBuffer, vmaAllocation);
+        vmaDestroyBuffer(vmaAllocator, static_cast<VkBuffer>(buffer_),
+                         vmaAllocation);
 
-        vkBuffer = VK_NULL_HANDLE;
+        buffer_ = nullptr;
         vmaAllocation = nullptr;
     }
 
     vmaAllocator = nullptr;
-    vkDevice = VK_NULL_HANDLE;
+    device_ = nullptr;
     byteSize = 0;
 }
 
 Buffer::~Buffer() { destroy_(); }
 
 Buffer::Buffer(Buffer &&rhs) noexcept
-    : vkDevice { rhs.vkDevice }, vmaAllocator { rhs.vmaAllocator },
-      vkBuffer { rhs.vkBuffer }, vmaAllocation { rhs.vmaAllocation },
+    : device_ { rhs.device_ }, vmaAllocator { rhs.vmaAllocator },
+      buffer_ { rhs.buffer_ }, vmaAllocation { rhs.vmaAllocation },
       byteSize { rhs.byteSize },
       persistentMappedBase { rhs.persistentMappedBase } {
 
-    rhs.vkDevice = VK_NULL_HANDLE;
+    rhs.device_ = nullptr;
     rhs.vmaAllocator = nullptr;
-    rhs.vkBuffer = VK_NULL_HANDLE;
+    rhs.buffer_ = nullptr;
     rhs.vmaAllocation = nullptr;
     rhs.byteSize = 0;
     rhs.persistentMappedBase = nullptr;
@@ -234,16 +220,16 @@ Buffer &Buffer::operator=(Buffer &&rhs) noexcept {
 
     destroy_();
 
-    vkDevice = rhs.vkDevice;
+    device_ = rhs.device_;
     vmaAllocator = rhs.vmaAllocator;
-    vkBuffer = rhs.vkBuffer;
+    buffer_ = rhs.buffer_;
     vmaAllocation = rhs.vmaAllocation;
     byteSize = rhs.byteSize;
     persistentMappedBase = rhs.persistentMappedBase;
 
-    rhs.vkDevice = VK_NULL_HANDLE;
+    rhs.device_ = nullptr;
     rhs.vmaAllocator = nullptr;
-    rhs.vkBuffer = VK_NULL_HANDLE;
+    rhs.buffer_ = nullptr;
     rhs.vmaAllocation = nullptr;
     rhs.byteSize = 0;
     rhs.persistentMappedBase = nullptr;
@@ -252,18 +238,18 @@ Buffer &Buffer::operator=(Buffer &&rhs) noexcept {
 }
 
 bool Buffer::create_device_local_upload_impl(
-    const Context &ctx, VkQueue transferQueue, CommandPool &cmdPool,
-    BufferUsage usage, const void *srcBytes, size_t byteCount) {
+    const Context &ctx, vk::Queue transferQueue, CommandPool &cmdPool,
+    vk::BufferUsageFlags usage, const void *srcBytes, size_t byteCount) {
     if (!srcBytes || byteCount == 0) {
         return false;
     }
 
-    const BufferCreateInfo createInfo { .size = byteCount,
-                                        .usage = usage,
-                                        .hostVisible = false,
-                                        .usageFlagsExtra =
-                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                        .persistentlyMapped = false };
+    const BufferCreateInfo createInfo {
+        .size = byteCount,
+        .usage = usage | vk::BufferUsageFlagBits::eTransferDst,
+        .hostVisible = false,
+        .persistentlyMapped = false,
+    };
     if (!create(ctx, createInfo)) {
         return false;
     }
@@ -276,13 +262,12 @@ bool Buffer::create_device_local_upload_impl(
     staging.upload(srcBytes, byteCount);
 
     const bool ok =
-        cmdPool.submit_one_shot(transferQueue, [&](const CommandBuffer &cmd) {
-            VkBufferCopy region {};
+        cmdPool.submit_one_shot(transferQueue, [&](vk::CommandBuffer cmd) {
+            vk::BufferCopy region {};
             region.srcOffset = 0;
             region.dstOffset = 0;
-            region.size = static_cast<VkDeviceSize>(byteCount);
-            vkCmdCopyBuffer(cmd.handle(), staging.handle(), handle(), 1,
-                            &region);
+            region.size = static_cast<vk::DeviceSize>(byteCount);
+            cmd.copyBuffer(staging.handle(), handle(), 1, &region);
         });
 
     if (!ok) {
@@ -294,55 +279,57 @@ bool Buffer::create_device_local_upload_impl(
 
 bool VertexBuffer::create(const Context &ctx, size_t byteCount,
                           bool hostVisible) {
-    return Buffer::create(ctx, { .size = byteCount,
-                                 .usage = BufferUsage::Vertex,
-                                 .hostVisible = hostVisible,
-                                 .usageFlagsExtra = 0,
-                                 .persistentlyMapped = false });
+    return Buffer::create(
+        ctx, { .size = byteCount,
+               .usage = vk::BufferUsageFlagBits::eVertexBuffer,
+               .hostVisible = hostVisible,
+               .persistentlyMapped = false });
 }
 
 bool VertexBuffer::create_device_local_and_upload(const Context &ctx,
-                                                  VkQueue transferQueue,
+                                                  vk::Queue transferQueue,
                                                   CommandPool &cmdPool,
                                                   const void *srcBytes,
                                                   size_t byteCount) {
     return create_device_local_upload_impl(
-        ctx, transferQueue, cmdPool, BufferUsage::Vertex, srcBytes, byteCount);
+        ctx, transferQueue, cmdPool, vk::BufferUsageFlagBits::eVertexBuffer,
+        srcBytes, byteCount);
 }
 
 bool IndexBuffer::create(const Context &ctx, size_t byteCount,
                          bool hostVisible) {
-    return Buffer::create(ctx, { .size = byteCount,
-                                 .usage = BufferUsage::Index,
-                                 .hostVisible = hostVisible,
-                                 .usageFlagsExtra = 0,
-                                 .persistentlyMapped = false });
+    return Buffer::create(
+        ctx, { .size = byteCount,
+               .usage = vk::BufferUsageFlagBits::eIndexBuffer,
+               .hostVisible = hostVisible,
+               .persistentlyMapped = false });
 }
 
 bool IndexBuffer::create_device_local_and_upload(const Context &ctx,
-                                                 VkQueue transferQueue,
+                                                 vk::Queue transferQueue,
                                                  CommandPool &cmdPool,
                                                  const void *srcBytes,
                                                  size_t byteCount) {
     return create_device_local_upload_impl(
-        ctx, transferQueue, cmdPool, BufferUsage::Index, srcBytes, byteCount);
+        ctx, transferQueue, cmdPool, vk::BufferUsageFlagBits::eIndexBuffer,
+        srcBytes, byteCount);
 }
 
 bool UniformBuffer::create(const Context &ctx, size_t byteCount,
                            bool hostVisible) {
-    return Buffer::create(ctx, { .size = byteCount,
-                                 .usage = BufferUsage::Uniform,
-                                 .hostVisible = hostVisible,
-                                 .usageFlagsExtra = 0,
-                                 .persistentlyMapped = false });
+    return Buffer::create(
+        ctx, { .size = byteCount,
+               .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+               .hostVisible = hostVisible,
+               .persistentlyMapped = false });
 }
 
 bool UniformBuffer::create_persistent(const Context &ctx, size_t byteCount) {
-    return Buffer::create(ctx, { .size = byteCount,
-                                 .usage = BufferUsage::Uniform,
-                                 .hostVisible = true,
-                                 .usageFlagsExtra = 0,
-                                 .persistentlyMapped = true });
+    return Buffer::create(
+        ctx, { .size = byteCount,
+               .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+               .hostVisible = true,
+               .persistentlyMapped = true });
 }
 
 void UniformBuffer::update(const void *srcBytes, size_t byteCount,
@@ -351,11 +338,11 @@ void UniformBuffer::update(const void *srcBytes, size_t byteCount,
 }
 
 bool StagingBuffer::create(const Context &ctx, size_t byteCount) {
-    return Buffer::create(ctx, { .size = byteCount,
-                                 .usage = BufferUsage::Staging,
-                                 .hostVisible = true,
-                                 .usageFlagsExtra = 0,
-                                 .persistentlyMapped = false });
+    return Buffer::create(
+        ctx, { .size = byteCount,
+               .usage = vk::BufferUsageFlagBits::eTransferSrc,
+               .hostVisible = true,
+               .persistentlyMapped = false });
 }
 
 } // namespace lumen::render

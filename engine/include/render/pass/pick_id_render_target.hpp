@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/context.hpp"
 #include "render/pass/render_pass.hpp"

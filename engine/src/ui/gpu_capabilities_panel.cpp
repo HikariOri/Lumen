@@ -7,7 +7,7 @@
 #include "render/context.hpp"
 
 #include <imgui.h>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace ui {

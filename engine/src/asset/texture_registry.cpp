@@ -74,11 +74,13 @@ TextureRegistry::get_or_create_file(lumen::render::Context &ctx,
     const bool ktx = ends_with_ktx(full);
     bool ok = false;
     if (ktx) {
-        ok = tex->create_from_ktx_file(ctx, full.c_str(), transfer_queue, cmd_pool,
-                                       format, sampler);
+        ok = tex->create_from_ktx_file(
+            ctx, full.c_str(), vk::Queue { transfer_queue }, cmd_pool,
+            static_cast<vk::Format>(format), sampler);
     } else {
-        ok = tex->create_from_file(ctx, full.c_str(), transfer_queue, cmd_pool, sampler,
-                                   format);
+        ok = tex->create_from_file(ctx, full.c_str(), vk::Queue { transfer_queue },
+                                   cmd_pool, sampler,
+                                   static_cast<vk::Format>(format));
     }
     if (!ok) {
         LUMEN_LOG_WARN("TextureRegistry: 上传失败: {}", full);

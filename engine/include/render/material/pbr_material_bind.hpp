@@ -2,6 +2,9 @@
  * @file pbr_material_bind.hpp
  * @brief 前向 PBR：`note/forward_shader.md` 中四组 descriptor set
  * 的布局声明与写入接口
+ *
+ * Vulkan 句柄侧统一使用 **Vulkan-Hpp**（`vk::Device`、`vk::DescriptorSet`、
+ * `vk::Buffer`、`vk::Queue` 等），与 `descriptor.hpp` / `texture.hpp` 一致。
  */
 
 #pragma once
@@ -11,8 +14,6 @@
 #include <cstdint>
 #include <string_view>
 #include <vector>
-
-#include <vulkan/vulkan.h>
 
 #include "render/material/material.hpp"
 #include "render/resource/descriptor.hpp"
@@ -111,7 +112,7 @@ pbr_frame_ibl_descriptor_bindings();
 
 /**
  * @brief 构建 **Set 2** 的绑定布局：每物体动态偏移的
- * `PbrObjectUbo`（`VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC`）
+ * `PbrObjectUbo`（`vk::DescriptorType::eUniformBufferDynamic`）
  * @return 供 `DescriptorSetLayout::create` 使用的 binding 列表
  */
 [[nodiscard]] std::vector<DescriptorBinding> pbr_object_descriptor_bindings();
@@ -134,7 +135,7 @@ pbr_frame_ibl_descriptor_bindings();
  * @param brdfLut           BRDF 积分 LUT（2D）
  */
 void write_pbr_frame_ibl_descriptor_set(
-    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer frameUbo,
+    vk::Device device, vk::DescriptorSet descriptorSet, vk::Buffer frameUbo,
     std::size_t frameUboRange, const Texture &irradianceCube,
     const Texture &prefilterCube, const Texture &brdfLut);
 
@@ -149,22 +150,22 @@ void write_pbr_frame_ibl_descriptor_set(
  * @param placeholders       引擎默认 1×1 占位纹理，避免绑定未初始化图像
  */
 void write_pbr_material_descriptor_set(
-    VkDevice device, VkDescriptorSet descriptorSet, VkBuffer materialUbo,
+    vk::Device device, vk::DescriptorSet descriptorSet, vk::Buffer materialUbo,
     std::size_t materialUboRange, const Material &material,
     const PbrPlaceholderTextures &placeholders);
 
 /**
  * @brief 写入 **Set 2**：仅绑定动态 UBO；实际物体数据通过
- * `vkCmdBindDescriptorSets` 的 @c pDynamicOffsets 选择偏移
+ * 录制 `bindDescriptorSets` 时传入的动态偏移（@c pDynamicOffsets）选择槽位
  * @param device           逻辑设备
  * @param descriptorSet    已分配的 descriptor set
  * @param objectUbo         backing store（可含多份 `PbrObjectUbo` 连续排列）
  * @param perObjectRange   单份 `PbrObjectUbo` 的字节跨度（须满足设备
  * `minUniformBufferOffsetAlignment`）
  */
-void write_pbr_object_descriptor_set_dynamic(VkDevice device,
-                                             VkDescriptorSet descriptorSet,
-                                             VkBuffer objectUbo,
+void write_pbr_object_descriptor_set_dynamic(vk::Device device,
+                                             vk::DescriptorSet descriptorSet,
+                                             vk::Buffer objectUbo,
                                              std::size_t perObjectRange);
 
 /**
@@ -174,15 +175,15 @@ void write_pbr_object_descriptor_set_dynamic(VkDevice device,
  * @param lightUbo        光源 UBO
  * @param lightUboRange   上述 UBO 的字节范围
  */
-void write_pbr_light_descriptor_set(VkDevice device,
-                                    VkDescriptorSet descriptorSet,
-                                    VkBuffer lightUbo,
+void write_pbr_light_descriptor_set(vk::Device device,
+                                    vk::DescriptorSet descriptorSet,
+                                    vk::Buffer lightUbo,
                                     std::size_t lightUboRange);
 
 /**
  * @brief 从两张灰度图（金属度、粗糙度各一张）合并为一张 **glTF MR** 纹理：R
  * 保留、G=粗糙度、B=金属度、A=255
- * @param[out] outTexture    输出的 `Texture`（`VK_FORMAT_R8G8B8A8_UNORM`）
+ * @param[out] outTexture    输出的 `Texture`（`vk::Format::eR8G8B8A8Unorm`）
  * @param ctx                渲染上下文
  * @param metallicPath       金属度图像路径（磁盘路径，由调用方保证可读）
  * @param roughnessPath      粗糙度图像路径
@@ -192,6 +193,6 @@ void write_pbr_light_descriptor_set(VkDevice device,
  */
 bool create_metallic_roughness_texture_from_grayscale_files(
     Texture &outTexture, const Context &ctx, const char *metallicPath,
-    const char *roughnessPath, VkQueue transferQueue, CommandPool &commandPool);
+    const char *roughnessPath, vk::Queue transferQueue, CommandPool &commandPool);
 
 } // namespace lumen::render

@@ -10,7 +10,7 @@
 #include <string>
 #include <unordered_map>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "asset/pbr_material_instance.hpp"
 

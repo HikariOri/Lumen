@@ -11,9 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <vulkan/vulkan.h>
-
-#include "vertex_attribute_format.hpp"
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -22,18 +20,9 @@ class Context;
 class DescriptorSetLayout;
 class RenderPass;
 
-/**
- * @brief 顶点缓冲绑定步进方式（对应 VkVertexInputRate）
- */
-enum class VertexInputRate {
-    PerVertex,   ///< 每个顶点推进一次（VK_VERTEX_INPUT_RATE_VERTEX）
-    PerInstance, ///< 每个实例推进一次（VK_VERTEX_INPUT_RATE_INSTANCE）
-};
-
-/// 着色器阶段
 struct ShaderStage {
-    VkShaderModule module { VK_NULL_HANDLE };
-    VkShaderStageFlagBits stage { VK_SHADER_STAGE_VERTEX_BIT };
+    vk::ShaderModule module {};
+    vk::ShaderStageFlagBits stage { vk::ShaderStageFlagBits::eVertex };
     const char *entryPoint { "main" };
 };
 
@@ -41,14 +30,14 @@ struct ShaderStage {
 struct VertexInputBinding {
     uint32_t binding { 0 };
     uint32_t stride { 0 };
-    VertexInputRate inputRate { VertexInputRate::PerVertex };
+    vk::VertexInputRate inputRate { vk::VertexInputRate::eVertex };
 };
 
-/// 顶点属性（`format` 决定 VkFormat；矩阵类会占用连续多个 location）
+/// 顶点属性（与 `VkVertexInputAttributeDescription` 一一对应；矩阵需按列拆成多条）
 struct VertexInputAttribute {
     uint32_t location { 0 };
     uint32_t binding { 0 };
-    VertexAttributeFormat format { VertexAttributeFormat::F32Vec3 };
+    vk::Format format { vk::Format::eR32G32B32Sfloat };
     uint32_t offset { 0 };
 };
 
@@ -57,15 +46,15 @@ struct GraphicsPipelineConfig {
     std::vector<ShaderStage> shaderStages {};
     std::vector<VertexInputBinding> vertexBindings {};
     std::vector<VertexInputAttribute> vertexAttributes {};
-    VkPrimitiveTopology topology { VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
-    VkPolygonMode polygonMode { VK_POLYGON_MODE_FILL };
-    VkCullModeFlags cullMode { VK_CULL_MODE_BACK_BIT };
-    VkFrontFace frontFace {
-        VK_FRONT_FACE_CLOCKWISE
+    vk::PrimitiveTopology topology { vk::PrimitiveTopology::eTriangleList };
+    vk::PolygonMode polygonMode { vk::PolygonMode::eFill };
+    vk::CullModeFlags cullMode { vk::CullModeFlagBits::eBack };
+    vk::FrontFace frontFace {
+        vk::FrontFace::eClockwise
     }; // 与 proj[1][1]*=-1 配合，见 docs/reference/glm-vulkan.md
     bool depthTest { true };
     bool depthWrite { true };
-    VkCompareOp depthCompareOp { VK_COMPARE_OP_LESS };
+    vk::CompareOp depthCompareOp { vk::CompareOp::eLess };
     /// 预乘前开启典型 SrcAlpha / OneMinusSrcAlpha 颜色混合（图标、粒子等）
     bool alphaBlend { false };
 };
@@ -91,17 +80,17 @@ public:
      */
     bool
     create(const Context &ctx,
-           const std::vector<VkDescriptorSetLayout> &setLayouts,
-           const std::vector<VkPushConstantRange> &pushConstantRanges = {});
+           const std::vector<vk::DescriptorSetLayout> &setLayouts,
+           const std::vector<vk::PushConstantRange> &pushConstantRanges = {});
 
-    [[nodiscard]] VkPipelineLayout handle() const { return layout_; }
-    [[nodiscard]] bool is_valid() const { return layout_ != VK_NULL_HANDLE; }
+    [[nodiscard]] vk::PipelineLayout handle() const { return layout_; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(layout_); }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkPipelineLayout layout_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::PipelineLayout layout_ {};
 };
 
 /**
@@ -129,14 +118,14 @@ public:
      */
     bool save_to_file(const char *filePath);
 
-    [[nodiscard]] VkPipelineCache handle() const { return cache_; }
-    [[nodiscard]] bool is_valid() const { return cache_ != VK_NULL_HANDLE; }
+    [[nodiscard]] vk::PipelineCache handle() const { return cache_; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(cache_); }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkPipelineCache cache_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::PipelineCache cache_ {};
 };
 
 /**
@@ -161,28 +150,24 @@ public:
      * @param config 管线配置
      * @param cache 可选管线缓存
      */
-    bool create(const Context &ctx, VkPipelineLayout pipelineLayout,
-                VkRenderPass renderPass, uint32_t subpassIndex,
+    bool create(const Context &ctx, vk::PipelineLayout pipelineLayout,
+                vk::RenderPass renderPass, uint32_t subpassIndex,
                 const GraphicsPipelineConfig &config,
-                VkPipelineCache cache = VK_NULL_HANDLE);
+                vk::PipelineCache cache = {});
 
-    /**
-     * @brief 同 `create`（`VkPipelineLayout` /
-     * `VkRenderPass`），传入封装对象即可
-     */
     bool create(const Context &ctx, const PipelineLayout &pipelineLayout,
                 const RenderPass &renderPass, uint32_t subpassIndex,
                 const GraphicsPipelineConfig &config,
-                VkPipelineCache cache = VK_NULL_HANDLE);
+                vk::PipelineCache cache = {});
 
-    [[nodiscard]] VkPipeline handle() const { return pipeline_; }
-    [[nodiscard]] bool is_valid() const { return pipeline_ != VK_NULL_HANDLE; }
+    [[nodiscard]] vk::Pipeline handle() const { return pipeline_; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(pipeline_); }
 
 private:
     void destroy_();
 
-    VkDevice device_ { VK_NULL_HANDLE };
-    VkPipeline pipeline_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
+    vk::Pipeline pipeline_ {};
 };
 
 } // namespace render

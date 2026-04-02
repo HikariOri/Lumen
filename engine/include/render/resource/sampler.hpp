@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -33,7 +33,7 @@ class Context;
  * SamplerConfig（创建参数）
  * ============================
  *
- * Vulkan 原生 VkSamplerCreateInfo 的“高层封装”。
+ * 与 `vk::SamplerCreateInfo` 字段一一对应的高层封装。
  *
  * 设计目标：
  *  - 简化 Vulkan 冗长结构体
@@ -61,7 +61,7 @@ struct SamplerConfig {
      * GPU层行为：
      *   - 读取 2~4 texels 做插值
      */
-    VkFilter magFilter { VK_FILTER_LINEAR };
+    vk::Filter magFilter { vk::Filter::eLinear };
 
     /**
      * ============================
@@ -78,7 +78,7 @@ struct SamplerConfig {
      *   - GPU 仍会采样 base level
      *   - 可能产生闪烁 aliasing
      */
-    VkFilter minFilter { VK_FILTER_LINEAR };
+    vk::Filter minFilter { vk::Filter::eLinear };
 
     /**
      * ============================
@@ -144,7 +144,7 @@ struct SamplerConfig {
      *   - (2) screen space gradient
      *   - (3) hardware derivatives (ddx/ddy)
      */
-    VkSamplerMipmapMode mipmapMode { VK_SAMPLER_MIPMAP_MODE_LINEAR };
+    vk::SamplerMipmapMode mipmapMode { vk::SamplerMipmapMode::eLinear };
 
     /**
      * ============================
@@ -165,9 +165,9 @@ struct SamplerConfig {
      * W 维度：
      *   - 3D texture 或 array texture 使用
      */
-    VkSamplerAddressMode addressModeU { VK_SAMPLER_ADDRESS_MODE_REPEAT };
-    VkSamplerAddressMode addressModeV { VK_SAMPLER_ADDRESS_MODE_REPEAT };
-    VkSamplerAddressMode addressModeW { VK_SAMPLER_ADDRESS_MODE_REPEAT };
+    vk::SamplerAddressMode addressModeU { vk::SamplerAddressMode::eRepeat };
+    vk::SamplerAddressMode addressModeV { vk::SamplerAddressMode::eRepeat };
+    vk::SamplerAddressMode addressModeW { vk::SamplerAddressMode::eRepeat };
 
     /**
      * ============================
@@ -216,7 +216,7 @@ struct SamplerConfig {
      *   - 渲染调试
      */
     float minLod { 0.0F };
-    float maxLod { VK_LOD_CLAMP_NONE };
+    float maxLod { vk::LodClampNone };
 
     /**
      * borderColor（CLAMP_TO_BORDER 时的边界色）
@@ -224,7 +224,7 @@ struct SamplerConfig {
      * 仅当 addressMode* 为 VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER 时生效。
      * 常用：阴影贴图用 INT_OPAQUE_BLACK，自定义浮点边界用 FLOAT_* 系列。
      */
-    VkBorderColor borderColor { VK_BORDER_COLOR_INT_OPAQUE_BLACK };
+    vk::BorderColor borderColor { vk::BorderColor::eIntOpaqueBlack };
 };
 
 /**
@@ -272,13 +272,13 @@ public:
      * 创建 VkSampler：
      *
      * 内部映射：
-     * SamplerConfig → VkSamplerCreateInfo
+     * SamplerConfig → vk::SamplerCreateInfo
      *
      * 关键 Vulkan 字段说明：
      *
-     * - magFilter / minFilter → VkFilter
-     * - mipmapMode → VkSamplerMipmapMode
-     * - addressModeU/V/W → VkSamplerAddressMode
+     * - magFilter / minFilter → vk::Filter
+     * - mipmapMode → vk::SamplerMipmapMode
+     * - addressModeU/V/W → vk::SamplerAddressMode
      * - anisotropyEnable → maxAnisotropy > 1.0
      * - maxAnisotropy → device feature dependent
      * - minLod / maxLod → LOD clamp
@@ -294,12 +294,14 @@ public:
      * 返回 Vulkan 原生句柄
      * 用于 descriptor set 绑定
      */
-    [[nodiscard]] VkSampler handle() const { return sampler_; }
+    [[nodiscard]] VkSampler handle() const {
+        return static_cast<VkSampler>(sampler_);
+    }
 
     /**
      * 判断是否已创建成功
      */
-    [[nodiscard]] bool is_valid() const { return sampler_ != VK_NULL_HANDLE; }
+    [[nodiscard]] bool is_valid() const { return static_cast<bool>(sampler_); }
 
 private:
     /**
@@ -315,12 +317,12 @@ private:
      * Vulkan 逻辑设备
      * Sampler 生命周期必须绑定 device
      */
-    VkDevice device_ { VK_NULL_HANDLE };
+    vk::Device device_ {};
 
     /**
      * Vulkan sampler handle
      */
-    VkSampler sampler_ { VK_NULL_HANDLE };
+    vk::Sampler sampler_ {};
 };
 
 } // namespace render

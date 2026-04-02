@@ -13,7 +13,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/pipeline.hpp"
 #include "render/resource/buffer.hpp"
@@ -34,10 +34,10 @@ namespace ui {
  */
 struct LightViewportGizmosCreateInfo {
     const render::Context *ctx { nullptr };
-    VkRenderPass scene_render_pass { VK_NULL_HANDLE };
+    vk::RenderPass scene_render_pass {};
     uint32_t subpass_index { 0 };
     render::CommandPool *cmd_pool { nullptr };
-    VkQueue graphics_queue { VK_NULL_HANDLE };
+    vk::Queue graphics_queue {};
     uint32_t max_frames_in_flight { 2 };
     float icon_half_extent { 0.18f };
     const char *spirv_light_icon_vert { nullptr };
@@ -52,7 +52,7 @@ struct LightViewportGizmosCreateInfo {
 /**
  * @brief 封装光源图标与调试线资源及录制逻辑
  *
- * 须在 **与主场景相同** 的 `VkRenderPass` / subpass 内调用 `record`（深度测、混合与
+ * 须在 **与主场景相同** 的 `vk::RenderPass` / subpass 内调用 `record`（深度测、混合与
  * demo 原实现一致）。
  */
 class LightViewportGizmos {
@@ -86,9 +86,9 @@ public:
                        uint32_t frame_index);
 
     /**
-     * @pre 已 `vkCmdSetViewport` / `vkCmdSetScissor` 与场景一致；仍在同一 render pass 内
+     * @pre 已 `setViewport` / `setScissor` 与场景一致；仍在同一 render pass 内
      */
-    void record(VkCommandBuffer cmd, uint32_t frame_index,
+    void record(vk::CommandBuffer cmd, uint32_t frame_index,
                 const glm::mat4 &view, const glm::mat4 &proj,
                 const entt::registry &registry) const;
 
@@ -113,7 +113,7 @@ private:
     render::IndexBuffer icon_index_buffer_;
     render::DescriptorSetLayout icon_desc_layout_;
     render::DescriptorPool icon_desc_pool_;
-    VkDescriptorSet icon_sets_[3] {};
+    vk::DescriptorSet icon_sets_[3] {};
     render::PipelineLayout icon_pipeline_layout_;
     render::GraphicsPipeline icon_pipeline_;
     render::PipelineLayout dbg_pipeline_layout_;

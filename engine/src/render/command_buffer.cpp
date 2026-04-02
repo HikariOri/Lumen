@@ -8,104 +8,22 @@
 #include "core/logger.hpp"
 
 #include "render/context.hpp"
-#include <utility>
+
+#include <array>
 
 namespace lumen::render {
-
-CommandBuffer::CommandBuffer(CommandBuffer &&other) noexcept : vk_(other.vk_) {
-    other.vk_ = VK_NULL_HANDLE;
-}
-
-CommandBuffer &CommandBuffer::operator=(CommandBuffer &&other) noexcept {
-    if (this != &other) {
-        vk_ = other.vk_;
-        other.vk_ = VK_NULL_HANDLE;
-    }
-    return *this;
-}
-
-bool CommandBuffer::begin(CommandBufferUsage usage) {
-    if (!is_valid()) {
-        LUMEN_LOG_ERROR("CommandBuffer::begin: 无效句柄");
-        return false;
-    }
-    const VkCommandBufferBeginInfo begin_info {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = command_buffer_usage_to_vk(usage),
-    };
-    const VkResult result = vkBeginCommandBuffer(vk_, &begin_info);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR(
-            "CommandBuffer::begin: vkBeginCommandBuffer 失败 result={}",
-            static_cast<int>(result));
-        return false;
-    }
-    return true;
-}
-
-bool CommandBuffer::begin(const VkCommandBufferBeginInfo &info) {
-    if (!is_valid()) {
-        LUMEN_LOG_ERROR("CommandBuffer::begin: 无效句柄");
-        return false;
-    }
-    const VkResult result = vkBeginCommandBuffer(vk_, &info);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR(
-            "CommandBuffer::begin(info): vkBeginCommandBuffer 失败 result={}",
-            static_cast<int>(result));
-        return false;
-    }
-    return true;
-}
-
-bool CommandBuffer::end() {
-    if (!is_valid()) {
-        LUMEN_LOG_ERROR("CommandBuffer::end: 无效句柄");
-        return false;
-    }
-    const VkResult result = vkEndCommandBuffer(vk_);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("CommandBuffer::end: vkEndCommandBuffer 失败 result={}",
-                        static_cast<int>(result));
-        return false;
-    }
-    return true;
-}
-
-bool CommandBuffer::reset(VkCommandBufferResetFlags flags) {
-    if (!is_valid()) {
-        LUMEN_LOG_ERROR("CommandBuffer::reset: 无效句柄");
-        return false;
-    }
-    const VkResult result = vkResetCommandBuffer(vk_, flags);
-    if (result != VK_SUCCESS) {
-        LUMEN_LOG_ERROR(
-            "CommandBuffer::reset: vkResetCommandBuffer 失败 result={}",
-            static_cast<int>(result));
-        return false;
-    }
-    return true;
-}
-
-VkCommandBufferLevel command_buffer_level_to_vk(CommandBufferLevel level) {
-    return level == CommandBufferLevel::Primary
-               ? VK_COMMAND_BUFFER_LEVEL_PRIMARY
-               : VK_COMMAND_BUFFER_LEVEL_SECONDARY;
-}
 
 bool CommandPool::create(const Context &ctx, uint32_t queueFamilyIndex) {
     device_ = ctx.device();
 
-    VkCommandPoolCreateInfo createInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-    };
+    vk::CommandPoolCreateInfo createInfo {};
     createInfo.queueFamilyIndex = queueFamilyIndex;
-    createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    createInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
 
-    VkResult result =
-        vkCreateCommandPool(device_, &createInfo, nullptr, &pool_);
+    const vk::Result result =
+        device_.createCommandPool(&createInfo, nullptr, &pool_);
 
-    if (result == VK_SUCCESS) {
+    if (result == vk::Result::eSuccess) {
         LUMEN_LOG_DEBUG("CommandPool 创建成功, queueFamily={}",
                         queueFamilyIndex);
     } else {
@@ -113,123 +31,103 @@ bool CommandPool::create(const Context &ctx, uint32_t queueFamilyIndex) {
                         static_cast<int>(result));
     }
 
-    return result == VK_SUCCESS;
+    return result == vk::Result::eSuccess;
 }
 
-std::vector<CommandBuffer> CommandPool::allocate(uint32_t count,
-                                                 CommandBufferLevel level) {
-    std::vector<VkCommandBuffer> raw(count);
+std::vector<vk::CommandBuffer>
+CommandPool::allocate(uint32_t count, vk::CommandBufferLevel level) {
+    std::vector<vk::CommandBuffer> raw(count);
 
-    VkCommandBufferAllocateInfo allocInfo {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
-    };
+    vk::CommandBufferAllocateInfo allocInfo {};
     allocInfo.commandPool = pool_;
-    allocInfo.level = command_buffer_level_to_vk(level);
+    allocInfo.level = level;
     allocInfo.commandBufferCount = count;
 
-    if (vkAllocateCommandBuffers(device_, &allocInfo, raw.data()) !=
-        VK_SUCCESS) {
-        LUMEN_LOG_ERROR("CommandBuffer 分配失败 count={}", count);
+    if (device_.allocateCommandBuffers(&allocInfo, raw.data()) !=
+        vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("命令缓冲分配失败 count={}", count);
         return {};
     }
 
-    std::vector<CommandBuffer> out;
-    out.reserve(count);
-    for (VkCommandBuffer vk : raw) {
-        out.emplace_back(CommandBuffer(vk));
-    }
-    return out;
+    return raw;
 }
 
-void CommandPool::free(const std::vector<CommandBuffer> &buffers) {
+void CommandPool::free(const std::vector<vk::CommandBuffer> &buffers) {
     if (buffers.empty()) {
         return;
     }
-    std::vector<VkCommandBuffer> raw;
-    raw.reserve(buffers.size());
-    for (const CommandBuffer &b : buffers) {
-        raw.push_back(b.handle());
-    }
-    vkFreeCommandBuffers(device_, pool_, static_cast<uint32_t>(raw.size()),
-                         raw.data());
+    device_.freeCommandBuffers(pool_, buffers);
 }
 
-void CommandPool::free_moved(CommandBuffer &&cb) {
-    if (!cb.is_valid()) {
+void CommandPool::free_one_(vk::CommandBuffer cb) {
+    if (!cb) {
         return;
     }
-    std::vector<CommandBuffer> v;
-    v.push_back(std::move(cb));
-    free(v);
+    const std::array<vk::CommandBuffer, 1> one {{ cb }};
+    device_.freeCommandBuffers(pool_, one);
 }
 
 void CommandPool::reset() {
-    if (pool_ != VK_NULL_HANDLE) {
-        vkResetCommandPool(device_, pool_, 0);
+    if (pool_) {
+        device_.resetCommandPool(pool_, {});
     }
 }
 
 bool CommandPool::submit_one_shot(
-    VkQueue queue,
-    const std::function<void(const CommandBuffer &cmd)> &record) {
-    if (pool_ == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE ||
-        queue == VK_NULL_HANDLE) {
+    vk::Queue queue, const std::function<void(vk::CommandBuffer cmd)> &record) {
+    if (!pool_ || !device_ || !queue) {
         LUMEN_LOG_ERROR("submit_one_shot: 无效的 pool / device / queue");
         return false;
     }
 
-    std::vector<CommandBuffer> buffers =
-        allocate(1, CommandBufferLevel::Primary);
-    if (buffers.empty() || !buffers[0].is_valid()) {
+    std::vector<vk::CommandBuffer> buffers =
+        allocate(1, vk::CommandBufferLevel::ePrimary);
+    if (buffers.empty() || !buffers[0]) {
         return false;
     }
 
-    CommandBuffer cmd = std::move(buffers[0]);
+    vk::CommandBuffer cmd = buffers[0];
 
-    // OneTimeSubmit：本 buffer 仅提交一次后即 free，驱动可据此优化；与帧内复用
-    // buffer 的用法区分
-    if (!cmd.begin()) {
-        free_moved(std::move(cmd));
+    vk::CommandBufferBeginInfo beginInfo {};
+    beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+    if (cmd.begin(&beginInfo) != vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("submit_one_shot: vk::CommandBuffer::begin 失败");
+        free_one_(cmd);
         return false;
     }
 
     record(cmd);
+    cmd.end();
 
-    if (!cmd.end()) {
-        free_moved(std::move(cmd));
+    vk::Fence fence {};
+    vk::FenceCreateInfo fenceInfo {};
+    if (device_.createFence(&fenceInfo, nullptr, &fence) !=
+        vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("submit_one_shot: createFence 失败");
+        free_one_(cmd);
         return false;
     }
 
-    VkCommandBuffer vkCmd = cmd.handle();
-
-    VkFence fence = VK_NULL_HANDLE;
-    VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    if (vkCreateFence(device_, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("submit_one_shot: vkCreateFence 失败");
-        free_moved(std::move(cmd));
-        return false;
-    }
-
-    VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    vk::SubmitInfo submitInfo {};
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &vkCmd;
+    submitInfo.pCommandBuffers = &cmd;
 
-    const VkResult submitResult = vkQueueSubmit(queue, 1, &submitInfo, fence);
-    if (submitResult != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("submit_one_shot: vkQueueSubmit 失败 result={}",
+    const vk::Result submitResult = queue.submit(1, &submitInfo, fence);
+    if (submitResult != vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("submit_one_shot: queue.submit 失败 result={}",
                         static_cast<int>(submitResult));
-        vkDestroyFence(device_, fence, nullptr);
-        free_moved(std::move(cmd));
+        device_.destroyFence(fence, nullptr);
+        free_one_(cmd);
         return false;
     }
 
-    const VkResult waitResult =
-        vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX);
-    vkDestroyFence(device_, fence, nullptr);
-    free_moved(std::move(cmd));
+    const vk::Result waitResult =
+        device_.waitForFences(1, &fence, vk::True, UINT64_MAX);
+    device_.destroyFence(fence, nullptr);
+    free_one_(cmd);
 
-    if (waitResult != VK_SUCCESS) {
-        LUMEN_LOG_ERROR("submit_one_shot: vkWaitForFences 失败 result={}",
+    if (waitResult != vk::Result::eSuccess) {
+        LUMEN_LOG_ERROR("submit_one_shot: waitForFences 失败 result={}",
                         static_cast<int>(waitResult));
         return false;
     }
@@ -238,9 +136,9 @@ bool CommandPool::submit_one_shot(
 }
 
 void CommandPool::destroy_() {
-    if (pool_ != VK_NULL_HANDLE) {
-        vkDestroyCommandPool(device_, pool_, nullptr);
-        pool_ = VK_NULL_HANDLE;
+    if (pool_) {
+        device_.destroyCommandPool(pool_, nullptr);
+        pool_ = nullptr;
     }
 }
 
@@ -248,8 +146,8 @@ CommandPool::~CommandPool() { destroy_(); }
 
 CommandPool::CommandPool(CommandPool &&other) noexcept
     : device_ { other.device_ }, pool_ { other.pool_ } {
-    other.device_ = VK_NULL_HANDLE;
-    other.pool_ = VK_NULL_HANDLE;
+    other.device_ = nullptr;
+    other.pool_ = nullptr;
 }
 
 CommandPool &CommandPool::operator=(CommandPool &&other) noexcept {
@@ -262,8 +160,8 @@ CommandPool &CommandPool::operator=(CommandPool &&other) noexcept {
     device_ = other.device_;
     pool_ = other.pool_;
 
-    other.device_ = VK_NULL_HANDLE;
-    other.pool_ = VK_NULL_HANDLE;
+    other.device_ = nullptr;
+    other.pool_ = nullptr;
 
     return *this;
 }

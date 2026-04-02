@@ -20,7 +20,7 @@
 #include <cstdint>
 #include <string>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 namespace lumen {
 namespace render {
@@ -67,7 +67,7 @@ struct SamplerConfig;
  * @return false 任一阶段失败
  */
 bool load_cubemap_from_face_files(const Context &ctx, const std::string &dir,
-                                  VkQueue transfer_queue, CommandPool &cmd_pool,
+                                  vk::Queue transfer_queue, CommandPool &cmd_pool,
                                   const SamplerConfig &sampler_cfg,
                                   Texture &out_tex,
                                   std::string *out_error = nullptr);
@@ -106,7 +106,7 @@ bool load_cubemap_from_face_files(const Context &ctx, const std::string &dir,
  * @return false 失败
  */
 bool load_cubemap_from_hdr_equirectangular_file(
-    const Context &ctx, const std::string &hdr_path, VkQueue transfer_queue,
+    const Context &ctx, const std::string &hdr_path, vk::Queue transfer_queue,
     CommandPool &cmd_pool, const SamplerConfig &sampler_cfg, Texture &out_tex,
     std::uint32_t face_size = 0, std::string *out_error = nullptr);
 

@@ -206,13 +206,13 @@ static int run_cube3d() {
     lumen::render::DescriptorSetLayout descLayout;
     const std::vector<lumen::render::DescriptorBinding> descBindings = {
         { .binding = 0,
-          .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          .type = vk::DescriptorType::eUniformBuffer,
           .count = 1,
-          .stages = VK_SHADER_STAGE_VERTEX_BIT },
+          .stages = vk::ShaderStageFlagBits::eVertex },
         { .binding = 1,
-          .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .type = vk::DescriptorType::eCombinedImageSampler,
           .count = 1,
-          .stages = VK_SHADER_STAGE_FRAGMENT_BIT },
+          .stages = vk::ShaderStageFlagBits::eFragment },
     };
     if (!descLayout.create(ctx, descBindings)) {
         LUMEN_APP_LOG_ERROR("DescriptorSetLayout 创建失败");
@@ -221,9 +221,9 @@ static int run_cube3d() {
 
     lumen::render::DescriptorPool descPool;
     if (!descPool.create(ctx,
-                         { { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                         { { .type = vk::DescriptorType::eUniformBuffer,
                              .count = kMaxFramesInFlight },
-                           { .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           { .type = vk::DescriptorType::eCombinedImageSampler,
                              .count = kMaxFramesInFlight } },
                          kMaxFramesInFlight)) {
         LUMEN_APP_LOG_ERROR("DescriptorPool 创建失败");
@@ -240,7 +240,7 @@ static int run_cube3d() {
         }
     }
 
-    std::array<VkDescriptorSet, kMaxFramesInFlight> descriptorSets {};
+    std::array<vk::DescriptorSet, kMaxFramesInFlight> descriptorSets {};
     for (uint32_t i = 0; i < kMaxFramesInFlight; ++i) {
         if (!descPool.allocate(ctx.device(), descLayout.handle(),
                                descriptorSets[i])) {
@@ -250,7 +250,7 @@ static int run_cube3d() {
         lumen::render::write_descriptor_set(
             ctx.device(), descriptorSets[i],
             { { .binding = 0,
-                .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .type = vk::DescriptorType::eUniformBuffer,
                 .buffer = uniformBuffers[i].handle(),
                 .offset = 0,
                 .range = kUboSize } },
@@ -268,30 +268,30 @@ static int run_cube3d() {
 
     lumen::render::GraphicsPipelineConfig pipeConfig;
     pipeConfig.shaderStages.push_back({ .module = vertShader.handle(),
-                                        .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                                        .stage = vk::ShaderStageFlagBits::eVertex,
                                         .entryPoint = "main" });
     pipeConfig.shaderStages.push_back({ .module = fragShader.handle(),
-                                        .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        .stage = vk::ShaderStageFlagBits::eFragment,
                                         .entryPoint = "main" });
     pipeConfig.vertexBindings.push_back(
         { .binding = 0,
           .stride = sizeof(Vertex),
-          .inputRate = lumen::render::VertexInputRate::PerVertex });
+          .inputRate = vk::VertexInputRate::eVertex });
     pipeConfig.vertexAttributes.push_back(
         { .location = 0,
           .binding = 0,
-          .format = lumen::render::VertexAttributeFormat::F32Vec3,
+          .format = vk::Format::eR32G32B32Sfloat,
           .offset = offsetof(Vertex, position) });
     pipeConfig.vertexAttributes.push_back(
         { .location = 1,
           .binding = 0,
-          .format = lumen::render::VertexAttributeFormat::F32Vec2,
+          .format = vk::Format::eR32G32Sfloat,
           .offset = offsetof(Vertex, uv) });
     pipeConfig.depthTest = true;
     pipeConfig.depthWrite = true;
     // 与 `docs/reference/glm-vulkan.md`：投影 Y 翻转后正面为 CLOCKWISE
-    pipeConfig.cullMode = VK_CULL_MODE_NONE;
-    pipeConfig.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    pipeConfig.cullMode = vk::CullModeFlagBits::eNone;
+    pipeConfig.frontFace = vk::FrontFace::eCounterClockwise;
 
     lumen::render::GraphicsPipeline pipeline;
     if (!pipeline.create(ctx, pipelineLayout, renderPass, 0, pipeConfig)) {
@@ -385,16 +385,14 @@ static int run_cube3d() {
         }
 
         const uint32_t imageIndex = swapchain.acquire_next_image(
-            frameSync.image_available(currentFrame), VK_NULL_HANDLE,
+            frameSync.image_available(currentFrame), {},
             kAcquireTimeoutNs);
         if (imageIndex == UINT32_MAX) {
             continue;
         }
 
         auto &cmdBuf = cmdBuffers[currentFrame];
-        if (!cmdBuf.reset()) {
-            continue;
-        }
+        cmdBuf.reset({});
 
         const float seconds = static_cast<float>(SDL_GetTicks()) * 0.001F;
         const float aspect =
@@ -412,94 +410,91 @@ static int run_cube3d() {
         TransformUbo ubo { .mvp = proj * view * model };
         uniformBuffers[currentFrame].update(ubo);
 
-        if (!cmdBuf.begin()) {
+        vk::CommandBufferBeginInfo frameBegin {};
+        frameBegin.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+        if (cmdBuf.begin(&frameBegin) != vk::Result::eSuccess) {
             continue;
         }
 
-        VkClearValue clearValues[2] {};
-        clearValues[0].color = { { 0.07F, 0.08F, 0.11F, 1.0F } };
-        clearValues[1].depthStencil = { 1.0F, 0 };
+        std::array<vk::ClearValue, 2> clearValues {};
+        clearValues[0].color.float32[0] = 0.07F;
+        clearValues[0].color.float32[1] = 0.08F;
+        clearValues[0].color.float32[2] = 0.11F;
+        clearValues[0].color.float32[3] = 1.0F;
+        clearValues[1].depthStencil.depth = 1.0F;
+        clearValues[1].depthStencil.stencil = 0;
 
-        VkRenderPassBeginInfo rpBegin {
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-        };
+        vk::RenderPassBeginInfo rpBegin {};
         rpBegin.renderPass = renderPass.handle();
         rpBegin.framebuffer = framebuffers.get(imageIndex);
-        rpBegin.renderArea.offset = { .x = 0, .y = 0 };
+        rpBegin.renderArea.offset = vk::Offset2D { 0, 0 };
         rpBegin.renderArea.extent = swapchain.extent();
-        rpBegin.clearValueCount = 2;
-        rpBegin.pClearValues = clearValues;
+        rpBegin.clearValueCount =
+            static_cast<uint32_t>(clearValues.size());
+        rpBegin.pClearValues = clearValues.data();
 
-        vkCmdBeginRenderPass(cmdBuf, &rpBegin,
-                             VK_SUBPASS_CONTENTS_INLINE);
+        cmdBuf.beginRenderPass(rpBegin, vk::SubpassContents::eInline);
 
-        VkViewport viewport {};
-        viewport.x = 0.0F;
-        viewport.y = 0.0F;
-        viewport.width = static_cast<float>(swapchain.extent().width);
-        viewport.height = static_cast<float>(swapchain.extent().height);
-        viewport.minDepth = 0.0F;
-        viewport.maxDepth = 1.0F;
-        vkCmdSetViewport(cmdBuf, 0, 1, &viewport);
+        const vk::Viewport viewport {
+            0.0F, 0.0F,
+            static_cast<float>(swapchain.extent().width),
+            static_cast<float>(swapchain.extent().height),
+            0.0F, 1.0F};
+        cmdBuf.setViewport(0, { viewport });
 
-        VkRect2D scissor {};
-        scissor.offset = { .x = 0, .y = 0 };
-        scissor.extent = swapchain.extent();
-        vkCmdSetScissor(cmdBuf, 0, 1, &scissor);
+        const vk::Rect2D scissor { vk::Offset2D { 0, 0 },
+                                   swapchain.extent() };
+        cmdBuf.setScissor(0, { scissor });
 
-        vkCmdBindPipeline(cmdBuf,
-                          VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.handle());
-        vkCmdBindDescriptorSets(cmdBuf,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                pipelineLayout.handle(), 0, 1,
-                                &descriptorSets[currentFrame], 0, nullptr);
+        cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                            pipeline.handle());
+        const vk::DescriptorSet ds_bind = descriptorSets[currentFrame];
+        cmdBuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                   pipelineLayout.handle(), 0, { ds_bind }, {});
 
-        VkBuffer vb = vertexBuffer.handle();
-        VkDeviceSize vbOffset { 0 };
-        vkCmdBindVertexBuffers(cmdBuf, 0, 1, &vb, &vbOffset);
-        vkCmdBindIndexBuffer(cmdBuf, indexBuffer.handle(), 0,
-                             indexBuffer.vk_index_type());
-        vkCmdDrawIndexed(cmdBuf,
-                         static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+        const vk::Buffer vb = vertexBuffer.handle();
+        const vk::DeviceSize vbo { 0 };
+        cmdBuf.bindVertexBuffers(0, { vb }, { vbo });
+        cmdBuf.bindIndexBuffer(indexBuffer.handle(), vk::DeviceSize { 0 },
+                              indexBuffer.vk_index_type());
+        cmdBuf.drawIndexed(static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
-        vkCmdEndRenderPass(cmdBuf);
+        cmdBuf.endRenderPass();
 
-        if (!cmdBuf.end()) {
-            continue;
-        }
+        cmdBuf.end();
 
-        VkSemaphore waitSem = frameSync.image_available(currentFrame);
-        VkSemaphore signalSem = frameSync.render_finished(imageIndex);
+        const vk::Semaphore wait_sem = frameSync.image_available(currentFrame);
+        const vk::Semaphore signal_sem = frameSync.render_finished(imageIndex);
+        const std::array<vk::PipelineStageFlags, 1> wait_stages {
+            vk::PipelineStageFlagBits::eColorAttachmentOutput};
 
-        VkCommandBuffer submit_buf = cmdBuf.handle();
-        VkSubmitInfo submitInfo { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-        VkPipelineStageFlags waitStage =
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        vk::SubmitInfo submitInfo {};
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &waitSem;
-        submitInfo.pWaitDstStageMask = &waitStage;
+        submitInfo.pWaitSemaphores = &wait_sem;
+        submitInfo.pWaitDstStageMask = wait_stages.data();
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &submit_buf;
+        submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &signalSem;
+        submitInfo.pSignalSemaphores = &signal_sem;
 
         if (!frameSync.reset_fence(currentFrame)) {
-            LUMEN_LOG_ERROR("vkResetFences 失败 currentFrame={}", currentFrame);
+            LUMEN_LOG_ERROR("FrameSync::reset_fence 失败 currentFrame={}",
+                            currentFrame);
             continue;
         }
-        if (vkQueueSubmit(ctx.graphics_queue(), 1, &submitInfo,
-                          frameSync.in_flight_fence(currentFrame)) !=
-            VK_SUCCESS) {
+        if (ctx.graphics_queue().submit(
+                1, &submitInfo, frameSync.in_flight_fence(currentFrame)) !=
+            vk::Result::eSuccess) {
             continue;
         }
 
-        const VkResult presentResult =
+        const vk::Result presentResult =
             swapchain.present(ctx.present_queue(), imageIndex,
                               frameSync.render_finished(imageIndex));
-        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (presentResult == vk::Result::eErrorOutOfDateKHR) {
             needRecreateSwapchain = true;
-        } else if (presentResult != VK_SUCCESS &&
-                   presentResult != VK_SUBOPTIMAL_KHR) {
+        } else if (presentResult != vk::Result::eSuccess &&
+                   presentResult != vk::Result::eSuboptimalKHR) {
             LUMEN_APP_LOG_WARN("Present 失败 result={}",
                                static_cast<int>(presentResult));
         }

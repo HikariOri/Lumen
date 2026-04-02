@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "asset/asset_handle.hpp"
 #include "asset/asset_id.hpp"

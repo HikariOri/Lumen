@@ -13,7 +13,7 @@
 #include <string>
 #include <unordered_map>
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "asset/sampler_fingerprint.hpp"
 #include "render/resource/sampler.hpp"

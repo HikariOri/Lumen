@@ -44,7 +44,7 @@
 
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "render/resource/texture.hpp"
 
@@ -97,7 +97,7 @@ public:
      * - 上传到 GPU（staging buffer）
      * - 创建 sampler + image view
      */
-    bool create(const Context &ctx, VkQueue transfer_queue,
+    bool create(const Context &ctx, vk::Queue transfer_queue,
                 CommandPool &cmd_pool);
 
     /**

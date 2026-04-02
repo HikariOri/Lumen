@@ -96,17 +96,17 @@ bool PickIdRenderTarget::create_internal_(const Context &ctx) {
 
     RenderPassConfig rpConfig {};
     rpConfig.useDepth = true;
-    rpConfig.colorAttachment.format = VK_FORMAT_R32_UINT;
-    rpConfig.colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    rpConfig.colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    rpConfig.colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    rpConfig.colorAttachment.format = vk::Format::eR32Uint;
+    rpConfig.colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    rpConfig.colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+    rpConfig.colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
     rpConfig.colorAttachment.finalLayout =
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    rpConfig.depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    rpConfig.depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    rpConfig.depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        vk::ImageLayout::eTransferSrcOptimal;
+    rpConfig.depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+    rpConfig.depthAttachment.storeOp = vk::AttachmentStoreOp::eDontCare;
+    rpConfig.depthAttachment.initialLayout = vk::ImageLayout::eUndefined;
     rpConfig.depthAttachment.finalLayout =
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        vk::ImageLayout::eDepthStencilAttachmentOptimal;
 
     if (!renderPass_.create(ctx.device(), rpConfig)) {
         LUMEN_LOG_ERROR("PickIdRenderTarget: RenderPass 创建失败");
@@ -116,10 +116,10 @@ bool PickIdRenderTarget::create_internal_(const Context &ctx) {
     ImageCreateInfo colorInfo {};
     colorInfo.width = width_;
     colorInfo.height = height_;
-    colorInfo.format = VK_FORMAT_R32_UINT;
-    colorInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                      VK_IMAGE_USAGE_SAMPLED_BIT;
+    colorInfo.format = vk::Format::eR32Uint;
+    colorInfo.usage = vk::ImageUsageFlagBits::eColorAttachment |
+                      vk::ImageUsageFlagBits::eTransferSrc |
+                      vk::ImageUsageFlagBits::eSampled;
     if (!colorImage_.create(ctx, colorInfo)) {
         LUMEN_LOG_ERROR("PickIdRenderTarget: 颜色附件创建失败");
         return false;
@@ -130,10 +130,11 @@ bool PickIdRenderTarget::create_internal_(const Context &ctx) {
         return false;
     }
 
-    std::array<VkImageView, 2> views { colorImage_.view(), depthImage_.view() };
+    std::array<vk::ImageView, 2> views { vk::ImageView { colorImage_.view() },
+                                         vk::ImageView { depthImage_.view() } };
     if (!framebuffer_.create_offscreen(ctx.device(), renderPass_.handle(),
                                        width_, height_,
-                                       std::span<const VkImageView>(
+                                       std::span<const vk::ImageView>(
                                            views.data(), views.size()))) {
         LUMEN_LOG_ERROR("PickIdRenderTarget: Framebuffer 创建失败");
         return false;

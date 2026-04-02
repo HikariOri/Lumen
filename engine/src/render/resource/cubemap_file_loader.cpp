@@ -243,7 +243,7 @@ convert_equirect_to_cubemap(const float *hdr, int w, int h, int face_size,
  * 3. 上传 GPU cubemap
  */
 bool load_cubemap_from_face_files(const Context &ctx, const std::string &dir,
-                                  VkQueue transfer_queue, CommandPool &cmd_pool,
+                                  vk::Queue transfer_queue, CommandPool &cmd_pool,
                                   const SamplerConfig &sampler_cfg,
                                   Texture &out_tex, std::string *out_error) {
     namespace fs = ghc::filesystem;
@@ -325,8 +325,8 @@ bool load_cubemap_from_face_files(const Context &ctx, const std::string &dir,
     const auto dim = (uint32_t)face_w;
 
     // GPU 上传 Cubemap
-    return out_tex.create_cubemap_from_rgba8_faces(
-        ctx, ptrs, dim, transfer_queue, cmd_pool, sampler_cfg);
+    return out_tex.create_cubemap_from_rgba8_faces(ctx, ptrs, dim, transfer_queue,
+                                                   cmd_pool, sampler_cfg);
 }
 
 // ============================================================
@@ -345,7 +345,7 @@ bool load_cubemap_from_face_files(const Context &ctx, const std::string &dir,
  * 3. GPU 上传 float cubemap
  */
 bool load_cubemap_from_hdr_equirectangular_file(
-    const Context &ctx, const std::string &hdr_path, VkQueue transfer_queue,
+    const Context &ctx, const std::string &hdr_path, vk::Queue transfer_queue,
     CommandPool &cmd_pool, const SamplerConfig &sampler_cfg, Texture &out_tex,
     std::uint32_t face_size, std::string *out_error) {
     namespace fs = ghc::filesystem;

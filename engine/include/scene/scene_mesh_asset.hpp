@@ -11,7 +11,7 @@
 #include <vector>
 
 #include <glm/mat4x4.hpp>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include "asset/geometry/mesh_asset.hpp"
 #include "asset/pbr_material_instance.hpp"

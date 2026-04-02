@@ -9,7 +9,7 @@
 
 #include "render/material/material.hpp"
 
-#include <vulkan/vulkan.h>
+#include "render/vulkan.hpp"
 
 #include <cstring>
 #include <string>
