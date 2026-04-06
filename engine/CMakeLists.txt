@@ -8,7 +8,7 @@ file(
 
 add_library(${ENGINE_TARGET} STATIC ${ENGINE_SOURCES})
 
-target_include_directories(${ENGINE_TARGET} PUBLIC include)
+target_include_directories(${ENGINE_TARGET} PUBLIC src)
 
 target_link_libraries(${ENGINE_TARGET} PUBLIC Vulkan::Vulkan)
 target_link_libraries(${ENGINE_TARGET} PUBLIC SDL3::SDL3)
@@ -20,7 +20,6 @@ target_include_directories(${ENGINE_TARGET} PUBLIC ${Stb_INCLUDE_DIR})
 target_include_directories(${ENGINE_TARGET} PUBLIC imgui::imgui)
 target_link_libraries(${ENGINE_TARGET} PUBLIC imgui::imgui)
 target_link_libraries(${ENGINE_TARGET} PUBLIC imguizmo::imguizmo)
-target_link_libraries(${ENGINE_TARGET} PUBLIC cpr::cpr)
 target_link_libraries(${ENGINE_TARGET} PUBLIC Vulkan::Headers)
 target_link_libraries(${ENGINE_TARGET} PUBLIC GPUOpen::VulkanMemoryAllocator)
 target_link_libraries(${ENGINE_TARGET} PUBLIC ghcFilesystem::ghc_filesystem)
@@ -35,7 +34,7 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-cpp)
 target_link_libraries(${ENGINE_TARGET} PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(${ENGINE_TARGET} PUBLIC volk::volk volk::volk_headers)
 
-target_precompile_headers(${ENGINE_TARGET} PUBLIC ./include/pch.hpp)
+target_precompile_headers(${ENGINE_TARGET} PUBLIC ./src/pch.hpp)
 
 add_custom_command(
   TARGET ${ENGINE_TARGET}
