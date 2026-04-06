@@ -5,7 +5,7 @@
 
 #include "ibl_bake.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"

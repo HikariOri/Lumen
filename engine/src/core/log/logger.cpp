@@ -3,9 +3,9 @@
  * @brief Logger 实现：引擎与外部双 logger
  */
 
-#include "core/logger.hpp"
-#include "core/log_ui_sink.hpp"
-#include "core/log_view_buffer.hpp"
+#include "core/log/logger.hpp"
+#include "core/log/log_ui_sink.hpp"
+#include "core/log/log_view_buffer.hpp"
 
 #include <ghc/filesystem.hpp>
 #include <string>
@@ -16,8 +16,7 @@
 
 namespace fs = ghc::filesystem;
 
-namespace lumen {
-namespace core {
+namespace core::log {
 
 namespace {
 
@@ -142,5 +141,4 @@ std::shared_ptr<spdlog::logger> Logger::app_() {
     return spdlog::get(k_app_logger_name);
 }
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log

@@ -4,7 +4,7 @@
  */
 
 #include "render/shader.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 #include <fstream>
 

@@ -16,7 +16,7 @@
  */
 
 #include "render/context.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "platform/window.hpp"
 
 #include <algorithm>

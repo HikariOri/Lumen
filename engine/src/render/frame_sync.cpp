@@ -5,7 +5,7 @@
 
 #include "render/frame_sync.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 namespace lumen::render {
 

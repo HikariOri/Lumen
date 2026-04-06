@@ -38,7 +38,7 @@ Lumen 日志系统基于 spdlog，将**引擎内部日志**与**应用层日志*
 ### 使用示例
 
 ```cpp
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 int main() {
     if (!lumen::core::Logger::init()) {
@@ -84,7 +84,7 @@ if (!lumen::core::Logger::init(config)) {
 ```
 engine/
 ├── include/core/logger.hpp
-├── include/core/log_view_buffer.hpp
+├── include/core/log/log_view_buffer.hpp
 ├── include/core/log_ui_sink.hpp
 └── src/core/
     ├── logger.cpp

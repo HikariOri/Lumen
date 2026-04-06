@@ -11,7 +11,7 @@
  */
 
 #include "render/resource/buffer.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 

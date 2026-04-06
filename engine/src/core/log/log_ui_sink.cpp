@@ -2,8 +2,8 @@
  * @file log_ui_sink.cpp
  */
 
-#include "core/log_ui_sink.hpp"
-#include "core/log_view_buffer.hpp"
+#include "core/log/log_ui_sink.hpp"
+#include "core/log/log_view_buffer.hpp"
 
 #include <array>
 #include <chrono>
@@ -15,8 +15,7 @@
 #include <spdlog/details/log_msg.h>
 #include <spdlog/sinks/base_sink.h>
 
-namespace lumen {
-namespace core {
+namespace core::log {
 namespace {
 
 std::string format_msg_time(spdlog::log_clock::time_point tp) {
@@ -54,7 +53,7 @@ protected:
                                             std::move(logger), std::move(text));
     }
     void flush_() override {}
-}; 
+};
 
 } // namespace
 
@@ -62,5 +61,4 @@ std::shared_ptr<spdlog::sinks::sink> make_log_view_sink() {
     return std::make_shared<log_view_sink_mt>();
 }
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log

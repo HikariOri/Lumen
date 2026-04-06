@@ -1,5 +1,5 @@
 #include "network/file_downloader.h"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 #include <cpr/cpr.h>
 #include <fstream>

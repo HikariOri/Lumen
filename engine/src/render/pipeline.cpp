@@ -4,7 +4,7 @@
  */
 
 #include "render/pipeline.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/context.hpp"
 #include "render/pass/render_pass.hpp"
 

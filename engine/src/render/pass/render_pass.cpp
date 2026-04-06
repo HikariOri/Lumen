@@ -4,7 +4,7 @@
  */
 
 #include "render/pass/render_pass.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/swapchain.hpp"
 
 namespace lumen::render {

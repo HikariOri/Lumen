@@ -4,7 +4,7 @@
  */
 
 #include "render/resource/descriptor.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/context.hpp"
 
 #include <array>

@@ -13,10 +13,8 @@ class sink;
 }
 } // namespace spdlog
 
-namespace lumen {
-namespace core {
+namespace core::log {
 
 std::shared_ptr<spdlog::sinks::sink> make_log_view_sink();
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log

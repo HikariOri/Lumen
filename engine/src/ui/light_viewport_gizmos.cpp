@@ -4,7 +4,7 @@
 
 #include "ui/light_viewport_gizmos.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/context.hpp"
 
 #include <algorithm>

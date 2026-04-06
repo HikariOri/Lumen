@@ -17,10 +17,9 @@
 
 #include <spdlog/common.h>
 
-#include "logger.hpp"
+#include "core/log/logger.hpp"
 
-namespace lumen {
-namespace core {
+namespace core::log {
 
 /**
  * @struct LogViewLine
@@ -117,5 +116,4 @@ private:
     std::deque<LogViewLine> lines_;  ///< 内部日志行存储
 };
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log

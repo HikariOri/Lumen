@@ -4,7 +4,7 @@
 
 #include "asset/font_registry.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 #include <imgui.h>
 

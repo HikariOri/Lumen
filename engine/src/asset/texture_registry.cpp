@@ -5,7 +5,7 @@
 
 #include "asset/texture_registry.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
 
 #include "render/command_buffer.hpp"

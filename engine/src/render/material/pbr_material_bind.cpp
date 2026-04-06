@@ -14,7 +14,7 @@
 
 #include <stb_image.h>
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/context.hpp"
 #include "render/resource/texture.hpp"
 

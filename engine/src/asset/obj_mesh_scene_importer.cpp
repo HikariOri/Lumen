@@ -6,7 +6,7 @@
 #include "asset/mesh_scene_importer.hpp"
 
 #include "asset/asset_registry.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/pbr_interleaved_vertex.hpp"

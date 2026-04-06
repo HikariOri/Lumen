@@ -5,7 +5,7 @@
 
 #include "engine.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"

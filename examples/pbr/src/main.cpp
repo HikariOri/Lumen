@@ -6,7 +6,7 @@
 #include "ibl_bake.hpp"
 
 #include "asset/asset_registry.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
 #include "platform/event.hpp"
 #include "platform/event_pump.hpp"

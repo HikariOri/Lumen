@@ -24,7 +24,7 @@
  */
 
 #include "core/ktx_texture_rgba8.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 #include <ktx.h>
 

@@ -2,10 +2,9 @@
  * @file log_view_buffer.cpp
  */
 
-#include "core/log_view_buffer.hpp"
+#include "core/log/log_view_buffer.hpp"
 
-namespace lumen {
-namespace core {
+namespace core::log {
 
 LogViewBuffer &LogViewBuffer::instance() {
     static LogViewBuffer inst;
@@ -47,5 +46,4 @@ std::vector<LogViewLine> LogViewBuffer::snapshot() const {
     return std::vector<LogViewLine>(lines_.begin(), lines_.end());
 }
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log

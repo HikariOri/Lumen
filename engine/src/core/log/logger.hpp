@@ -10,8 +10,7 @@
 
 #include <spdlog/spdlog.h>
 
-namespace lumen {
-namespace core {
+namespace core::log {
 
 /**
  * @enum LogLevel
@@ -244,8 +243,7 @@ inline spdlog::level::level_enum to_spdlog(LogLevel l) {
 }
 } // namespace detail
 
-} // namespace core
-} // namespace lumen
+} // namespace core::log
 
 // ============== 引擎内部日志宏 ==============
 // Debug 模式下输出，Release (NDEBUG) 下为空操作，避免开销
@@ -253,56 +251,51 @@ inline spdlog::level::level_enum to_spdlog(LogLevel l) {
 #ifndef NDEBUG
 #define LUMEN_LOG_TRACE(...)                                                   \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Trace),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Trace),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_LOG_DEBUG(...)                                                   \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Debug),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Debug),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_LOG_INFO(...)                                                    \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Info),                            \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Info),   \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_LOG_WARN(...)                                                    \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Warn),                            \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Warn),   \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_LOG_ERROR(...)                                                   \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Error),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Error),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_LOG_CRITICAL(...)                                                \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::engine())                         \
+        if (auto _l = ::core::log::Logger::engine())                           \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Critical),                        \
+                ::core::log::detail::to_spdlog(                                \
+                    ::core::log::LogLevel::Critical),                          \
                 __VA_ARGS__);                                                  \
     } while (0)
 #else
@@ -317,55 +310,50 @@ inline spdlog::level::level_enum to_spdlog(LogLevel l) {
 // ============== 外部调用日志宏 ==============
 #define LUMEN_APP_LOG_TRACE(...)                                               \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Trace),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Trace),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_APP_LOG_DEBUG(...)                                               \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Debug),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Debug),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_APP_LOG_INFO(...)                                                \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Info),                            \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Info),   \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_APP_LOG_WARN(...)                                                \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Warn),                            \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Warn),   \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_APP_LOG_ERROR(...)                                               \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Error),                           \
+                ::core::log::detail::to_spdlog(::core::log::LogLevel::Error),  \
                 __VA_ARGS__);                                                  \
     } while (0)
 #define LUMEN_APP_LOG_CRITICAL(...)                                            \
     do {                                                                       \
-        if (auto _l = ::lumen::core::Logger::app())                            \
+        if (auto _l = ::core::log::Logger::app())                              \
             _l->log(                                                           \
                 ::spdlog::source_loc { __FILE__, __LINE__, SPDLOG_FUNCTION },  \
-                ::lumen::core::detail::to_spdlog(                              \
-                    ::lumen::core::LogLevel::Critical),                        \
+                ::core::log::detail::to_spdlog(                                \
+                    ::core::log::LogLevel::Critical),                          \
                 __VA_ARGS__);                                                  \
     } while (0)

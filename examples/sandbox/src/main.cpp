@@ -4,10 +4,9 @@
  */
 
 #include "asset/asset_registry.hpp"
-#include "core/logger.hpp"
+#include "asset/geometry/mesh_asset.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
-#include "scene/scene_mesh_asset.hpp"
-#include "scene/scene_mesh_spawn.hpp"
 #include "ibl_bake.hpp"
 #include "platform/event.hpp"
 #include "platform/event_pump.hpp"
@@ -18,10 +17,10 @@
 #include "render/material/material.hpp"
 #include "render/material/pbr_forward_ubo.hpp"
 #include "render/material/pbr_material_bind.hpp"
-#include "render/pbr_forward_record_render_items.hpp"
 #include "render/pass/pick_id_render_target.hpp"
 #include "render/pass/render_pass.hpp"
 #include "render/pass/render_target.hpp"
+#include "render/pbr_forward_record_render_items.hpp"
 #include "render/pipeline.hpp"
 #include "render/resource/buffer.hpp"
 #include "render/resource/descriptor.hpp"
@@ -34,11 +33,12 @@
 #include "render/swapchain.hpp"
 #include "scene/components.hpp"
 #include "scene/id_lookup.hpp"
-#include "asset/geometry/mesh_asset.hpp"
 #include "scene/pick.hpp"
 #include "scene/render.hpp"
 #include "scene/scene.hpp"
 #include "scene/scene_camera.hpp"
+#include "scene/scene_mesh_asset.hpp"
+#include "scene/scene_mesh_spawn.hpp"
 #include "scene/scene_orbit_controller.hpp"
 #include "scene/transform.hpp"
 #include "ui/editor_selection.hpp"
@@ -53,7 +53,6 @@
 #include "ui/scene_viewport_panel.hpp"
 #include "ui/texture_view_panel.hpp"
 
-
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
 #include <imgui.h>
@@ -66,14 +65,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <ghc/filesystem.hpp>
 #include <format>
+#include <ghc/filesystem.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 
 #include "render/vulkan.hpp"
 
@@ -159,9 +157,10 @@ struct HelmVertex {
 
 /** @brief 立方体贴图某一面的 2D 视图（@a base_array_layer 0…5 对应 +X −X +Y −Y
  * +Z −Z） */
-[[nodiscard]] vk::ImageView create_cubemap_face_2d_view(
-    vk::Device device, vk::Image img, vk::Format format, uint32_t mipLevel,
-    uint32_t baseArrayLayer, const char *label) {
+[[nodiscard]] vk::ImageView
+create_cubemap_face_2d_view(vk::Device device, vk::Image img, vk::Format format,
+                            uint32_t mipLevel, uint32_t baseArrayLayer,
+                            const char *label) {
     vk::ImageViewCreateInfo createInfo {};
     createInfo.image = img;
     createInfo.viewType = vk::ImageViewType::e2D;
@@ -493,8 +492,8 @@ static int run_pbr(int, char **) {
     sponza_spawn_opts.owning_scene = sponza_asset_sp;
     sponza_spawn_opts.scene_mesh_handle = sponza_mesh_handle;
     const lumen::scene::SceneMeshSpawnResult sponza_spawn =
-        lumen::scene::spawn_scene_mesh_hierarchy(editorScene, sponzaAsset,
-                                                 "SponzaSub", sponza_spawn_opts);
+        lumen::scene::spawn_scene_mesh_hierarchy(
+            editorScene, sponzaAsset, "SponzaSub", sponza_spawn_opts);
     if (sponza_spawn.node_entities.empty()) {
         LUMEN_APP_LOG_ERROR("Sponza glTF 场景节点为空");
         return -1;
@@ -504,14 +503,16 @@ static int run_pbr(int, char **) {
         for (const entt::entity ent :
              editorScene.registry()
                  .view<lumen::scene::SubMeshInstanceRefRendererComponent>()) {
-            const auto &sr = editorScene.registry()
-                                 .get<lumen::scene::SubMeshInstanceRefRendererComponent>(
-                                     ent);
+            const auto &sr =
+                editorScene.registry()
+                    .get<lumen::scene::SubMeshInstanceRefRendererComponent>(
+                        ent);
             const auto rp = sr.submeshRef.resolve();
-            if (!rp.has_value() || rp->meshBuffer.vertexBuffer != gb.vertexBuffer ||
+            if (!rp.has_value() ||
+                rp->meshBuffer.vertexBuffer != gb.vertexBuffer ||
                 rp->meshBuffer.indexBuffer != gb.indexBuffer) {
-                LUMEN_APP_LOG_ERROR(
-                    "SubMeshInstanceRef 与 geometry() 不一致（注册表/弱引用异常）");
+                LUMEN_APP_LOG_ERROR("SubMeshInstanceRef 与 geometry() "
+                                    "不一致（注册表/弱引用异常）");
                 return -1;
             }
             break;
@@ -521,8 +522,9 @@ static int run_pbr(int, char **) {
         std::string meshFmtErr;
         const std::string triObj =
             lumen::core::get_resource_path("assets/meshes/triangle.obj");
-        if (const auto sp = lumen::asset::AssetRegistry::instance().load_scene_mesh(
-                ctx, gq, cmdPool, triObj, {}, &meshFmtErr)) {
+        if (const auto sp =
+                lumen::asset::AssetRegistry::instance().load_scene_mesh(
+                    ctx, gq, cmdPool, triObj, {}, &meshFmtErr)) {
             LUMEN_APP_LOG_INFO("Mesh OBJ 烟测: {} 顶点", sp->statsVertexCount);
         } else {
             LUMEN_APP_LOG_WARN("Mesh OBJ 烟测跳过: {}",
@@ -543,8 +545,8 @@ static int run_pbr(int, char **) {
     }
     editorSelection.entity = sponza_spawn.node_entities.front();
 
-    const uint32_t sponzaDrawSlots = (std::max)(
-        sponza_spawn.drawable_primitive_instances, 1u);
+    const uint32_t sponzaDrawSlots =
+        (std::max)(sponza_spawn.drawable_primitive_instances, 1u);
     const std::size_t helmetObjStride =
         lumen::render::pbr_object_ubo_dynamic_stride(static_cast<std::size_t>(
             ctx.physical_device_properties()
@@ -614,15 +616,13 @@ static int run_pbr(int, char **) {
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(),
             static_cast<VkImageView>(debugTileTarget.color_view()),
-            static_cast<VkImageLayout>(
-                debugTileTarget.color_sample_layout())));
+            static_cast<VkImageLayout>(debugTileTarget.color_sample_layout())));
 
     auto idMapVizTexId =
         reinterpret_cast<ImTextureID>(lumen::ui::imgui_backend_add_texture(
             sceneSampler.handle(),
             static_cast<VkImageView>(idMapVizTarget.color_view()),
-            static_cast<VkImageLayout>(
-                idMapVizTarget.color_sample_layout())));
+            static_cast<VkImageLayout>(idMapVizTarget.color_sample_layout())));
 
     lumen::render::Sampler pickIdNearestSampler;
     {
@@ -707,11 +707,10 @@ static int run_pbr(int, char **) {
         { .binding = 0,
           .stride = sizeof(float) * 3,
           .inputRate = vk::VertexInputRate::eVertex });
-    skyCfg.vertexAttributes.push_back(
-        { .location = 0,
-          .binding = 0,
-          .format = vk::Format::eR32G32B32Sfloat,
-          .offset = 0 });
+    skyCfg.vertexAttributes.push_back({ .location = 0,
+                                        .binding = 0,
+                                        .format = vk::Format::eR32G32B32Sfloat,
+                                        .offset = 0 });
     skyCfg.depthTest = true;
     skyCfg.depthWrite = false;
     skyCfg.depthCompareOp = vk::CompareOp::eLessOrEqual;
@@ -830,9 +829,7 @@ static int run_pbr(int, char **) {
                                              3.0F);
         sponzaMaterialUbos[mi].update(mu);
         lumen::render::write_pbr_material_descriptor_set(
-            dev,
-            sponzaMaterialDs[mi],
-            sponzaMaterialUbos[mi].handle(),
+            dev, sponzaMaterialDs[mi], sponzaMaterialUbos[mi].handle(),
             sizeof(lumen::render::PbrMaterialUbo), *sponzaUniqueMaterials[mi],
             pbrPlaceholders);
     }
@@ -857,9 +854,7 @@ static int run_pbr(int, char **) {
 
     for (uint32_t i = 0; i < helmetFrameDs.size(); ++i) {
         lumen::render::write_pbr_frame_ibl_descriptor_set(
-            dev,
-            helmetFrameDs[i],
-            helmetFrameUbos[i].handle(),
+            dev, helmetFrameDs[i], helmetFrameUbos[i].handle(),
             sizeof(lumen::render::PbrFrameUbo), ibl.irradiance, ibl.prefilter,
             ibl.brdf_lut);
     }
@@ -876,8 +871,7 @@ static int run_pbr(int, char **) {
         return -1;
     }
     lumen::render::write_pbr_object_descriptor_set_dynamic(
-        dev, helmetObjectDs,
-        helmetObjectUbo.handle(),
+        dev, helmetObjectDs, helmetObjectUbo.handle(),
         sizeof(lumen::render::PbrObjectUbo));
 
     std::array<vk::DescriptorSet, 3> helmetLightDs {};
@@ -894,9 +888,7 @@ static int run_pbr(int, char **) {
             return -1;
         }
         lumen::render::write_pbr_light_descriptor_set(
-            dev,
-            helmetLightDs[i],
-            helmetLightUbos[i].handle(),
+            dev, helmetLightDs[i], helmetLightUbos[i].handle(),
             sizeof(lumen::render::PbrLightUbo));
     }
 
@@ -1034,9 +1026,8 @@ static int run_pbr(int, char **) {
         return -1;
     }
     lumen::render::write_descriptor_image(
-        dev, idMapVizDs, 0,
-        pickIdTarget.color_image().view(), pickIdNearestSampler.handle(),
-        vk::ImageLayout::eShaderReadOnlyOptimal);
+        dev, idMapVizDs, 0, pickIdTarget.color_image().view(),
+        pickIdNearestSampler.handle(), vk::ImageLayout::eShaderReadOnlyOptimal);
 
     lumen::render::PipelineLayout pickVizPl;
     if (!pickVizPl.create(ctx, { idMapVizDsl.handle() }, {})) {
@@ -1259,9 +1250,7 @@ static int run_pbr(int, char **) {
                 break;
             }
             lumen::render::write_descriptor_image(
-                dev,
-                idMapVizDs, 0,
-                pickIdTarget.color_image().view(),
+                dev, idMapVizDs, 0, pickIdTarget.color_image().view(),
                 pickIdNearestSampler.handle(),
                 vk::ImageLayout::eShaderReadOnlyOptimal);
             sceneTexId = reinterpret_cast<ImTextureID>(
@@ -1289,9 +1278,8 @@ static int run_pbr(int, char **) {
             continue;
         }
 
-        const uint32_t imageIndex =
-            swapchain.acquire_next_image(frameSync.image_available(frameIndex),
-                                         {}, ACQUIRE_TIMEOUT_NS);
+        const uint32_t imageIndex = swapchain.acquire_next_image(
+            frameSync.image_available(frameIndex), {}, ACQUIRE_TIMEOUT_NS);
         if (imageIndex == UINT32_MAX) {
             if (!acquireFailLogged) {
                 LUMEN_APP_LOG_WARN(
@@ -1524,7 +1512,8 @@ static int run_pbr(int, char **) {
             ImGui::Text("场景节点数: %zu", sponzaAsset.scene_nodes.size());
             ImGui::Text("可绘制 primitive 实例数: %u", sponzaDrawSlots);
             ImGui::Text("材质槽位数: %zu", sponzaAsset.materials.size());
-            ImGui::Text("去重后 PBR 材质种类: %zu", sponzaUniqueMaterials.size());
+            ImGui::Text("去重后 PBR 材质种类: %zu",
+                        sponzaUniqueMaterials.size());
             ImGui::TextWrapped(
                 "几何在 mesh 局部空间；Node 变换在 ECS。每实例 SubMesh 绘制。");
         }
@@ -1685,18 +1674,21 @@ static int run_pbr(int, char **) {
                             }
                         }
                     }
-                } else if (const auto *smir = frame_reg.try_get<
-                               lumen::scene::SubMeshInstanceRefRendererComponent>(
-                               frame_sel)) {
-                    const std::optional<lumen::asset::SubMeshInstanceRef::ResolvedPrim>
+                } else if (const auto *smir =
+                               frame_reg.try_get<
+                                   lumen::scene::
+                                       SubMeshInstanceRefRendererComponent>(
+                                   frame_sel)) {
+                    const std::optional<
+                        lumen::asset::SubMeshInstanceRef::ResolvedPrim>
                         rp = smir->submeshRef.resolve();
                     if (rp.has_value() && rp->primitive->is_drawable()) {
                         glm::vec3 half_ext = rp->primitive->localAabbHalfExtent;
                         if (glm::length(half_ext) < 1e-6F) {
                             half_ext = glm::vec3(0.5F);
                         }
-                        if (const auto frame_targets = lumen::scene::
-                                frame_orbit_targets_for_drawable(
+                        if (const auto frame_targets =
+                                lumen::scene::frame_orbit_targets_for_drawable(
                                     orbit, frame_reg, frame_sel,
                                     rp->primitive->localPivot, half_ext)) {
                             orbit.begin_smooth_frame(frame_targets->first,
@@ -1721,9 +1713,11 @@ static int run_pbr(int, char **) {
                             }
                         }
                     }
-                } else if (const auto *mir = frame_reg.try_get<
-                               lumen::scene::MeshInstanceRefRendererComponent>(
-                               frame_sel)) {
+                } else if (const auto *mir =
+                               frame_reg.try_get<
+                                   lumen::scene::
+                                       MeshInstanceRefRendererComponent>(
+                                   frame_sel)) {
                     const std::optional<lumen::asset::MeshInstanceRef::Resolved>
                         rr = mir->meshRef.resolve();
                     if (rr.has_value() && rr->mesh != nullptr) {
@@ -1895,8 +1889,7 @@ static int run_pbr(int, char **) {
         sceneRpInfo.framebuffer = sceneTarget.framebuffer();
         sceneRpInfo.renderArea.offset = vk::Offset2D { 0, 0 };
         sceneRpInfo.renderArea.extent = sceneTarget.extent();
-        sceneRpInfo.clearValueCount =
-            static_cast<uint32_t>(sceneClears.size());
+        sceneRpInfo.clearValueCount = static_cast<uint32_t>(sceneClears.size());
         sceneRpInfo.pClearValues = sceneClears.data();
 
         {
@@ -1951,14 +1944,12 @@ static int run_pbr(int, char **) {
 
             commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                        skyPipe.handle());
-            commandBuffer.bindDescriptorSets(
-                vk::PipelineBindPoint::eGraphics, skyPl.handle(), 0, { skyDs },
-                {});
-            commandBuffer.pushConstants(
-                skyPl.handle(),
-                vk::ShaderStageFlagBits::eVertex |
-                    vk::ShaderStageFlagBits::eFragment,
-                0, sizeof(SkyPush), &skyPush);
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                             skyPl.handle(), 0, { skyDs }, {});
+            commandBuffer.pushConstants(skyPl.handle(),
+                                        vk::ShaderStageFlagBits::eVertex |
+                                            vk::ShaderStageFlagBits::eFragment,
+                                        0, sizeof(SkyPush), &skyPush);
             const vk::DeviceSize skyOff { 0 };
             const vk::Buffer skyVbh = skyVbuf.handle();
             commandBuffer.bindVertexBuffers(0, { skyVbh }, { skyOff });
@@ -2019,8 +2010,8 @@ static int run_pbr(int, char **) {
                     vk::ShaderStageFlagBits::eFragment;
                 pickCtx.pick_id_push_constant_offset = 0;
                 pickCtx.bind_vertex_and_index_buffers_per_item = true;
-                lumen::render::record_pick_id_render_items(pickCtx, pbrRenderItems,
-                                                         helmetObjectUbo);
+                lumen::render::record_pick_id_render_items(
+                    pickCtx, pbrRenderItems, helmetObjectUbo);
                 commandBuffer.endRenderPass();
 
                 if (scene_pick_pending) {
@@ -2035,7 +2026,8 @@ static int run_pbr(int, char **) {
                     copyRegion.imageSubresource.layerCount = 1;
                     copyRegion.imageOffset = vk::Offset3D {
                         static_cast<std::int32_t>(scene_pick_fb_x),
-                        static_cast<std::int32_t>(scene_pick_fb_y), 0};
+                        static_cast<std::int32_t>(scene_pick_fb_y), 0
+                    };
                     copyRegion.imageExtent = vk::Extent3D { 1, 1, 1 };
                     commandBuffer.copyImageToBuffer(
                         static_cast<vk::Image>(pickIdTarget.color_image_vk()),
@@ -2051,11 +2043,12 @@ static int run_pbr(int, char **) {
                     bufBar.offset = 0;
                     bufBar.size = sizeof(std::uint32_t);
                     const std::array<vk::BufferMemoryBarrier, 1> bufBars {
-                        bufBar};
+                        bufBar
+                    };
                     commandBuffer.pipelineBarrier(
                         vk::PipelineStageFlagBits::eTransfer,
-                        vk::PipelineStageFlagBits::eHost, vk::DependencyFlags {},
-                        {}, bufBars, {});
+                        vk::PipelineStageFlagBits::eHost,
+                        vk::DependencyFlags {}, {}, bufBars, {});
                 }
 
                 if (show_id_map_viz) {
@@ -2192,14 +2185,14 @@ static int run_pbr(int, char **) {
                     const uint32_t scissorHeight = static_cast<uint32_t>(
                         (std::max)(1L, std::lround(
                                            static_cast<double>(cellHeight))));
-                    const vk::Rect2D scissorTile { vk::Offset2D { sx, sy },
-                                                   vk::Extent2D {
-                                                       scissorWidth,
-                                                       scissorHeight} };
+                    const vk::Rect2D scissorTile {
+                        vk::Offset2D { sx, sy },
+                        vk::Extent2D { scissorWidth, scissorHeight }
+                    };
                     commandBuffer.setScissor(0, { scissorTile });
 
-                    commandBuffer.bindPipeline(
-                        vk::PipelineBindPoint::eGraphics, helmetPipe.handle());
+                    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                                               helmetPipe.handle());
                     lumen::render::PbrForwardRecordContext pbrDbgCtx {};
                     pbrDbgCtx.command_buffer = &commandBuffer;
                     pbrDbgCtx.pipeline_layout = &helmetPl;
@@ -2231,19 +2224,23 @@ static int run_pbr(int, char **) {
         swapRpInfo.framebuffer = framebuffers.get(imageIndex);
         swapRpInfo.renderArea.offset = vk::Offset2D { 0, 0 };
         swapRpInfo.renderArea.extent = swapchain.extent();
-        swapRpInfo.clearValueCount =
-            static_cast<uint32_t>(swapClears.size());
+        swapRpInfo.clearValueCount = static_cast<uint32_t>(swapClears.size());
         swapRpInfo.pClearValues = swapClears.data();
         commandBuffer.beginRenderPass(swapRpInfo, vk::SubpassContents::eInline);
 
         {
             const vk::Extent2D swapchainExtent = swapchain.extent();
             const vk::Viewport framebufferViewport {
-                0.0F, 0.0F, static_cast<float>(swapchainExtent.width),
-                static_cast<float>(swapchainExtent.height), 0.0F, 1.0F};
+                0.0F,
+                0.0F,
+                static_cast<float>(swapchainExtent.width),
+                static_cast<float>(swapchainExtent.height),
+                0.0F,
+                1.0F
+            };
             commandBuffer.setViewport(0, { framebufferViewport });
             const vk::Rect2D framebufferScissor { vk::Offset2D { 0, 0 },
-                                                swapchainExtent };
+                                                  swapchainExtent };
             commandBuffer.setScissor(0, { framebufferScissor });
         }
 
@@ -2257,7 +2254,8 @@ static int run_pbr(int, char **) {
         const vk::Semaphore signalSemaphore =
             frameSync.render_finished(imageIndex);
         const std::array<vk::PipelineStageFlags, 1> waitStages {
-            vk::PipelineStageFlagBits::eColorAttachmentOutput};
+            vk::PipelineStageFlagBits::eColorAttachmentOutput
+        };
 
         vk::SubmitInfo sub {};
         sub.waitSemaphoreCount = 1;
@@ -2289,8 +2287,8 @@ static int run_pbr(int, char **) {
 
         if (record_scene_pick) {
             const vk::Fence pick_fence = frameSync.in_flight_fence(frameIndex);
-            static_cast<void>(dev.waitForFences(
-                1, &pick_fence, vk::True, UINT64_MAX));
+            static_cast<void>(
+                dev.waitForFences(1, &pick_fence, vk::True, UINT64_MAX));
             void *const pickMap = pickReadbackBuffer.map();
             if (pickMap != nullptr) {
                 pickReadbackBuffer.invalidate_mapped_range(
@@ -2362,21 +2360,22 @@ static int run_pbr(int, char **) {
                                       "indexCount={}",
                                       smir->submeshRef.primitiveIndex,
                                       rp->primitive->indexCount)
-                                : " | SubMeshInstanceRef（资产已卸载，无法解析）";
+                                : " | "
+                                  "SubMeshInstanceRef（资产已卸载，无法解析）";
                     } else if (const auto *mir =
                                    pick_reg.try_get<
                                        lumen::scene::
                                            MeshInstanceRefRendererComponent>(
                                        picked)) {
-                        const std::optional<lumen::asset::MeshInstanceRef::Resolved>
+                        const std::optional<
+                            lumen::asset::MeshInstanceRef::Resolved>
                             rr = mir->meshRef.resolve();
                         mesh_note =
                             rr.has_value()
-                                ? std::format(
-                                      " | MeshInstanceRef meshIndex={} "
-                                      "primitives={}",
-                                      mir->meshRef.meshIndex,
-                                      rr->mesh->primitives.size())
+                                ? std::format(" | MeshInstanceRef meshIndex={} "
+                                              "primitives={}",
+                                              mir->meshRef.meshIndex,
+                                              rr->mesh->primitives.size())
                                 : " | MeshInstanceRef（资产已卸载）";
                     }
                     LUMEN_APP_LOG_INFO(
@@ -2395,7 +2394,8 @@ static int run_pbr(int, char **) {
         if (pr == vk::Result::eErrorOutOfDateKHR) {
             LUMEN_APP_LOG_WARN("present OUT_OF_DATE，将重建 Swapchain");
             needRecreateSwapchain = true;
-        } else if (pr != vk::Result::eSuccess && pr != vk::Result::eSuboptimalKHR) {
+        } else if (pr != vk::Result::eSuccess &&
+                   pr != vk::Result::eSuboptimalKHR) {
             LUMEN_APP_LOG_ERROR("present 失败 result={}", static_cast<int>(pr));
         }
 
@@ -2435,10 +2435,10 @@ static int run_pbr(int, char **) {
 }
 
 int main(int argc, char **argv) {
-    if (!lumen::core::Logger::init()) {
+    if (!core::log::Logger::init()) {
         return -1;
     }
     const int result = run_pbr(argc, argv);
-    lumen::core::Logger::shutdown();
+    core::log::Logger::shutdown();
     return result;
 }

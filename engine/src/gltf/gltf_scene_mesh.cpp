@@ -8,7 +8,7 @@
 #include "asset/asset_registry.hpp"
 
 #include "core/ktx_texture_rgba8.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "core/path.hpp"
 
 #include "render/command_buffer.hpp"

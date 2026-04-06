@@ -4,7 +4,7 @@
  */
 
 #include "platform/window.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "platform/event_pump.hpp"
 
 #include <SDL3/SDL.h>

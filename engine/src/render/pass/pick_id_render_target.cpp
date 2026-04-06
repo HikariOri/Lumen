@@ -7,7 +7,7 @@
 #include <array>
 #include <span>
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 namespace lumen {
 namespace render {

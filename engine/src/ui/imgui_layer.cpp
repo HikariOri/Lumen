@@ -3,7 +3,7 @@
  */
 
 #include "ui/imgui_layer.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "platform/event_dispatcher.hpp"
 #include "platform/event_pump.hpp"
 #include "ui/imgui_backend.hpp"

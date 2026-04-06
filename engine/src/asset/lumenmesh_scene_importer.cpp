@@ -7,7 +7,7 @@
 
 #include "asset/asset_registry.hpp"
 #include "asset/lumenmesh_format.hpp"
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/command_buffer.hpp"
 #include "render/context.hpp"
 #include "render/pbr_interleaved_vertex.hpp"

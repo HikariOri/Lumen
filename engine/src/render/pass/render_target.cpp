@@ -25,7 +25,7 @@
 #include <array>
 #include <span>
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "render/context.hpp"
 
 namespace lumen::render {

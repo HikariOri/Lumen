@@ -7,7 +7,7 @@
 #include "platform/event_debug.hpp"
 #include "platform/event_pump.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 #include "ui/imgui_layer.hpp"
 
 #include <imgui.h>

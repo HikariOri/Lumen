@@ -4,7 +4,7 @@
 
 #include "ui/log_panel.hpp"
 
-#include "core/log_view_buffer.hpp"
+#include "core/log/log_view_buffer.hpp"
 
 #include <imgui.h>
 #include <spdlog/common.h>
@@ -49,7 +49,7 @@ void LogPanel::on_imgui_render() {
     }
 
     if (ImGui::Button("Clear")) {
-        lumen::core::LogViewBuffer::instance().clear();
+        core::log::LogViewBuffer::instance().clear();
     }
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &auto_scroll_);
@@ -64,7 +64,7 @@ void LogPanel::on_imgui_render() {
     const spdlog::level::level_enum min_level =
         index_to_min_level(filter_min_level_);
 
-    const auto lines = lumen::core::LogViewBuffer::instance().snapshot();
+    const auto lines = core::log::LogViewBuffer::instance().snapshot();
 
     ImGui::Separator();
     const float footer = ImGui::GetFrameHeightWithSpacing();
@@ -102,7 +102,7 @@ void LogPanel::on_imgui_render() {
 
     ImGui::Separator();
     ImGui::Text("Lines: %zu / cap %zu", lines.size(),
-                lumen::core::LogViewBuffer::instance().capacity());
+                core::log::LogViewBuffer::instance().capacity());
 
     ImGui::End();
 }

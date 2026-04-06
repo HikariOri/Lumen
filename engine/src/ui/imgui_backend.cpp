@@ -7,7 +7,7 @@
 
 #include "asset/asset_registry.hpp"
 
-#include "core/logger.hpp"
+#include "core/log/logger.hpp"
 
 #include <ImGuizmo.h>
 #include <imgui.h>
