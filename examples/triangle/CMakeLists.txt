@@ -19,11 +19,3 @@ add_custom_command(
   VERBATIM
 )
 
-add_custom_command(
-  TARGET triangle
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets"
-          "$<TARGET_FILE_DIR:triangle>/assets"
-  VERBATIM
-)
-

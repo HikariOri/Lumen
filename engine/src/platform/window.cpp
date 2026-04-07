@@ -83,17 +83,12 @@ vk::SurfaceKHR Window::create_vulkan_surface(vk::Instance instance) const {
 
     VkSurfaceKHR surface {};
     if (!SDL_Vulkan_CreateSurface(window_, static_cast<VkInstance>(instance),
-                                 nullptr, &surface)) {
+                                  nullptr, &surface)) {
         LUMEN_LOG_ERROR("Vulkan Surface 创建失败: {}", SDL_GetError());
         return {};
     }
     LUMEN_LOG_DEBUG("Vulkan Surface 创建成功");
     return vk::SurfaceKHR { surface };
-}
-
-vk::SurfaceKHR
-Window::create_vulkan_surface(const render::Context &context) const {
-    return create_vulkan_surface(context.instance());
 }
 
 bool Window::poll_events() {

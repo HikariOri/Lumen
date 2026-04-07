@@ -13,9 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "render/vulkan.hpp"
-
-#include "render/context.hpp"
+#include "rhi/vulkan.hpp"
 
 struct SDL_Window;
 struct SDL_Surface;
@@ -103,7 +101,8 @@ public:
      * @note
      * - 创建失败通常意味着 SDL 初始化或窗口创建失败
      * - 成功后 window_ 不为空
-     * - 若 `config.icon_path` 非空，会尝试设置图标；加载失败仅打日志，不导致本函数返回 false
+     * - 若 `config.icon_path`
+     * 非空，会尝试设置图标；加载失败仅打日志，不导致本函数返回 false
      */
     bool create(const WindowConfig &config);
 
@@ -130,11 +129,6 @@ public:
      * - 典型用法：`render::Surface surface(ctx, window)`，无需直接调用本函数
      */
     vk::SurfaceKHR create_vulkan_surface(vk::Instance instance) const;
-
-    /**
-     * @brief 创建 Vulkan Surface（`create_vulkan_surface(context.instance())`）
-     */
-    vk::SurfaceKHR create_vulkan_surface(const render::Context &context) const;
 
     /**
      * @brief 轮询窗口事件
