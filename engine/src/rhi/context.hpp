@@ -5,6 +5,7 @@
 #include <vk_mem_alloc.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 /*
@@ -31,6 +32,9 @@ struct ContextDesc {
     std::vector<const char *> deviceExtensions;
 
     void *windowHandle = nullptr; ///< `lumen::platform::Window*`，可选
+
+    /// 非空时：`Device` 会创建 `vk::PipelineCache` 时读入、析构时写出驱动管线缓存。
+    std::string pipeline_cache_file_path;
 };
 
 class Context {
@@ -83,6 +87,10 @@ public:
     [[nodiscard]] VmaAllocator allocator() const { return allocator_; }
     [[nodiscard]] bool validation_enabled() const {
         return validation_enabled_;
+    }
+
+    [[nodiscard]] const std::string &pipeline_cache_file_path() const {
+        return desc_.pipeline_cache_file_path;
     }
 
     void wait_idle() const;

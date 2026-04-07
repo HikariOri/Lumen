@@ -12,6 +12,8 @@ namespace rhi {
 /// 单槽「帧飞行」上下文：命令池 + 主命令缓冲 + fence + 本帧上传环形 staging。
 /// 用法：`begin_recording` → 录制 copy / draw → `submit`；与
 /// `Device::frame_slot_` 轮转配合。
+///
+/// （路线图）每帧 descriptor set 池化 / arena 与上传环并列管理可后续在此层扩展。
 class FrameContext {
 public:
     FrameContext() = default;

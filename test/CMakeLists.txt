@@ -27,3 +27,11 @@ target_compile_definitions(
   PRIVATE
     "LUMEN_TEST_TRIANGLE_SHADERS_DIR=\"${_test_triangle_shader_out}\"")
 add_test(NAME shader_reflection COMMAND test_shader_reflection)
+
+add_executable(test_render_graph test_render_graph.cpp)
+target_link_libraries(test_render_graph PRIVATE engine doctest::doctest)
+add_test(NAME render_graph COMMAND test_render_graph)
+
+add_executable(test_pipeline_key test_pipeline_key.cpp)
+target_link_libraries(test_pipeline_key PRIVATE engine doctest::doctest)
+add_test(NAME pipeline_key COMMAND test_pipeline_key)

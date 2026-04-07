@@ -3,6 +3,8 @@
 #include "core/log/logger.hpp"
 
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <vector>
 
 namespace rhi {
@@ -32,6 +34,38 @@ namespace {
         f |= vk::BufferUsageFlagBits::eTransferDst;
     }
     return f;
+}
+
+[[nodiscard]] std::vector<std::uint8_t>
+read_binary_file(const std::string &path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) {
+        return {};
+    }
+    const auto sz = static_cast<std::size_t>(f.tellg());
+    f.seekg(0);
+    std::vector<std::uint8_t> out(sz);
+    if (sz > 0) {
+        f.read(reinterpret_cast<char *>(out.data()),
+               static_cast<std::streamsize>(sz));
+    }
+    if (!f) {
+        return {};
+    }
+    return out;
+}
+
+[[nodiscard]] bool write_binary_file(const std::string &path,
+                                     const std::vector<std::uint8_t> &data) {
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f) {
+        return false;
+    }
+    if (!data.empty()) {
+        f.write(reinterpret_cast<const char *>(data.data()),
+                static_cast<std::streamsize>(data.size()));
+    }
+    return static_cast<bool>(f);
 }
 
 } // namespace
@@ -236,6 +270,29 @@ bool Device::init(Context &ctx) {
     tracker_ = std::make_unique<ResourceTracker>();
     frame_slot_ = 0;
     in_frame_ = false;
+
+    pipeline_cache_file_path_ = ctx.pipeline_cache_file_path();
+    std::vector<std::uint8_t> pipeline_cache_initial;
+    if (!pipeline_cache_file_path_.empty()) {
+        pipeline_cache_initial = read_binary_file(pipeline_cache_file_path_);
+        if (!pipeline_cache_initial.empty()) {
+            LUMEN_LOG_DEBUG("已读入管线缓存文件 {} 字节",
+                            pipeline_cache_initial.size());
+        }
+    }
+    vk::PipelineCacheCreateInfo pcci {};
+    if (!pipeline_cache_initial.empty()) {
+        pcci.initialDataSize = pipeline_cache_initial.size();
+        pcci.pInitialData = pipeline_cache_initial.data();
+    }
+    const vk::Result pcr =
+        device_.createPipelineCache(&pcci, nullptr, &vk_pipeline_cache_);
+    if (pcr != vk::Result::eSuccess) {
+        LUMEN_LOG_WARN("createPipelineCache 失败 vk::Result={}，继续无驱动缓存",
+                       static_cast<int>(pcr));
+        vk_pipeline_cache_ = nullptr;
+    }
+
     initialized_ = true;
     LUMEN_LOG_DEBUG("rhi::Device 初始化完成 (frames_in_flight={})",
                     k_frames_in_flight);
@@ -254,6 +311,8 @@ void Device::shutdown() {
         present_queue_ = nullptr;
         allocator_ = nullptr;
         in_frame_ = false;
+        vk_pipeline_cache_ = nullptr;
+        pipeline_cache_file_path_.clear();
         return;
     }
 
@@ -268,6 +327,31 @@ void Device::shutdown() {
 
     sync_upload_.reset();
     tracker_.reset();
+
+    graphics_pipeline_cache_.clear(device_);
+    compute_pipeline_cache_.clear(device_);
+    shader_module_cache_.clear(device_);
+
+    if (vk_pipeline_cache_) {
+        if (!pipeline_cache_file_path_.empty()) {
+            std::size_t blob_size = 0;
+            const vk::Result q1 = device_.getPipelineCacheData(
+                vk_pipeline_cache_, &blob_size, nullptr);
+            if (q1 == vk::Result::eSuccess && blob_size > 0) {
+                std::vector<std::uint8_t> blob(blob_size);
+                const vk::Result q2 = device_.getPipelineCacheData(
+                    vk_pipeline_cache_, &blob_size, blob.data());
+                if (q2 == vk::Result::eSuccess &&
+                    write_binary_file(pipeline_cache_file_path_, blob)) {
+                    LUMEN_LOG_DEBUG("已写出管线缓存 {} 字节 -> {}",
+                                    blob.size(), pipeline_cache_file_path_);
+                }
+            }
+        }
+        device_.destroyPipelineCache(vk_pipeline_cache_, nullptr);
+        vk_pipeline_cache_ = nullptr;
+    }
+    pipeline_cache_file_path_.clear();
 
     device_ = nullptr;
     physical_device_ = nullptr;

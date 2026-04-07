@@ -16,7 +16,9 @@ namespace {
     const std::size_t h2 = std::hash<std::uint32_t>{}(b.descriptor_count);
     const std::size_t h3 = std::hash<std::uint32_t>{}(static_cast<std::uint32_t>(
         static_cast<VkShaderStageFlags>(b.stages)));
-    return h1 ^ (h2 << 1) ^ (h3 << 2);
+    const std::size_t h4 = std::hash<std::uint8_t>{}(
+        static_cast<std::uint8_t>(b.uniform_buffer_mode));
+    return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
 }
 
 } // namespace
@@ -30,7 +32,8 @@ bool DescriptorSetLayoutCache::SetLayoutKey::operator==(
         const DescriptorBinding &a = bindings[i];
         const DescriptorBinding &b = o.bindings[i];
         if (a.binding != b.binding || a.descriptor_type != b.descriptor_type ||
-            a.descriptor_count != b.descriptor_count || a.stages != b.stages) {
+            a.descriptor_count != b.descriptor_count || a.stages != b.stages ||
+            a.uniform_buffer_mode != b.uniform_buffer_mode) {
             return false;
         }
     }

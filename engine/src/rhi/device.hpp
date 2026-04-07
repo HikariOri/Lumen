@@ -2,17 +2,22 @@
 
 #include "rhi/buffer.hpp"
 #include "rhi/buffer_pool.hpp"
+#include "rhi/compute_pipeline_cache.hpp"
 #include "rhi/context.hpp"
 #include "rhi/frame_context.hpp"
+#include "rhi/graphics_pipeline_cache.hpp"
 #include "rhi/image.hpp"
 #include "rhi/image_pool.hpp"
 #include "rhi/resource_tracker.hpp"
+#include "rhi/shader_module_cache.hpp"
 #include "rhi/upload_context.hpp"
+#include "rhi/vulkan.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace rhi {
 
@@ -106,6 +111,32 @@ public:
     [[nodiscard]] const BufferResource *try_get(BufferHandle h) const;
     [[nodiscard]] const ImageResource *try_get(ImageHandle h) const;
 
+    /// 驱动级管线缓存；可为空句柄（创建失败时）。
+    [[nodiscard]] vk::PipelineCache vk_pipeline_cache() const {
+        return vk_pipeline_cache_;
+    }
+
+    [[nodiscard]] ShaderModuleCache &shader_module_cache() {
+        return shader_module_cache_;
+    }
+    [[nodiscard]] const ShaderModuleCache &shader_module_cache() const {
+        return shader_module_cache_;
+    }
+
+    [[nodiscard]] GraphicsPipelineCache &graphics_pipeline_cache() {
+        return graphics_pipeline_cache_;
+    }
+    [[nodiscard]] const GraphicsPipelineCache &graphics_pipeline_cache() const {
+        return graphics_pipeline_cache_;
+    }
+
+    [[nodiscard]] ComputePipelineCache &compute_pipeline_cache() {
+        return compute_pipeline_cache_;
+    }
+    [[nodiscard]] const ComputePipelineCache &compute_pipeline_cache() const {
+        return compute_pipeline_cache_;
+    }
+
 private:
     void fill_vma_alloc_(MemoryUsage mem, VmaAllocationCreateInfo &aci) const;
     void apply_buffer_tracker_(BufferHandle h, BufferUsage usage);
@@ -133,6 +164,12 @@ private:
     /// 加载期或未调用 `begin_frame` 时的阻塞上传（`flush` 会 wait）。
     std::unique_ptr<UploadContext> sync_upload_;
     std::unique_ptr<ResourceTracker> tracker_;
+
+    vk::PipelineCache vk_pipeline_cache_ {};
+    ShaderModuleCache shader_module_cache_;
+    GraphicsPipelineCache graphics_pipeline_cache_;
+    ComputePipelineCache compute_pipeline_cache_;
+    std::string pipeline_cache_file_path_;
 
     bool initialized_ { false };
 };

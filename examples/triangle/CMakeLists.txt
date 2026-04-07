@@ -15,7 +15,7 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/triangle.frag"
           -o "$<TARGET_FILE_DIR:triangle>/shaders/triangle.frag.spv"
-  COMMENT "Compile minimal triangle GLSL shaders"
+  COMMENT "Compile GLSL shaders for indexed rectangle example"
   VERBATIM
 )
 

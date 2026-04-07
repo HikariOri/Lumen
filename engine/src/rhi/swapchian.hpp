@@ -91,4 +91,16 @@ private:
     std::uint32_t height_req_ { 0 };
 };
 
+/// 按当前 swapchain 图像为 **单颜色附件** 的 `render_pass` 重建 `VkFramebuffer`（**不是** `VkBuffer`）；
+/// 会先销毁 `out_framebuffers` 中已有句柄。
+[[nodiscard]] bool rebuild_swapchain_present_framebuffers(
+    vk::Device device, const Swapchain &swapchain, vk::RenderPass render_pass,
+    std::vector<vk::Framebuffer> &out_framebuffers);
+
+/// `Swapchain::recreate` 成功后立刻重建呈现用 framebuffer，避免示例里分两步手写。
+[[nodiscard]] bool recreate_swapchain_and_present_framebuffers(
+    Swapchain &swapchain, std::uint32_t width, std::uint32_t height,
+    vk::Device device, vk::RenderPass render_pass,
+    std::vector<vk::Framebuffer> &out_framebuffers);
+
 } // namespace rhi

@@ -320,4 +320,67 @@ vk::ImageView Swapchain::image_view(const std::uint32_t i) const {
     return image_views_[i];
 }
 
+bool rebuild_swapchain_present_framebuffers(
+    const vk::Device device, const Swapchain &swapchain,
+    const vk::RenderPass render_pass,
+    std::vector<vk::Framebuffer> &out_framebuffers) {
+    if (!render_pass) {
+        LUMEN_LOG_ERROR(
+            "rebuild_swapchain_present_framebuffers: RenderPass 无效");
+        return false;
+    }
+    if (!swapchain.valid()) {
+        LUMEN_LOG_ERROR(
+            "rebuild_swapchain_present_framebuffers: Swapchain 无效");
+        return false;
+    }
+    for (vk::Framebuffer fb : out_framebuffers) {
+        if (fb) {
+            device.destroyFramebuffer(fb, nullptr);
+        }
+    }
+    out_framebuffers.clear();
+    const vk::Extent2D ext = swapchain.extent();
+    const std::uint32_t n = swapchain.image_count();
+    out_framebuffers.resize(n);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        vk::ImageView iv = swapchain.image_view(i);
+        vk::FramebufferCreateInfo fci {};
+        fci.renderPass = render_pass;
+        fci.attachmentCount = 1;
+        fci.pAttachments = &iv;
+        fci.width = ext.width;
+        fci.height = ext.height;
+        fci.layers = 1;
+        const vk::Result fr =
+            device.createFramebuffer(&fci, nullptr, &out_framebuffers[i]);
+        if (fr != vk::Result::eSuccess) {
+            LUMEN_LOG_ERROR("rebuild_swapchain_present_framebuffers: "
+                            "createFramebuffer 失败 i={} vk::Result={} "
+                            "extent={}x{}",
+                            i, static_cast<int>(fr), ext.width, ext.height);
+            for (std::uint32_t j = 0; j < i; ++j) {
+                device.destroyFramebuffer(out_framebuffers[j], nullptr);
+            }
+            out_framebuffers.clear();
+            return false;
+        }
+    }
+    LUMEN_LOG_DEBUG("rebuild_swapchain_present_framebuffers: {} 个 {}x{}", n,
+                    ext.width, ext.height);
+    return true;
+}
+
+bool recreate_swapchain_and_present_framebuffers(
+    Swapchain &swapchain, const std::uint32_t width,
+    const std::uint32_t height, const vk::Device device,
+    const vk::RenderPass render_pass,
+    std::vector<vk::Framebuffer> &out_framebuffers) {
+    if (!swapchain.recreate(width, height)) {
+        return false;
+    }
+    return rebuild_swapchain_present_framebuffers(device, swapchain, render_pass,
+                                                  out_framebuffers);
+}
+
 } // namespace rhi

@@ -4,7 +4,8 @@
 #include "rhi/context.hpp"
 #include "rhi/descriptor_layout_cache.hpp"
 #include "rhi/device.hpp"
-#include "rhi/shader_reflection.hpp"
+#include "rhi/render_graph.hpp"
+#include "rhi/render_graph_gpu.hpp"
 #include "rhi/swapchian.hpp"
 
 #include <ghc/filesystem.hpp>
@@ -16,8 +17,11 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace fs = ghc::filesystem;
@@ -29,11 +33,16 @@ struct Vertex {
     float color[3];
 };
 
-constexpr Vertex k_triangle_vertices[] = {
-    { { 0.0F, -0.5F }, { 1.0F, 0.2F, 0.2F } },
-    { { 0.5F, 0.5F }, { 0.2F, 1.0F, 0.2F } },
-    { { -0.5F, 0.5F }, { 0.2F, 0.4F, 1.0F } },
+/// 四边形四角（NDC），由索引缓冲拼成两个三角形。
+constexpr Vertex k_rect_vertices[] = {
+    { { -0.55F, -0.55F }, { 1.0F, 0.25F, 0.25F } },
+    { { 0.55F, -0.55F }, { 0.25F, 1.0F, 0.25F } },
+    { { 0.55F, 0.55F }, { 0.25F, 0.25F, 1.0F } },
+    { { -0.55F, 0.55F }, { 1.0F, 1.0F, 0.35F } },
 };
+constexpr std::uint16_t k_rect_indices[] = { 0, 1, 2, 0, 2, 3 };
+constexpr std::uint32_t k_rect_index_count =
+    static_cast<std::uint32_t>(std::size(k_rect_indices));
 
 [[nodiscard]] std::vector<std::byte> read_spv(const fs::path &path) {
     if (!fs::exists(path)) {
@@ -75,381 +84,65 @@ constexpr Vertex k_triangle_vertices[] = {
     return fs::current_path();
 }
 
-[[nodiscard]] vk::ShaderModule
-create_shader_module(vk::Device dev, const std::vector<std::byte> &code) {
-    if (code.empty()) {
-        LUMEN_APP_LOG_ERROR("create_shader_module: SPIR-V 为空");
-        return nullptr;
-    }
-    if ((code.size() % 4) != 0) {
-        LUMEN_APP_LOG_ERROR("create_shader_module: 大小非 4 对齐 size={}",
-                            code.size());
-        return nullptr;
-    }
-    vk::ShaderModuleCreateInfo ci {};
-    ci.codeSize = code.size();
-    ci.pCode = reinterpret_cast<const std::uint32_t *>(code.data());
-    vk::ShaderModule mod {};
-    const vk::Result r = dev.createShaderModule(&ci, nullptr, &mod);
-    if (r != vk::Result::eSuccess) {
-        LUMEN_APP_LOG_ERROR("createShaderModule 失败 vk::Result={}",
-                            static_cast<int>(r));
-        return nullptr;
-    }
-    return mod;
-}
-
-struct DrawResources {
-    vk::RenderPass render_pass {};
-    vk::DescriptorSetLayout descriptor_layout {};
-    vk::PipelineLayout pipeline_layout {};
-    vk::Pipeline pipeline {};
-    vk::DescriptorPool descriptor_pool {};
-    std::array<vk::DescriptorSet, rhi::Device::k_frames_in_flight>
-        descriptor_sets {};
-    std::vector<vk::Framebuffer> framebuffers;
+struct RectGpuBundle {
+    rhi::BufferHandle vertex_buffer {};
+    rhi::BufferHandle index_buffer {};
+    rhi::BufferHandle ubo_buffer {};
+    vk::DeviceSize ubo_dynamic_stride { 0 };
 };
 
-void destroy_draw(vk::Device dev, DrawResources &g) {
-    for (vk::Framebuffer fb : g.framebuffers) {
-        if (fb) {
-            dev.destroyFramebuffer(fb, nullptr);
-        }
-    }
-    g.framebuffers.clear();
-    if (g.pipeline) {
-        dev.destroyPipeline(g.pipeline, nullptr);
-        g.pipeline = nullptr;
-    }
-    // `descriptor_layout` / `pipeline_layout` 由全局 LayoutCache
-    // 持有，在进程退出前 `DescriptorSetLayoutCache::clear` /
-    // `PipelineLayoutCache::clear` 中销毁。
-    if (g.descriptor_pool) {
-        dev.destroyDescriptorPool(g.descriptor_pool, nullptr);
-        g.descriptor_pool = nullptr;
-    }
-    g.descriptor_sets.fill(nullptr);
-    g.descriptor_layout = nullptr;
-    g.pipeline_layout = nullptr;
-    if (g.render_pass) {
-        dev.destroyRenderPass(g.render_pass, nullptr);
-        g.render_pass = nullptr;
-    }
-}
-
-[[nodiscard]] bool create_framebuffers(vk::Device dev,
-                                       const rhi::Swapchain &swap,
-                                       vk::RenderPass rp, DrawResources &g) {
-    for (vk::Framebuffer fb : g.framebuffers) {
-        if (fb) {
-            dev.destroyFramebuffer(fb, nullptr);
-        }
-    }
-    g.framebuffers.clear();
-    const vk::Extent2D ext = swap.extent();
-    const std::uint32_t n = swap.image_count();
-    g.framebuffers.resize(n);
-    for (std::uint32_t i = 0; i < n; ++i) {
-        vk::ImageView iv = swap.image_view(i);
-        vk::FramebufferCreateInfo fci {};
-        fci.renderPass = rp;
-        fci.attachmentCount = 1;
-        fci.pAttachments = &iv;
-        fci.width = ext.width;
-        fci.height = ext.height;
-        fci.layers = 1;
-        const vk::Result fr =
-            dev.createFramebuffer(&fci, nullptr, &g.framebuffers[i]);
-        if (fr != vk::Result::eSuccess) {
-            LUMEN_APP_LOG_ERROR(
-                "createFramebuffer 失败 i={} vk::Result={} extent={}x{}", i,
-                static_cast<int>(fr), ext.width, ext.height);
-            return false;
-        }
-    }
-    LUMEN_APP_LOG_INFO("framebuffer: 已创建 {} 个 {}x{}", n, ext.width,
-                       ext.height);
-    return true;
-}
-
-[[nodiscard]] bool setup_triangle_descriptors(
-    vk::Device dev, DrawResources &g,
-    const std::array<rhi::BufferHandle, rhi::Device::k_frames_in_flight> &ubos,
-    rhi::Device &rdev, const vk::DeviceSize ubo_range) {
-    constexpr std::uint32_t n = rhi::Device::k_frames_in_flight;
-    vk::DescriptorPoolSize ps {};
-    ps.type = vk::DescriptorType::eUniformBuffer;
-    ps.descriptorCount = n;
-
-    vk::DescriptorPoolCreateInfo dpci {};
-    dpci.maxSets = n;
-    dpci.poolSizeCount = 1;
-    dpci.pPoolSizes = &ps;
-    const vk::Result rdp =
-        dev.createDescriptorPool(&dpci, nullptr, &g.descriptor_pool);
-    if (rdp != vk::Result::eSuccess) {
-        LUMEN_APP_LOG_ERROR("createDescriptorPool 失败 vk::Result={}",
-                            static_cast<int>(rdp));
+[[nodiscard]] bool create_rect_gpu_buffers(rhi::Device &device,
+                                           RectGpuBundle &out) {
+    rhi::BufferDesc vb_desc {};
+    vb_desc.size = sizeof(k_rect_vertices);
+    vb_desc.usage = rhi::BufferUsage::Vertex;
+    vb_desc.memory = rhi::MemoryUsage::GPU_ONLY;
+    vb_desc.data = k_rect_vertices;
+    out.vertex_buffer = device.create_buffer(vb_desc);
+    if (!rhi::is_valid(out.vertex_buffer)) {
+        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers: 顶点缓冲失败");
         return false;
     }
 
-    std::array<vk::DescriptorSetLayout, n> dsls {};
-    dsls.fill(g.descriptor_layout);
-
-    vk::DescriptorSetAllocateInfo dsai {};
-    dsai.descriptorPool = g.descriptor_pool;
-    dsai.descriptorSetCount = n;
-    dsai.pSetLayouts = dsls.data();
-    const vk::Result ras =
-        dev.allocateDescriptorSets(&dsai, g.descriptor_sets.data());
-    if (ras != vk::Result::eSuccess) {
-        LUMEN_APP_LOG_ERROR("allocateDescriptorSets 失败 vk::Result={}",
-                            static_cast<int>(ras));
-        dev.destroyDescriptorPool(g.descriptor_pool, nullptr);
-        g.descriptor_pool = nullptr;
-        g.descriptor_sets.fill(nullptr);
+    rhi::BufferDesc ib_desc {};
+    ib_desc.size = sizeof(k_rect_indices);
+    ib_desc.usage = rhi::BufferUsage::Index;
+    ib_desc.memory = rhi::MemoryUsage::GPU_ONLY;
+    ib_desc.data = k_rect_indices;
+    out.index_buffer = device.create_buffer(ib_desc);
+    if (!rhi::is_valid(out.index_buffer)) {
+        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers: 索引缓冲失败");
+        device.destroy_buffer(out.vertex_buffer);
+        out.vertex_buffer = {};
         return false;
     }
 
-    for (std::uint32_t i = 0; i < n; ++i) {
-        const rhi::BufferResource *br = rdev.try_get(ubos[i]);
-        if (br == nullptr) {
-            LUMEN_APP_LOG_ERROR("setup_triangle_descriptors: try_get(ubos[{}]) "
-                                "失败",
-                                i);
-            dev.destroyDescriptorPool(g.descriptor_pool, nullptr);
-            g.descriptor_pool = nullptr;
-            g.descriptor_sets.fill(nullptr);
-            return false;
-        }
-        vk::DescriptorBufferInfo bi {};
-        bi.buffer = br->buffer;
-        bi.offset = 0;
-        bi.range = ubo_range;
+    const vk::DeviceSize ubo_align_raw = static_cast<vk::DeviceSize>(
+        device.physical_device()
+            .getProperties()
+            .limits.minUniformBufferOffsetAlignment);
+    const vk::DeviceSize ubo_align =
+        ubo_align_raw > 0 ? ubo_align_raw : static_cast<vk::DeviceSize>(256);
+    out.ubo_dynamic_stride =
+        std::max<vk::DeviceSize>(ubo_align, sizeof(float));
+    const vk::DeviceSize ubo_pool_bytes =
+        out.ubo_dynamic_stride *
+        static_cast<vk::DeviceSize>(rhi::Device::k_frames_in_flight);
 
-        vk::WriteDescriptorSet w {};
-        w.dstSet = g.descriptor_sets[i];
-        w.dstBinding = 0;
-        w.dstArrayElement = 0;
-        w.descriptorCount = 1;
-        w.descriptorType = vk::DescriptorType::eUniformBuffer;
-        w.pBufferInfo = &bi;
-        dev.updateDescriptorSets(1, &w, 0, nullptr);
-    }
-    return true;
-}
-
-[[nodiscard]] bool
-create_draw_pipeline(vk::Device dev, const rhi::Swapchain &swap,
-                     const fs::path &vert_spv, const fs::path &frag_spv,
-                     DrawResources &g, rhi::DescriptorSetLayoutCache &dsl_cache,
-                     rhi::PipelineLayoutCache &pl_cache) {
-    destroy_draw(dev, g);
-
-    const std::vector<std::byte> vert_code = read_spv(vert_spv);
-    const std::vector<std::byte> frag_code = read_spv(frag_spv);
-    if (vert_code.empty() || frag_code.empty() || (vert_code.size() % 4) != 0 ||
-        (frag_code.size() % 4) != 0) {
-        LUMEN_APP_LOG_ERROR("create_draw_pipeline: SPIR-V 无效 vert={} frag={}",
-                            vert_spv.generic_string(),
-                            frag_spv.generic_string());
-        return false;
-    }
-
-    const std::span<const std::uint32_t> vert_words {
-        reinterpret_cast<const std::uint32_t *>(vert_code.data()),
-        vert_code.size() / 4
-    };
-    const std::span<const std::uint32_t> frag_words {
-        reinterpret_cast<const std::uint32_t *>(frag_code.data()),
-        frag_code.size() / 4
-    };
-
-    const std::optional<rhi::ShaderReflection> refl_v =
-        rhi::reflect_spirv(vert_words, vk::ShaderStageFlagBits::eVertex);
-    const std::optional<rhi::ShaderReflection> refl_f =
-        rhi::reflect_spirv(frag_words, vk::ShaderStageFlagBits::eFragment);
-    if (!refl_v || !refl_f) {
-        LUMEN_APP_LOG_ERROR("create_draw_pipeline: 着色器反射失败");
-        return false;
-    }
-    rhi::ShaderReflection merged {};
-    if (!rhi::merge_vert_frag_reflection(*refl_v, *refl_f, merged)) {
-        LUMEN_APP_LOG_ERROR("create_draw_pipeline: 合并 VS/FS 反射失败");
-        return false;
-    }
-
-    std::vector<vk::DescriptorSetLayout> set_layouts {};
-    if (!rhi::create_reflected_pipeline_layouts(
-            dev, merged, dsl_cache, pl_cache, set_layouts, g.pipeline_layout)) {
+    rhi::BufferDesc ubd {};
+    ubd.size = static_cast<std::size_t>(ubo_pool_bytes);
+    ubd.usage = rhi::BufferUsage::Uniform | rhi::BufferUsage::TransferDst;
+    ubd.memory = rhi::MemoryUsage::GPU_ONLY;
+    ubd.data = nullptr;
+    out.ubo_buffer = device.create_buffer(ubd);
+    if (!rhi::is_valid(out.ubo_buffer)) {
         LUMEN_APP_LOG_ERROR(
-            "create_draw_pipeline: 从反射创建 PipelineLayout 失败");
-        return false;
-    }
-    if (set_layouts.size() != 1) {
-        LUMEN_APP_LOG_ERROR(
-            "create_draw_pipeline: triangle 期望单 set，实际 set 数={}",
-            set_layouts.size());
-        return false;
-    }
-    g.descriptor_layout = set_layouts[0];
-
-    const vk::Format color_fmt = swap.format();
-
-    vk::AttachmentDescription color {};
-    color.format = color_fmt;
-    color.samples = vk::SampleCountFlagBits::e1;
-    color.loadOp = vk::AttachmentLoadOp::eClear;
-    color.storeOp = vk::AttachmentStoreOp::eStore;
-    color.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-    color.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-    color.initialLayout = vk::ImageLayout::eUndefined;
-    color.finalLayout = vk::ImageLayout::ePresentSrcKHR;
-
-    vk::AttachmentReference color_ref {};
-    color_ref.attachment = 0;
-    color_ref.layout = vk::ImageLayout::eColorAttachmentOptimal;
-
-    vk::SubpassDescription sub {};
-    sub.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-    sub.colorAttachmentCount = 1;
-    sub.pColorAttachments = &color_ref;
-
-    vk::SubpassDependency dep {};
-    dep.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dep.dstSubpass = 0;
-    dep.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dep.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    dep.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
-
-    vk::RenderPassCreateInfo rpci {};
-    rpci.attachmentCount = 1;
-    rpci.pAttachments = &color;
-    rpci.subpassCount = 1;
-    rpci.pSubpasses = &sub;
-    rpci.dependencyCount = 1;
-    rpci.pDependencies = &dep;
-
-    const vk::Result rpr = dev.createRenderPass(&rpci, nullptr, &g.render_pass);
-    if (rpr != vk::Result::eSuccess) {
-        LUMEN_APP_LOG_ERROR("createRenderPass 失败 vk::Result={}",
-                            static_cast<int>(rpr));
-        return false;
-    }
-    LUMEN_APP_LOG_DEBUG("createRenderPass 成功 format={}",
-                        static_cast<int>(color_fmt));
-
-    vk::ShaderModule vert_mod = create_shader_module(dev, vert_code);
-    vk::ShaderModule frag_mod = create_shader_module(dev, frag_code);
-    if (!vert_mod || !frag_mod) {
-        if (vert_mod) {
-            dev.destroyShaderModule(vert_mod, nullptr);
-        }
-        if (frag_mod) {
-            dev.destroyShaderModule(frag_mod, nullptr);
-        }
-        destroy_draw(dev, g);
-        LUMEN_APP_LOG_ERROR(
-            "着色器模块创建失败 vert_bytes={} frag_bytes={} vert={} frag={}",
-            vert_code.size(), frag_code.size(), vert_spv.generic_string(),
-            frag_spv.generic_string());
-        return false;
-    }
-
-    vk::PipelineShaderStageCreateInfo st_vert {};
-    st_vert.stage = vk::ShaderStageFlagBits::eVertex;
-    st_vert.module = vert_mod;
-    st_vert.pName = "main";
-    vk::PipelineShaderStageCreateInfo st_frag {};
-    st_frag.stage = vk::ShaderStageFlagBits::eFragment;
-    st_frag.module = frag_mod;
-    st_frag.pName = "main";
-    const vk::PipelineShaderStageCreateInfo stages[] = { st_vert, st_frag };
-
-    vk::VertexInputBindingDescription vib {};
-    vib.binding = 0;
-    vib.stride = sizeof(Vertex);
-    vib.inputRate = vk::VertexInputRate::eVertex;
-
-    vk::VertexInputAttributeDescription via[2] {};
-    via[0].location = 0;
-    via[0].binding = 0;
-    via[0].format = vk::Format::eR32G32Sfloat;
-    via[0].offset = offsetof(Vertex, pos);
-    via[1].location = 1;
-    via[1].binding = 0;
-    via[1].format = vk::Format::eR32G32B32Sfloat;
-    via[1].offset = offsetof(Vertex, color);
-
-    vk::PipelineVertexInputStateCreateInfo vi {};
-    vi.vertexBindingDescriptionCount = 1;
-    vi.pVertexBindingDescriptions = &vib;
-    vi.vertexAttributeDescriptionCount = 2;
-    vi.pVertexAttributeDescriptions = via;
-
-    vk::PipelineInputAssemblyStateCreateInfo ia {};
-    ia.topology = vk::PrimitiveTopology::eTriangleList;
-
-    vk::PipelineViewportStateCreateInfo vp {};
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-
-    vk::PipelineRasterizationStateCreateInfo rs {};
-    rs.polygonMode = vk::PolygonMode::eFill;
-    rs.cullMode = vk::CullModeFlagBits::eNone;
-    rs.frontFace = vk::FrontFace::eCounterClockwise;
-    rs.lineWidth = 1.0F;
-
-    vk::PipelineMultisampleStateCreateInfo ms {};
-    ms.rasterizationSamples = vk::SampleCountFlagBits::e1;
-
-    vk::PipelineColorBlendAttachmentState cba {};
-    cba.colorWriteMask =
-        vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-        vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-
-    vk::PipelineColorBlendStateCreateInfo cb {};
-    cb.attachmentCount = 1;
-    cb.pAttachments = &cba;
-
-    const vk::DynamicState dyn_states[] = { vk::DynamicState::eViewport,
-                                            vk::DynamicState::eScissor };
-    vk::PipelineDynamicStateCreateInfo dyn {};
-    dyn.dynamicStateCount = 2;
-    dyn.pDynamicStates = dyn_states;
-
-    vk::GraphicsPipelineCreateInfo gpi {};
-    gpi.stageCount = 2;
-    gpi.pStages = stages;
-    gpi.pVertexInputState = &vi;
-    gpi.pInputAssemblyState = &ia;
-    gpi.pViewportState = &vp;
-    gpi.pRasterizationState = &rs;
-    gpi.pMultisampleState = &ms;
-    gpi.pColorBlendState = &cb;
-    gpi.pDynamicState = &dyn;
-    gpi.layout = g.pipeline_layout;
-    gpi.renderPass = g.render_pass;
-    gpi.subpass = 0;
-
-    const vk::Result gpr =
-        dev.createGraphicsPipelines(nullptr, 1, &gpi, nullptr, &g.pipeline);
-    if (gpr != vk::Result::eSuccess) {
-        LUMEN_APP_LOG_ERROR("createGraphicsPipelines 失败 vk::Result={}",
-                            static_cast<int>(gpr));
-        dev.destroyShaderModule(vert_mod, nullptr);
-        dev.destroyShaderModule(frag_mod, nullptr);
-        destroy_draw(dev, g);
-        return false;
-    }
-    LUMEN_APP_LOG_INFO("graphics pipeline 创建成功");
-
-    dev.destroyShaderModule(vert_mod, nullptr);
-    dev.destroyShaderModule(frag_mod, nullptr);
-
-    if (!create_framebuffers(dev, swap, g.render_pass, g)) {
-        LUMEN_APP_LOG_ERROR("create_framebuffers 失败");
-        destroy_draw(dev, g);
+            "create_rect_gpu_buffers: UBO 池失败（{} 字节）",
+            static_cast<std::uint64_t>(ubo_pool_bytes));
+        device.destroy_buffer(out.index_buffer);
+        device.destroy_buffer(out.vertex_buffer);
+        out.index_buffer = {};
+        out.vertex_buffer = {};
         return false;
     }
     return true;
@@ -460,18 +153,18 @@ create_draw_pipeline(vk::Device dev, const rhi::Swapchain &swap,
 int main() {
     if (!core::log::Logger::init()) {
         std::cerr
-            << "[triangle] Logger::init 失败，请检查工作目录是否可写 logs/\n";
+            << "[rectangle] Logger::init 失败，请检查工作目录是否可写 logs/\n";
         return 1;
     }
     struct LogShutdown {
         ~LogShutdown() { core::log::Logger::shutdown(); }
     } log_shutdown;
 
-    LUMEN_APP_LOG_INFO("triangle 示例启动");
+    LUMEN_APP_LOG_INFO("rectangle（索引矩形）示例启动");
 
     lumen::platform::Window window {};
     lumen::platform::WindowConfig wcfg {};
-    wcfg.title = "triangle (RHI)";
+    wcfg.title = "rectangle indexed (RHI)";
     wcfg.width = 960;
     wcfg.height = 540;
     if (!window.create(wcfg)) {
@@ -484,6 +177,9 @@ int main() {
     rhi::ContextDesc cdesc {};
     cdesc.windowHandle = &window;
     cdesc.instanceExtensions = window.get_vulkan_instance_extensions();
+    cdesc.pipeline_cache_file_path =
+        (shader_base_dir() / "lumen_rectangle_vk_pipeline_cache.bin")
+            .string();
     LUMEN_APP_LOG_INFO("传给 rhi::Context 的实例扩展共 {} 个",
                        cdesc.instanceExtensions.size());
     for (const char *name : cdesc.instanceExtensions) {
@@ -535,17 +231,38 @@ int main() {
 
     const fs::path shader_dir = shader_base_dir() / "shaders";
     LUMEN_APP_LOG_INFO("着色器目录 shader_dir={}", shader_dir.generic_string());
-    rhi::DescriptorSetLayoutCache triangle_dsl_cache {};
-    rhi::PipelineLayoutCache triangle_pl_cache {};
-    DrawResources draw {};
-    if (!create_draw_pipeline(device.vk_device(), swap,
-                              shader_dir / "triangle.vert.spv",
-                              shader_dir / "triangle.frag.spv", draw,
-                              triangle_dsl_cache, triangle_pl_cache)) {
-        LUMEN_APP_LOG_ERROR(
-            "create_draw_pipeline 失败（见上文 SPIR-V / Vulkan 日志）");
-        triangle_pl_cache.clear(device.vk_device());
-        triangle_dsl_cache.clear(device.vk_device());
+    rhi::DescriptorSetLayoutCache rect_dsl_cache {};
+    rhi::PipelineLayoutCache rect_pl_cache {};
+    rhi::RgGpuCompileContext rect_gpu_ctx {};
+    rect_gpu_ctx.rhi_device = &device;
+    rect_gpu_ctx.vk_device = device.vk_device();
+    rect_gpu_ctx.swapchain = &swap;
+    rect_gpu_ctx.dsl_cache = &rect_dsl_cache;
+    rect_gpu_ctx.pl_cache = &rect_pl_cache;
+
+    const std::shared_ptr<const std::vector<std::byte>> rect_vert_spv =
+        std::make_shared<std::vector<std::byte>>(
+            read_spv(shader_dir / "triangle.vert.spv"));
+    const std::shared_ptr<const std::vector<std::byte>> rect_frag_spv =
+        std::make_shared<std::vector<std::byte>>(
+            read_spv(shader_dir / "triangle.frag.spv"));
+    if (rect_vert_spv->empty() || rect_frag_spv->empty() ||
+        (rect_vert_spv->size() % 4) != 0 || (rect_frag_spv->size() % 4) != 0) {
+        LUMEN_APP_LOG_ERROR("着色器 SPIR-V 无效或缺失（检查 {}）",
+                            shader_dir.generic_string());
+        rect_pl_cache.clear(device.vk_device());
+        rect_dsl_cache.clear(device.vk_device());
+        swap.destroy();
+        device.shutdown();
+        ctx.shutdown();
+        return 1;
+    }
+
+    RectGpuBundle rect_gpu {};
+    if (!create_rect_gpu_buffers(device, rect_gpu)) {
+        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers 失败");
+        rect_pl_cache.clear(device.vk_device());
+        rect_dsl_cache.clear(device.vk_device());
         swap.destroy();
         device.shutdown();
         ctx.shutdown();
@@ -571,99 +288,19 @@ int main() {
                 vkdev.destroySemaphore(image_available[j], nullptr);
                 vkdev.destroySemaphore(render_finished[j], nullptr);
             }
-            destroy_draw(vkdev, draw);
+            device.destroy_buffer(rect_gpu.ubo_buffer);
+            device.destroy_buffer(rect_gpu.index_buffer);
+            device.destroy_buffer(rect_gpu.vertex_buffer);
+            rect_gpu_ctx.destroy_all(vkdev, &device.graphics_pipeline_cache());
             swap.destroy();
-            triangle_pl_cache.clear(vkdev);
-            triangle_dsl_cache.clear(vkdev);
+            rect_pl_cache.clear(vkdev);
+            rect_dsl_cache.clear(vkdev);
             device.shutdown();
             ctx.shutdown();
             return 1;
         }
     }
     LUMEN_APP_LOG_INFO("同步对象（每帧 semaphore 对）创建完成，进入主循环");
-
-    rhi::BufferDesc vb_desc {};
-    vb_desc.size = sizeof(k_triangle_vertices);
-    vb_desc.usage = rhi::BufferUsage::Vertex;
-    vb_desc.memory = rhi::MemoryUsage::GPU_ONLY;
-    vb_desc.data = k_triangle_vertices;
-    const rhi::BufferHandle vertex_buffer = device.create_buffer(vb_desc);
-    if (!rhi::is_valid(vertex_buffer)) {
-        LUMEN_APP_LOG_ERROR("顶点缓冲创建失败");
-        for (std::uint32_t i = 0; i < rhi::Device::k_frames_in_flight; ++i) {
-            vkdev.destroySemaphore(image_available[i], nullptr);
-            vkdev.destroySemaphore(render_finished[i], nullptr);
-        }
-        destroy_draw(vkdev, draw);
-        swap.destroy();
-        triangle_pl_cache.clear(vkdev);
-        triangle_dsl_cache.clear(vkdev);
-        device.shutdown();
-        ctx.shutdown();
-        return 1;
-    }
-
-    const vk::DeviceSize ubo_align_raw = static_cast<vk::DeviceSize>(
-        device.physical_device()
-            .getProperties()
-            .limits.minUniformBufferOffsetAlignment);
-    const vk::DeviceSize ubo_align =
-        ubo_align_raw > 0 ? ubo_align_raw : static_cast<vk::DeviceSize>(256);
-    const vk::DeviceSize ubo_range =
-        std::max<vk::DeviceSize>(ubo_align, sizeof(float));
-
-    std::array<rhi::BufferHandle, rhi::Device::k_frames_in_flight> ubo_bufs {};
-    bool ubo_ok = true;
-    for (std::uint32_t ui = 0; ui < rhi::Device::k_frames_in_flight; ++ui) {
-        rhi::BufferDesc ubd {};
-        ubd.size = static_cast<std::size_t>(ubo_range);
-        ubd.usage = rhi::BufferUsage::Uniform | rhi::BufferUsage::TransferDst;
-        ubd.memory = rhi::MemoryUsage::GPU_ONLY;
-        ubd.data = nullptr;
-        ubo_bufs[ui] = device.create_buffer(ubd);
-        if (!rhi::is_valid(ubo_bufs[ui])) {
-            LUMEN_APP_LOG_ERROR("UBO 缓冲创建失败 slot={}", ui);
-            ubo_ok = false;
-            break;
-        }
-    }
-    if (!ubo_ok) {
-        for (rhi::BufferHandle h : ubo_bufs) {
-            if (rhi::is_valid(h)) {
-                device.destroy_buffer(h);
-            }
-        }
-        for (std::uint32_t i = 0; i < rhi::Device::k_frames_in_flight; ++i) {
-            vkdev.destroySemaphore(image_available[i], nullptr);
-            vkdev.destroySemaphore(render_finished[i], nullptr);
-        }
-        device.destroy_buffer(vertex_buffer);
-        destroy_draw(vkdev, draw);
-        swap.destroy();
-        triangle_pl_cache.clear(vkdev);
-        triangle_dsl_cache.clear(vkdev);
-        device.shutdown();
-        ctx.shutdown();
-        return 1;
-    }
-
-    if (!setup_triangle_descriptors(vkdev, draw, ubo_bufs, device, ubo_range)) {
-        for (rhi::BufferHandle h : ubo_bufs) {
-            device.destroy_buffer(h);
-        }
-        for (std::uint32_t i = 0; i < rhi::Device::k_frames_in_flight; ++i) {
-            vkdev.destroySemaphore(image_available[i], nullptr);
-            vkdev.destroySemaphore(render_finished[i], nullptr);
-        }
-        device.destroy_buffer(vertex_buffer);
-        destroy_draw(vkdev, draw);
-        swap.destroy();
-        triangle_pl_cache.clear(vkdev);
-        triangle_dsl_cache.clear(vkdev);
-        device.shutdown();
-        ctx.shutdown();
-        return 1;
-    }
 
     bool resize_pending = false;
     std::uint64_t frame_i = 0;
@@ -674,14 +311,22 @@ int main() {
             ctx.wait_idle();
             window.get_framebuffer_size(&fbw, &fbh);
             if (fbw > 0 && fbh > 0) {
-                if (swap.recreate(static_cast<std::uint32_t>(fbw),
-                                  static_cast<std::uint32_t>(fbh)) &&
-                    create_framebuffers(vkdev, swap, draw.render_pass, draw)) {
+                bool resized = false;
+                if (!rect_gpu_ctx.compiled.empty() &&
+                    rect_gpu_ctx.compiled[0].has_value()) {
+                    resized = rhi::recreate_swapchain_and_present_framebuffers(
+                        swap, static_cast<std::uint32_t>(fbw),
+                        static_cast<std::uint32_t>(fbh), vkdev,
+                        rect_gpu_ctx.compiled[0]->render_pass,
+                        rect_gpu_ctx.compiled[0]->framebuffers);
+                }
+                if (resized) {
                     resize_pending = false;
-                    LUMEN_APP_LOG_INFO("交换链重建成功 {}x{}", fbw, fbh);
+                    LUMEN_APP_LOG_INFO("交换链与呈现 framebuffer 重建成功 {}x{}",
+                                       fbw, fbh);
                 } else {
-                    LUMEN_APP_LOG_ERROR("交换链或 framebuffer 重建失败 {}x{}",
-                                        fbw, fbh);
+                    LUMEN_APP_LOG_ERROR(
+                        "交换链或呈现 framebuffer 重建失败 {}x{}", fbw, fbh);
                 }
             } else {
                 LUMEN_APP_LOG_WARN("重建跳过：framebuffer 尺寸仍无效 {}x{}",
@@ -723,80 +368,73 @@ int main() {
         }
 
         const vk::Extent2D ext = swap.extent();
-        vk::CommandBuffer cmd = device.frame_command_buffer();
+        vk::CommandBuffer vk_cmd = device.frame_command_buffer();
 
         const float time_sec = std::chrono::duration<float>(
                                    std::chrono::steady_clock::now() - app_start)
                                    .count();
-        device.upload_buffer(ubo_bufs[slot], &time_sec, sizeof(time_sec), 0);
+        const vk::DeviceSize ubo_slot_offset =
+            static_cast<vk::DeviceSize>(slot) * rect_gpu.ubo_dynamic_stride;
+        device.upload_buffer(rect_gpu.ubo_buffer, &time_sec, sizeof(time_sec),
+                             ubo_slot_offset);
 
-        const rhi::BufferResource *ubo_res = device.try_get(ubo_bufs[slot]);
+        const rhi::BufferResource *ubo_res = device.try_get(rect_gpu.ubo_buffer);
         if (ubo_res == nullptr) {
-            LUMEN_APP_LOG_ERROR("try_get(ubo_bufs[slot]) 失败");
+            LUMEN_APP_LOG_ERROR("try_get(ubo_buffer) 失败");
             device.end_frame();
             break;
         }
-        vk::BufferMemoryBarrier ubo_barrier {};
-        ubo_barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-        ubo_barrier.dstAccessMask = vk::AccessFlagBits::eUniformRead;
-        ubo_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        ubo_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        ubo_barrier.buffer = ubo_res->buffer;
-        ubo_barrier.offset = 0;
-        ubo_barrier.size = VK_WHOLE_SIZE;
-        cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                            vk::PipelineStageFlagBits::eVertexShader, {},
-                            nullptr, ubo_barrier, nullptr);
-
-        vk::ClearValue clear {};
-        clear.color = vk::ClearColorValue(
-            std::array<float, 4> { 0.05F, 0.06F, 0.09F, 1.0F });
-
-        vk::RenderPassBeginInfo rpbi {};
-        rpbi.renderPass = draw.render_pass;
-        rpbi.framebuffer = draw.framebuffers[acq.image_index];
-        rpbi.renderArea.offset = vk::Offset2D { 0, 0 };
-        rpbi.renderArea.extent = ext;
-        rpbi.clearValueCount = 1;
-        rpbi.pClearValues = &clear;
-
-        cmd.beginRenderPass(rpbi, vk::SubpassContents::eInline);
-        cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, draw.pipeline);
-
-        const std::array<vk::DescriptorSet, 1> draw_dss {
-            draw.descriptor_sets[slot]
-        };
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                               draw.pipeline_layout, 0, draw_dss, {});
-
-        vk::Viewport vp {};
-        vp.x = 0.0F;
-        vp.y = 0.0F;
-        vp.width = static_cast<float>(ext.width);
-        vp.height = static_cast<float>(ext.height);
-        vp.minDepth = 0.0F;
-        vp.maxDepth = 1.0F;
-        cmd.setViewport(0, 1, &vp);
-
-        vk::Rect2D sc {};
-        sc.offset = vk::Offset2D { 0, 0 };
-        sc.extent = ext;
-        cmd.setScissor(0, 1, &sc);
-
-        const rhi::BufferResource *vb_res = device.try_get(vertex_buffer);
+        const rhi::BufferResource *vb_res = device.try_get(rect_gpu.vertex_buffer);
         if (vb_res == nullptr) {
             LUMEN_APP_LOG_ERROR("try_get(vertex_buffer) 失败");
-            cmd.endRenderPass();
             device.end_frame();
             break;
         }
-        const vk::Buffer vb_buf = vb_res->buffer;
-        const vk::DeviceSize vb_off = 0;
-        cmd.bindVertexBuffers(0, 1, &vb_buf, &vb_off);
+        const rhi::BufferResource *ib_res = device.try_get(rect_gpu.index_buffer);
+        if (ib_res == nullptr) {
+            LUMEN_APP_LOG_ERROR("try_get(index_buffer) 失败");
+            device.end_frame();
+            break;
+        }
 
-        cmd.draw(static_cast<std::uint32_t>(std::size(k_triangle_vertices)), 1,
-                 0, 0);
-        cmd.endRenderPass();
+        const std::uint32_t swap_image_index = acq.image_index;
+        rhi::RenderGraph frame_rg {};
+        const rhi::RgResourceId rg_ubo = frame_rg.create_buffer();
+        const rhi::RgResourceId rg_vb = frame_rg.create_buffer();
+        const rhi::RgResourceId rg_ib = frame_rg.create_buffer();
+        frame_rg.bind_buffer(rg_ubo, ubo_res->buffer, 0, rect_gpu.ubo_buffer);
+        frame_rg.bind_buffer(rg_vb, vb_res->buffer, 0, rect_gpu.vertex_buffer);
+        frame_rg.bind_buffer(rg_ib, ib_res->buffer, 0, rect_gpu.index_buffer);
+        frame_rg.declare_buffer_prior_write(
+            rg_ubo, vk::PipelineStageFlagBits::eTransfer,
+            vk::AccessFlagBits::eTransferWrite);
+
+        frame_rg.add_pass("rectangle_draw")
+            .gpu_shaders(rect_vert_spv, rect_frag_spv)
+            .gpu_bind_uniform_buffer("ubo", rg_ubo, rect_gpu.ubo_dynamic_stride)
+            .gpu_draw_indexed(rg_vb, rg_ib, k_rect_index_count);
+
+        if (!frame_rg.compile(&rect_gpu_ctx)) {
+            LUMEN_APP_LOG_ERROR(
+                "rectangle 帧 RenderGraph::compile（含 GPU 阶段）失败");
+            device.end_frame();
+            break;
+        }
+
+        std::vector<std::optional<rhi::RgGpuExecuteFrame>> exec_frame(
+            frame_rg.passes().size());
+        exec_frame[0].emplace();
+        exec_frame[0]->rhi_device = &device;
+        exec_frame[0]->swap_image_index = swap_image_index;
+        exec_frame[0]->surface_extent = ext;
+        exec_frame[0]->dynamic_uniform_offsets = { ubo_slot_offset };
+
+        rhi::CommandBuffer cmd { vk_cmd };
+        if (!frame_rg.execute(cmd, rect_gpu_ctx, exec_frame)) {
+            LUMEN_APP_LOG_ERROR("rectangle 帧 RenderGraph::execute 失败");
+            device.end_frame();
+            break;
+        }
 
         device.end_frame(img_sem,
                          vk::PipelineStageFlagBits::eColorAttachmentOutput,
@@ -827,14 +465,13 @@ int main() {
         vkdev.destroySemaphore(image_available[i], nullptr);
         vkdev.destroySemaphore(render_finished[i], nullptr);
     }
-    destroy_draw(vkdev, draw);
+    rect_gpu_ctx.destroy_all(vkdev, &device.graphics_pipeline_cache());
     swap.destroy();
-    triangle_pl_cache.clear(vkdev);
-    triangle_dsl_cache.clear(vkdev);
-    for (rhi::BufferHandle h : ubo_bufs) {
-        device.destroy_buffer(h);
-    }
-    device.destroy_buffer(vertex_buffer);
+    rect_pl_cache.clear(vkdev);
+    rect_dsl_cache.clear(vkdev);
+    device.destroy_buffer(rect_gpu.ubo_buffer);
+    device.destroy_buffer(rect_gpu.index_buffer);
+    device.destroy_buffer(rect_gpu.vertex_buffer);
     device.shutdown();
     ctx.shutdown();
     return 0;
