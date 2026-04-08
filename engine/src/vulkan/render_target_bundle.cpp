@@ -7,6 +7,15 @@
 
 namespace vulkan {
 
+bool RenderTargetBundle::is_output_to_swapchain() const noexcept {
+    for (const RenderTarget &rt : color_targets_) {
+        if (rt.is_swapchain_target) {
+            return true;
+        }
+    }
+    return false;
+}
+
 RenderTargetBundle::~RenderTargetBundle() {
     if (framebuffer_device_ != VK_NULL_HANDLE && !framebuffers_.empty()) {
         for (const auto &entry : framebuffers_) {

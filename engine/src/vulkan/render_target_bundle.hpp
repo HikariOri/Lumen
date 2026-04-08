@@ -72,6 +72,9 @@ public:
         return depth_target_.is_valid();
     }
 
+    /// 任一颜色附件标记为交换链输出时，主循环应对应调用 `vkQueuePresentKHR`。
+    [[nodiscard]] bool is_output_to_swapchain() const noexcept;
+
 private:
     [[nodiscard]] bool set_extent_or_match_(std::uint32_t w,
                                             std::uint32_t h) noexcept;

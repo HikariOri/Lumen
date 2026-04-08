@@ -273,12 +273,15 @@ public:
         present.pSwapchains = &swapchain_;
         present.pImageIndices = &image_index;
 
-        const VkResult pr = vkQueuePresentKHR(present_queue_, &present);
-        if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) {
-            framebuffer_resized_ = true;
-        } else if (pr != VK_SUCCESS) {
-            app_log_err(std::string("vkQueuePresentKHR: ") +
-                        std::to_string(static_cast<int>(pr)));
+        if (image_index < swap_target_bundles_.size() &&
+            swap_target_bundles_[image_index].is_output_to_swapchain()) {
+            const VkResult pr = vkQueuePresentKHR(present_queue_, &present);
+            if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) {
+                framebuffer_resized_ = true;
+            } else if (pr != VK_SUCCESS) {
+                app_log_err(std::string("vkQueuePresentKHR: ") +
+                            std::to_string(static_cast<int>(pr)));
+            }
         }
 
         current_frame_ = (current_frame_ + 1U) % k_frames_in_flight;
@@ -576,13 +579,14 @@ private:
             return false;
         }
         vulkan::RenderTargetBundle template_bundle;
-        if (!template_bundle.add_color_target(vulkan::render_target_from_view(
-                swap_image_views_.front(), swap_format_, extent_.width,
-                extent_.height))) {
+        if (!template_bundle.add_color_target(
+                vulkan::render_target_from_swapchain_view(
+                    swap_image_views_.front(), swap_format_, extent_.width,
+                    extent_.height))) {
             app_log_err("create_render_pass: add_color_target failed");
             return false;
         }
-        auto rp = vulkan::RenderPass::create(device_, template_bundle, true);
+        auto rp = vulkan::RenderPass::create(device_, template_bundle);
         if (!rp) {
             app_log_err(rp.error());
             return false;
@@ -688,7 +692,7 @@ private:
         const VkRenderPass rp = vulkan_render_pass_->vk_render_pass();
         for (size_t i { 0 }; i < swap_image_views_.size(); ++i) {
             if (!swap_target_bundles_[i].add_color_target(
-                    vulkan::render_target_from_view(
+                    vulkan::render_target_from_swapchain_view(
                         swap_image_views_[i], swap_format_, extent_.width,
                         extent_.height))) {
                 app_log_err("create_framebuffer: add_color_target failed");

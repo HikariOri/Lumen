@@ -42,6 +42,11 @@ RenderPass &RenderPass::operator=(RenderPass &&other) noexcept {
 }
 
 std::expected<RenderPass, std::string>
+RenderPass::create(const VkDevice device, const RenderTargetBundle &bundle) {
+    return create(device, bundle, bundle.is_output_to_swapchain());
+}
+
+std::expected<RenderPass, std::string>
 RenderPass::create(const VkDevice device, const RenderTargetBundle &bundle,
                    const bool color_final_present_src) {
     if (device == VK_NULL_HANDLE) {

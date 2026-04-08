@@ -21,6 +21,8 @@ struct RenderTarget {
     VkFormat format { VK_FORMAT_UNDEFINED };
     std::uint32_t width { 0 };
     std::uint32_t height { 0 };
+    /// 颜色附件来自交换链时置 true，供 `RenderPass` / 主循环判断是否走 present。
+    bool is_swapchain_target { false };
 
     [[nodiscard]] bool is_valid() const noexcept {
         return view != VK_NULL_HANDLE;
@@ -28,15 +30,24 @@ struct RenderTarget {
 };
 
 /**
- * @brief 由交换链等外部资源构造（无 `Image` 封装时）。
+ * @brief 由外部 `VkImageView` 构造（离屏等）；`is_swapchain_target` 为 true
+ * 表示交换链图像。
  */
 [[nodiscard]] inline RenderTarget render_target_from_view(
     const VkImageView view, const VkFormat fmt, const std::uint32_t w,
-    const std::uint32_t h) noexcept {
+    const std::uint32_t h, const bool is_swapchain_target = false) noexcept {
     return RenderTarget{ .view = view,
                          .format = fmt,
                          .width = w,
-                         .height = h };
+                         .height = h,
+                         .is_swapchain_target = is_swapchain_target };
+}
+
+/// 交换链 swapchain 图像视图（`is_swapchain_target == true`）。
+[[nodiscard]] inline RenderTarget render_target_from_swapchain_view(
+    const VkImageView view, const VkFormat fmt, const std::uint32_t w,
+    const std::uint32_t h) noexcept {
+    return render_target_from_view(view, fmt, w, h, true);
 }
 
 /**
