@@ -9,14 +9,6 @@
 
 #pragma once
 
-#include <cstddef>
-#include <deque>
-#include <mutex>
-#include <string>
-#include <vector>
-
-#include <spdlog/common.h>
-
 #include "core/log/logger.hpp"
 
 namespace core::log {

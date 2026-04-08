@@ -7,15 +7,6 @@
 #include "platform/event.hpp"
 #include "platform/input.hpp"
 
-#include <utility>
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_events.h>
-#include <SDL3/SDL_keyboard.h>
-#include <SDL3/SDL_keycode.h>
-#include <SDL3/SDL_mouse.h>
-#include <variant>
-
 namespace lumen::platform {
 
 namespace {

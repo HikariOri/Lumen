@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include <memory>
-
 namespace spdlog {
 namespace sinks {
 class sink;

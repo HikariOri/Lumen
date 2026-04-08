@@ -4,9 +4,6 @@
 
 #include "platform/event_dispatcher.hpp"
 
-#include <type_traits>
-#include <variant>
-
 namespace lumen::platform {
 
 uint32_t event_categories(const Event &e) {

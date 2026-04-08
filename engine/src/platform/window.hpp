@@ -9,15 +9,6 @@
 
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <vector>
-
-#include "rhi/vulkan.hpp"
-
-struct SDL_Window;
-struct SDL_Surface;
-
 namespace lumen {
 namespace platform {
 
@@ -128,7 +119,7 @@ public:
      * - 仅在窗口有效时调用
      * - 典型用法：`render::Surface surface(ctx, window)`，无需直接调用本函数
      */
-    vk::SurfaceKHR create_vulkan_surface(vk::Instance instance) const;
+    VkSurfaceKHR create_vulkan_surface(VkInstance instance) const;
 
     /**
      * @brief 轮询窗口事件

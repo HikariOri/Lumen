@@ -7,13 +7,6 @@
 #include "core/log/log_ui_sink.hpp"
 #include "core/log/log_view_buffer.hpp"
 
-#include <ghc/filesystem.hpp>
-#include <string>
-
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-
 namespace fs = ghc::filesystem;
 
 namespace core::log {

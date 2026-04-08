@@ -10,8 +10,6 @@
 
 #include "platform/event.hpp"
 
-#include <cstdint>
-
 namespace lumen {
 namespace platform {
 

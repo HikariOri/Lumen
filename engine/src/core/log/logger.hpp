@@ -5,10 +5,7 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
 
-#include <spdlog/spdlog.h>
 
 namespace core::log {
 

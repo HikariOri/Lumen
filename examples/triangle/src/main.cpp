@@ -1,478 +1,904 @@
-#include "core/log/logger.hpp"
-#include "platform/window.hpp"
-#include "rhi/buffer.hpp"
-#include "rhi/context.hpp"
-#include "rhi/descriptor_layout_cache.hpp"
-#include "rhi/device.hpp"
-#include "rhi/render_graph.hpp"
-#include "rhi/render_graph_gpu.hpp"
-#include "rhi/swapchian.hpp"
+/**
+ * @file main.cpp
+ * @brief Vulkan 三角形示例：`platform::Window` + `EventPump`，其余为最小自管
+ * Vulkan
+ */
 
-#include <ghc/filesystem.hpp>
+#include <VkBootstrap.h>
 
-#include <algorithm>
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
-#include <fstream>
-#include <iostream>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string_view>
-#include <utility>
 #include <vector>
 
-namespace fs = ghc::filesystem;
+#include "core/log/logger.hpp"
+#include "platform/event_dispatcher.hpp"
+#include "platform/event_pump.hpp"
+#include "platform/window.hpp"
+#include "vulkan/pipeline.hpp"
 
 namespace {
 
+void app_log_err(const std::string &msg) {
+    if (auto lg = core::log::Logger::app()) {
+        lg->error(msg);
+    }
+}
+
+constexpr uint32_t k_frames_in_flight = 2;
+
+struct UniformBufferObject {
+    float time { 0.f };
+};
+
 struct Vertex {
-    float pos[2];
+    float position[2];
     float color[3];
 };
 
-/// 四边形四角（NDC），由索引缓冲拼成两个三角形。
-constexpr Vertex k_rect_vertices[] = {
-    { { -0.55F, -0.55F }, { 1.0F, 0.25F, 0.25F } },
-    { { 0.55F, -0.55F }, { 0.25F, 1.0F, 0.25F } },
-    { { 0.55F, 0.55F }, { 0.25F, 0.25F, 1.0F } },
-    { { -0.55F, 0.55F }, { 1.0F, 1.0F, 0.35F } },
+const Vertex k_vertices[] = {
+    { { 0.f, -0.5f }, { 1.f, 0.f, 0.f } },
+    { { 0.5f, 0.5f }, { 0.f, 1.f, 0.f } },
+    { { -0.5f, 0.5f }, { 0.f, 0.f, 1.f } },
 };
-constexpr std::uint16_t k_rect_indices[] = { 0, 1, 2, 0, 2, 3 };
-constexpr std::uint32_t k_rect_index_count =
-    static_cast<std::uint32_t>(std::size(k_rect_indices));
 
-[[nodiscard]] std::vector<std::byte> read_spv(const fs::path &path) {
-    if (!fs::exists(path)) {
-        LUMEN_APP_LOG_ERROR("read_spv: 文件不存在 path={}",
-                            path.generic_string());
-        return {};
-    }
+[[nodiscard]] std::vector<uint32_t>
+read_spirv(const ghc::filesystem::path &path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f) {
-        LUMEN_APP_LOG_ERROR("read_spv: 无法打开 path={}",
-                            path.generic_string());
         return {};
     }
-    const auto sz = static_cast<std::size_t>(f.tellg());
+    const auto size = f.tellg();
+    if (size <= 0 || (static_cast<size_t>(size) % sizeof(uint32_t)) != 0U) {
+        return {};
+    }
+    std::vector<uint32_t> code(static_cast<size_t>(size / sizeof(uint32_t)));
     f.seekg(0);
-    std::vector<std::byte> out(sz);
-    if (sz > 0) {
-        f.read(reinterpret_cast<char *>(out.data()),
-               static_cast<std::streamsize>(sz));
-    }
-    if (!f) {
-        LUMEN_APP_LOG_ERROR("read_spv: 读取失败 path={} size={}",
-                            path.generic_string(), sz);
-        return {};
-    }
-    LUMEN_APP_LOG_DEBUG("read_spv: 已读 {} 字节 path={}", sz,
-                        path.generic_string());
-    return out;
+    f.read(reinterpret_cast<char *>(code.data()), size);
+    return code;
 }
 
-[[nodiscard]] fs::path shader_base_dir() {
+[[nodiscard]] uint32_t find_memory_type(VkPhysicalDevice phys,
+                                        uint32_t type_filter,
+                                        VkMemoryPropertyFlags props) {
+    VkPhysicalDeviceMemoryProperties mem {};
+    vkGetPhysicalDeviceMemoryProperties(phys, &mem);
+    for (uint32_t i { 0 }; i < mem.memoryTypeCount; ++i) {
+        if ((type_filter & (1U << i)) &&
+            (mem.memoryTypes[i].propertyFlags & props) == props) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+/** @brief 着色器目录（可执行文件旁 `shaders/`）。SDL3 下 `SDL_GetBasePath`
+ * 返回只读串，由 SDL 持有，勿 SDL_free。 */
+[[nodiscard]] ghc::filesystem::path base_path_shaders_dir() {
     const char *base = SDL_GetBasePath();
-    if (base != nullptr && base[0] != '\0') {
-        LUMEN_APP_LOG_INFO("SDL_GetBasePath()={}", base);
-        return fs::path(base);
+    if (base == nullptr) {
+        return ghc::filesystem::path("shaders");
     }
-    LUMEN_APP_LOG_WARN("SDL_GetBasePath() 为空，使用 current_path={}",
-                       fs::current_path().generic_string());
-    return fs::current_path();
+    return ghc::filesystem::path(base) / "shaders";
 }
 
-struct RectGpuBundle {
-    rhi::BufferHandle vertex_buffer {};
-    rhi::BufferHandle index_buffer {};
-    rhi::BufferHandle ubo_buffer {};
-    vk::DeviceSize ubo_dynamic_stride { 0 };
+class TriangleExample {
+public:
+    bool init(lumen::platform::Window &window) {
+        window_ = &window;
+
+        auto vert_code =
+            read_spirv(base_path_shaders_dir() / "triangle.vert.spv");
+        auto frag_code =
+            read_spirv(base_path_shaders_dir() / "triangle.frag.spv");
+        if (vert_code.empty() || frag_code.empty()) {
+            LUMEN_APP_LOG_ERROR(
+                "SPIR-V load failed (triangle.*.spv next to executable)");
+            return false;
+        }
+        vert_spirv_ = std::move(vert_code);
+        frag_spirv_ = std::move(frag_code);
+
+        vkb::InstanceBuilder inst_builder;
+        inst_builder.set_app_name("triangle")
+            .set_engine_name("lumen")
+            .set_app_version(1, 0, 0);
+        const auto sdl_exts = window_->get_vulkan_instance_extensions();
+        inst_builder.set_headless(true).enable_extensions(sdl_exts);
+
+#if !defined(NDEBUG)
+        inst_builder.request_validation_layers().use_default_debug_messenger();
+#endif
+        inst_builder.require_api_version(1, 2, 0);
+
+        const auto inst_ret = inst_builder.build();
+        if (!inst_ret) {
+            app_log_err(std::string("VkInstance failed ec=") +
+                        std::to_string(inst_ret.error().value()));
+            return false;
+        }
+        vkb_instance_ = inst_ret.value();
+
+        surface_ = window_->create_vulkan_surface(vkb_instance_.instance);
+        if (surface_ == VK_NULL_HANDLE) {
+            LUMEN_APP_LOG_ERROR("Vulkan surface create failed");
+            return false;
+        }
+
+        vkb::PhysicalDeviceSelector phys_selector { vkb_instance_, surface_ };
+        phys_selector.set_minimum_version(1, 2)
+            .set_surface(surface_)
+            .require_present(true);
+        const auto phys_ret = phys_selector.select();
+        if (!phys_ret) {
+            app_log_err(std::string("PhysicalDevice select failed ec=") +
+                        std::to_string(phys_ret.error().value()));
+            return false;
+        }
+        vkb_phys_ = phys_ret.value();
+
+        vkb::DeviceBuilder dev_builder { vkb_phys_ };
+        const auto dev_ret = dev_builder.build();
+        if (!dev_ret) {
+            app_log_err(std::string("VkDevice failed ec=") +
+                        std::to_string(dev_ret.error().value()));
+            return false;
+        }
+        vkb_device_ = dev_ret.value();
+        device_ = vkb_device_.device;
+
+        const auto gq = vkb_device_.get_queue(vkb::QueueType::graphics);
+        const auto pq = vkb_device_.get_queue(vkb::QueueType::present);
+        if (!gq || !pq) {
+            LUMEN_APP_LOG_ERROR("Graphics or present queue unavailable");
+            return false;
+        }
+        graphics_queue_ = gq.value();
+        present_queue_ = pq.value();
+
+        if (!create_swapchain_internal(VK_NULL_HANDLE)) {
+            return false;
+        }
+        if (!create_render_pass()) {
+            return false;
+        }
+        if (!create_pipeline()) {
+            return false;
+        }
+        if (!create_framebuffer()) {
+            return false;
+        }
+        if (!create_vertex_buffer()) {
+            return false;
+        }
+        if (!create_uniform_buffers()) {
+            return false;
+        }
+        if (!create_descriptor_pool_and_sets()) {
+            return false;
+        }
+        if (!create_command_pool_and_buffers()) {
+            return false;
+        }
+        if (!create_sync()) {
+            return false;
+        }
+        return true;
+    }
+
+    void shutdown() {
+        if (device_ == VK_NULL_HANDLE) {
+            return;
+        }
+        vkDeviceWaitIdle(device_);
+
+        destroy_sync();
+        destroy_command();
+
+        if (descriptor_pool_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
+            descriptor_pool_ = VK_NULL_HANDLE;
+        }
+
+        for (auto b : uniform_buffers_) {
+            if (b.map != nullptr) {
+                vkUnmapMemory(device_, b.mem);
+            }
+            if (b.buf != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device_, b.buf, nullptr);
+            }
+            if (b.mem != VK_NULL_HANDLE) {
+                vkFreeMemory(device_, b.mem, nullptr);
+            }
+        }
+        uniform_buffers_.clear();
+
+        if (vertex_buffer_ != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, vertex_buffer_, nullptr);
+            vertex_buffer_ = VK_NULL_HANDLE;
+        }
+        if (vertex_buffer_mem_ != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, vertex_buffer_mem_, nullptr);
+            vertex_buffer_mem_ = VK_NULL_HANDLE;
+        }
+
+        cleanup_swapchain();
+
+        vkb::destroy_device(vkb_device_);
+
+        if (surface_ != VK_NULL_HANDLE) {
+            vkb::destroy_surface(vkb_instance_, surface_);
+            surface_ = VK_NULL_HANDLE;
+        }
+
+        vkb::destroy_instance(vkb_instance_);
+        device_ = VK_NULL_HANDLE;
+    }
+
+    void set_framebuffer_resized() { framebuffer_resized_ = true; }
+
+    void draw_frame(float time_sec) {
+        if (swapchain_ == VK_NULL_HANDLE || extent_.width == 0 ||
+            extent_.height == 0) {
+            return;
+        }
+
+        vkWaitForFences(device_, 1, &in_flight_fences_[current_frame_], VK_TRUE,
+                        UINT64_MAX);
+
+        uint32_t image_index { 0 };
+        const VkResult acq = vkAcquireNextImageKHR(
+            device_, swapchain_, UINT64_MAX, image_available_[current_frame_],
+            VK_NULL_HANDLE, &image_index);
+
+        if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+            framebuffer_resized_ = true;
+        }
+        if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
+            try_recreate_swapchain();
+            return;
+        }
+        if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
+            app_log_err(std::string("vkAcquireNextImageKHR: ") +
+                        std::to_string(static_cast<int>(acq)));
+            return;
+        }
+
+        if (images_in_flight_[image_index] != VK_NULL_HANDLE) {
+            vkWaitForFences(device_, 1, &images_in_flight_[image_index],
+                            VK_TRUE, UINT64_MAX);
+        }
+        images_in_flight_[image_index] = in_flight_fences_[current_frame_];
+
+        {
+            UniformBufferObject ubo { .time = time_sec };
+            auto &ub = uniform_buffers_[current_frame_];
+            std::memcpy(ub.map, &ubo, sizeof(ubo));
+        }
+
+        record_command_buffer(image_index, current_frame_);
+
+        vkResetFences(device_, 1, &in_flight_fences_[current_frame_]);
+
+        VkPipelineStageFlags wait_stage =
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo sub_info { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        sub_info.waitSemaphoreCount = 1;
+        sub_info.pWaitSemaphores = &image_available_[current_frame_];
+        sub_info.pWaitDstStageMask = &wait_stage;
+        sub_info.commandBufferCount = 1;
+        sub_info.pCommandBuffers = &command_buffers_[image_index];
+        // 与 image_index 对应：present 在图像再次 acquire
+        // 前可能一直占用该信号量， 不能按 current_frame_ 复用同一
+        // render_finished（VUID-vkQueueSubmit-pSignalSemaphores-00067）。
+        sub_info.signalSemaphoreCount = 1;
+        sub_info.pSignalSemaphores = &render_finished_[image_index];
+
+        if (vkQueueSubmit(graphics_queue_, 1, &sub_info,
+                          in_flight_fences_[current_frame_]) != VK_SUCCESS) {
+            LUMEN_APP_LOG_ERROR("vkQueueSubmit failed");
+            return;
+        }
+
+        VkPresentInfoKHR present { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        present.waitSemaphoreCount = 1;
+        present.pWaitSemaphores = &render_finished_[image_index];
+        present.swapchainCount = 1;
+        present.pSwapchains = &swapchain_;
+        present.pImageIndices = &image_index;
+
+        const VkResult pr = vkQueuePresentKHR(present_queue_, &present);
+        if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) {
+            framebuffer_resized_ = true;
+        } else if (pr != VK_SUCCESS) {
+            app_log_err(std::string("vkQueuePresentKHR: ") +
+                        std::to_string(static_cast<int>(pr)));
+        }
+
+        current_frame_ = (current_frame_ + 1U) % k_frames_in_flight;
+    }
+
+    void try_recreate_swapchain() {
+        if (!framebuffer_resized_) {
+            return;
+        }
+        int w { 0 };
+        int h { 0 };
+        window_->get_framebuffer_size(&w, &h);
+        if (w == 0 || h == 0) {
+            return;
+        }
+
+        vkDeviceWaitIdle(device_);
+        framebuffer_resized_ = false;
+
+        cleanup_swapchain_only();
+
+        if (!create_swapchain_internal(VK_NULL_HANDLE)) {
+            LUMEN_APP_LOG_ERROR("Swapchain recreate failed");
+            return;
+        }
+
+        if (!create_framebuffer()) {
+            LUMEN_APP_LOG_ERROR("Framebuffer recreate failed");
+            return;
+        }
+
+        destroy_render_finished_semaphores_();
+        if (!create_render_finished_semaphores_()) {
+            LUMEN_APP_LOG_ERROR("render_finished semaphores recreate failed");
+            return;
+        }
+
+        destroy_command();
+        if (!create_command_pool_and_buffers()) {
+            LUMEN_APP_LOG_ERROR("Command pool recreate failed");
+            return;
+        }
+
+        images_in_flight_.assign(swap_image_views_.size(), VK_NULL_HANDLE);
+    }
+
+private:
+    struct HostUniformBuffer {
+        VkBuffer buf { VK_NULL_HANDLE };
+        VkDeviceMemory mem { VK_NULL_HANDLE };
+        void *map { nullptr };
+    };
+
+    bool create_swapchain_internal(VkSwapchainKHR old_swapchain) {
+        vkb::SwapchainBuilder sc_builder { vkb_device_ };
+        sc_builder.set_old_swapchain(old_swapchain);
+        const auto sc_ret = sc_builder.build();
+        if (!sc_ret) {
+            app_log_err(std::string("Swapchain create failed ec=") +
+                        std::to_string(sc_ret.error().value()));
+            return false;
+        }
+        vkb_swapchain_ = sc_ret.value();
+        swapchain_ = vkb_swapchain_.swapchain;
+        extent_ = vkb_swapchain_.extent;
+        swap_format_ = vkb_swapchain_.image_format;
+
+        const auto views_ret = vkb_swapchain_.get_image_views();
+        if (!views_ret) {
+            LUMEN_APP_LOG_ERROR("Swapchain image views failed");
+            return false;
+        }
+        swap_image_views_ = views_ret.value();
+        return true;
+    }
+
+    void cleanup_swapchain_only() {
+        for (auto fb : framebuffers_) {
+            if (fb != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(device_, fb, nullptr);
+            }
+        }
+        framebuffers_.clear();
+
+        if (!swap_image_views_.empty()) {
+            vkb_swapchain_.destroy_image_views(swap_image_views_);
+            swap_image_views_.clear();
+        }
+
+        if (swapchain_ != VK_NULL_HANDLE) {
+            vkb::destroy_swapchain(vkb_swapchain_);
+            swapchain_ = VK_NULL_HANDLE;
+        }
+    }
+
+    void cleanup_swapchain() {
+        cleanup_swapchain_only();
+
+        if (render_pass_ != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(device_, render_pass_, nullptr);
+            render_pass_ = VK_NULL_HANDLE;
+        }
+        if (pipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device_, pipeline_, nullptr);
+            pipeline_ = VK_NULL_HANDLE;
+        }
+        if (pipeline_layout_ != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+            pipeline_layout_ = VK_NULL_HANDLE;
+        }
+        if (descriptor_set_layout_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_,
+                                         nullptr);
+            descriptor_set_layout_ = VK_NULL_HANDLE;
+        }
+    }
+
+    bool create_render_pass() {
+        VkAttachmentDescription color {};
+        color.format = swap_format_;
+        color.samples = VK_SAMPLE_COUNT_1_BIT;
+        color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        color.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference ref {};
+        ref.attachment = 0;
+        ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription sub {};
+        sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount = 1;
+        sub.pColorAttachments = &ref;
+
+        VkSubpassDependency dep { VK_SUBPASS_EXTERNAL, 0 };
+        dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dep.srcAccessMask = 0;
+        dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo rp { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+        rp.attachmentCount = 1;
+        rp.pAttachments = &color;
+        rp.subpassCount = 1;
+        rp.pSubpasses = &sub;
+        rp.dependencyCount = 1;
+        rp.pDependencies = &dep;
+
+        return vkCreateRenderPass(device_, &rp, nullptr, &render_pass_) ==
+               VK_SUCCESS;
+    }
+
+    bool create_pipeline() {
+        VkDescriptorSetLayoutBinding uboBind {};
+        uboBind.binding = 0;
+        uboBind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboBind.descriptorCount = 1;
+        uboBind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+        VkDescriptorSetLayoutCreateInfo dsl {
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+        };
+        dsl.bindingCount = 1;
+        dsl.pBindings = &uboBind;
+        if (vkCreateDescriptorSetLayout(device_, &dsl, nullptr,
+                                        &descriptor_set_layout_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        VkPipelineLayoutCreateInfo pl {
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+        };
+        pl.setLayoutCount = 1;
+        pl.pSetLayouts = &descriptor_set_layout_;
+        if (vkCreatePipelineLayout(device_, &pl, nullptr, &pipeline_layout_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        const std::vector<VkVertexInputBindingDescription> vertex_bindings {
+            VkVertexInputBindingDescription {
+                .binding = 0,
+                .stride = sizeof(Vertex),
+                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+            },
+        };
+        const std::vector<VkVertexInputAttributeDescription> vertex_attributes {
+            VkVertexInputAttributeDescription {
+                .location = 0,
+                .binding = 0,
+                .format = VK_FORMAT_R32G32_SFLOAT,
+                .offset = offsetof(Vertex, position),
+            },
+            VkVertexInputAttributeDescription {
+                .location = 1,
+                .binding = 0,
+                .format = VK_FORMAT_R32G32B32_SFLOAT,
+                .offset = offsetof(Vertex, color),
+            },
+        };
+
+        vulkan::GraphicsPipelineBuilder pipelineBuilder(device_);
+        pipelineBuilder.set_vertex_shader(vert_spirv_)
+            .set_fragment_shader(frag_spirv_)
+            .set_vertex_layout(vertex_attributes, vertex_bindings)
+            .set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+            .set_cull_mode(VK_CULL_MODE_NONE)
+            .set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .set_viewport_dynamic()
+            .set_depth_test(false, false)
+            .set_blend_off()
+            .set_pipeline_layout(pipeline_layout_)
+            .set_render_pass(render_pass_, 0);
+
+        pipeline_ = pipelineBuilder.build();
+        return pipeline_ != VK_NULL_HANDLE;
+    }
+
+    bool create_framebuffer() {
+        framebuffers_.resize(swap_image_views_.size());
+        for (size_t i { 0 }; i < swap_image_views_.size(); ++i) {
+            VkFramebufferCreateInfo fb {
+                VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+            };
+            fb.renderPass = render_pass_;
+            fb.attachmentCount = 1;
+            fb.pAttachments = &swap_image_views_[i];
+            fb.width = extent_.width;
+            fb.height = extent_.height;
+            fb.layers = 1;
+            if (vkCreateFramebuffer(device_, &fb, nullptr, &framebuffers_[i]) !=
+                VK_SUCCESS) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool create_vertex_buffer() {
+        VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bi.size = sizeof(k_vertices);
+        bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(device_, &bi, nullptr, &vertex_buffer_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        VkMemoryRequirements req {};
+        vkGetBufferMemoryRequirements(device_, vertex_buffer_, &req);
+        const uint32_t mem_index =
+            find_memory_type(vkb_phys_, req.memoryTypeBits,
+                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (mem_index == UINT32_MAX) {
+            return false;
+        }
+        VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        ai.allocationSize = req.size;
+        ai.memoryTypeIndex = mem_index;
+        if (vkAllocateMemory(device_, &ai, nullptr, &vertex_buffer_mem_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+        void *dst { nullptr };
+        vkMapMemory(device_, vertex_buffer_mem_, 0, sizeof(k_vertices), 0,
+                    &dst);
+        std::memcpy(dst, k_vertices, sizeof(k_vertices));
+        vkUnmapMemory(device_, vertex_buffer_mem_);
+        vkBindBufferMemory(device_, vertex_buffer_, vertex_buffer_mem_, 0);
+        return true;
+    }
+
+    bool create_uniform_buffers() {
+        uniform_buffers_.resize(k_frames_in_flight);
+        for (auto &ub : uniform_buffers_) {
+            VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+            bi.size = sizeof(UniformBufferObject);
+            bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            if (vkCreateBuffer(device_, &bi, nullptr, &ub.buf) != VK_SUCCESS) {
+                return false;
+            }
+            VkMemoryRequirements req {};
+            vkGetBufferMemoryRequirements(device_, ub.buf, &req);
+            const uint32_t mem_index =
+                find_memory_type(vkb_phys_, req.memoryTypeBits,
+                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (mem_index == UINT32_MAX) {
+                return false;
+            }
+            VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+            ai.allocationSize = req.size;
+            ai.memoryTypeIndex = mem_index;
+            if (vkAllocateMemory(device_, &ai, nullptr, &ub.mem) !=
+                VK_SUCCESS) {
+                return false;
+            }
+            vkBindBufferMemory(device_, ub.buf, ub.mem, 0);
+            vkMapMemory(device_, ub.mem, 0, sizeof(UniformBufferObject), 0,
+                        &ub.map);
+        }
+        return true;
+    }
+
+    bool create_descriptor_pool_and_sets() {
+        VkDescriptorPoolSize pool_size {};
+        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_size.descriptorCount = k_frames_in_flight;
+
+        VkDescriptorPoolCreateInfo pci {
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        };
+        pci.maxSets = k_frames_in_flight;
+        pci.poolSizeCount = 1;
+        pci.pPoolSizes = &pool_size;
+        if (vkCreateDescriptorPool(device_, &pci, nullptr, &descriptor_pool_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        std::vector<VkDescriptorSetLayout> layouts(k_frames_in_flight,
+                                                   descriptor_set_layout_);
+        VkDescriptorSetAllocateInfo ai {
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+        };
+        ai.descriptorPool = descriptor_pool_;
+        ai.descriptorSetCount = k_frames_in_flight;
+        ai.pSetLayouts = layouts.data();
+        descriptor_sets_.resize(k_frames_in_flight);
+        if (vkAllocateDescriptorSets(device_, &ai, descriptor_sets_.data()) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        for (uint32_t i { 0 }; i < k_frames_in_flight; ++i) {
+            VkDescriptorBufferInfo binfo {};
+            binfo.buffer = uniform_buffers_[i].buf;
+            binfo.offset = 0;
+            binfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet write {
+                VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+            };
+            write.dstSet = descriptor_sets_[i];
+            write.dstBinding = 0;
+            write.dstArrayElement = 0;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.pBufferInfo = &binfo;
+            vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+        }
+        return true;
+    }
+
+    bool create_command_pool_and_buffers() {
+        const auto qf = vkb_device_.get_queue_index(vkb::QueueType::graphics);
+        if (!qf) {
+            return false;
+        }
+        VkCommandPoolCreateInfo pci {
+            VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        };
+        pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pci.queueFamilyIndex = qf.value();
+        if (vkCreateCommandPool(device_, &pci, nullptr, &command_pool_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        command_buffers_.resize(swap_image_views_.size());
+        if (command_buffers_.empty()) {
+            return false;
+        }
+        VkCommandBufferAllocateInfo ai {
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        };
+        ai.commandPool = command_pool_;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = static_cast<uint32_t>(command_buffers_.size());
+        return vkAllocateCommandBuffers(device_, &ai,
+                                        command_buffers_.data()) == VK_SUCCESS;
+    }
+
+    void destroy_command() {
+        if (command_pool_ != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(device_, command_pool_, nullptr);
+            command_pool_ = VK_NULL_HANDLE;
+        }
+        command_buffers_.clear();
+    }
+
+    void record_command_buffer(uint32_t image_index, uint32_t frame_index) {
+        VkCommandBuffer cb = command_buffers_[image_index];
+        vkResetCommandBuffer(cb, 0);
+
+        VkCommandBufferBeginInfo bi {
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        };
+        vkBeginCommandBuffer(cb, &bi);
+
+        VkClearValue clear {};
+        clear.color = { { 0.05f, 0.06f, 0.09f, 1.f } };
+        VkRenderPassBeginInfo rp { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        rp.renderPass = render_pass_;
+        rp.framebuffer = framebuffers_[image_index];
+        rp.renderArea.extent = extent_;
+        rp.clearValueCount = 1;
+        rp.pClearValues = &clear;
+
+        vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+
+        VkViewport viewport {};
+        viewport.width = static_cast<float>(extent_.width);
+        viewport.height = static_cast<float>(extent_.height);
+        viewport.maxDepth = 1.f;
+        vkCmdSetViewport(cb, Offset, 1, &viewport);
+
+        VkRect2D scissor {};
+        scissor.extent = extent_;
+        vkCmdSetScissor(cb, Offset, 1, &scissor);
+
+        const VkDeviceSize vb_offset { 0 };
+        vkCmdBindVertexBuffers(cb, 0, 1, &vertex_buffer_, &vb_offset);
+
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                pipeline_layout_, 0, 1,
+                                &descriptor_sets_[frame_index], 0, nullptr);
+
+        vkCmdDraw(cb, 3, 1, 0, 0);
+        vkCmdEndRenderPass(cb);
+        vkEndCommandBuffer(cb);
+    }
+
+    bool create_sync() {
+        image_available_.resize(k_frames_in_flight);
+        in_flight_fences_.resize(k_frames_in_flight);
+        images_in_flight_.assign(swap_image_views_.size(), VK_NULL_HANDLE);
+
+        VkSemaphoreCreateInfo sci { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        VkFenceCreateInfo fci { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        for (uint32_t i { 0 }; i < k_frames_in_flight; ++i) {
+            if (vkCreateSemaphore(device_, &sci, nullptr,
+                                  &image_available_[i]) != VK_SUCCESS ||
+                vkCreateFence(device_, &fci, nullptr, &in_flight_fences_[i]) !=
+                    VK_SUCCESS) {
+                return false;
+            }
+        }
+        return create_render_finished_semaphores_();
+    }
+
+    void destroy_render_finished_semaphores_() {
+        for (VkSemaphore sem : render_finished_) {
+            if (sem != VK_NULL_HANDLE) {
+                vkDestroySemaphore(device_, sem, nullptr);
+            }
+        }
+        render_finished_.clear();
+    }
+
+    bool create_render_finished_semaphores_() {
+        const size_t imageCount = swap_image_views_.size();
+        render_finished_.resize(imageCount);
+        VkSemaphoreCreateInfo sci { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        for (size_t i { 0 }; i < imageCount; ++i) {
+            if (vkCreateSemaphore(device_, &sci, nullptr,
+                                  &render_finished_[i]) != VK_SUCCESS) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void destroy_sync() {
+        for (uint32_t i { 0 }; i < k_frames_in_flight; ++i) {
+            if (image_available_.size() > i &&
+                image_available_[i] != VK_NULL_HANDLE) {
+                vkDestroySemaphore(device_, image_available_[i], nullptr);
+            }
+            if (in_flight_fences_.size() > i &&
+                in_flight_fences_[i] != VK_NULL_HANDLE) {
+                vkDestroyFence(device_, in_flight_fences_[i], nullptr);
+            }
+        }
+        image_available_.clear();
+        in_flight_fences_.clear();
+        destroy_render_finished_semaphores_();
+        images_in_flight_.clear();
+    }
+
+    static constexpr uint32_t Offset = 0U;
+
+    lumen::platform::Window *window_ { nullptr };
+
+    std::vector<uint32_t> vert_spirv_;
+    std::vector<uint32_t> frag_spirv_;
+
+    vkb::Instance vkb_instance_;
+    vkb::PhysicalDevice vkb_phys_;
+    vkb::Device vkb_device_;
+    VkSurfaceKHR surface_ { VK_NULL_HANDLE };
+
+    vkb::Swapchain vkb_swapchain_;
+    VkSwapchainKHR swapchain_ { VK_NULL_HANDLE };
+    std::vector<VkImageView> swap_image_views_;
+    VkFormat swap_format_ { VK_FORMAT_UNDEFINED };
+    VkExtent2D extent_ {};
+
+    VkRenderPass render_pass_ { VK_NULL_HANDLE };
+    VkPipelineLayout pipeline_layout_ { VK_NULL_HANDLE };
+    VkPipeline pipeline_ { VK_NULL_HANDLE };
+    VkDescriptorSetLayout descriptor_set_layout_ { VK_NULL_HANDLE };
+    std::vector<VkFramebuffer> framebuffers_;
+
+    VkBuffer vertex_buffer_ { VK_NULL_HANDLE };
+    VkDeviceMemory vertex_buffer_mem_ { VK_NULL_HANDLE };
+    std::vector<HostUniformBuffer> uniform_buffers_;
+
+    VkDescriptorPool descriptor_pool_ { VK_NULL_HANDLE };
+    std::vector<VkDescriptorSet> descriptor_sets_;
+
+    VkCommandPool command_pool_ { VK_NULL_HANDLE };
+    std::vector<VkCommandBuffer> command_buffers_;
+
+    std::vector<VkSemaphore> image_available_;
+    /// 每帧 swapchain 图像各一个，与 acquire 得到的 image_index 对应（避免与
+    /// present 冲突）。
+    std::vector<VkSemaphore> render_finished_;
+    std::vector<VkFence> in_flight_fences_;
+    std::vector<VkFence> images_in_flight_;
+
+    VkDevice device_ { VK_NULL_HANDLE };
+    VkQueue graphics_queue_ { VK_NULL_HANDLE };
+    VkQueue present_queue_ { VK_NULL_HANDLE };
+
+    uint32_t current_frame_ { 0 };
+    bool framebuffer_resized_ { false };
 };
-
-[[nodiscard]] bool create_rect_gpu_buffers(rhi::Device &device,
-                                           RectGpuBundle &out) {
-    rhi::BufferDesc vb_desc {};
-    vb_desc.size = sizeof(k_rect_vertices);
-    vb_desc.usage = rhi::BufferUsage::Vertex;
-    vb_desc.memory = rhi::MemoryUsage::GPU_ONLY;
-    vb_desc.data = k_rect_vertices;
-    out.vertex_buffer = device.create_buffer(vb_desc);
-    if (!rhi::is_valid(out.vertex_buffer)) {
-        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers: 顶点缓冲失败");
-        return false;
-    }
-
-    rhi::BufferDesc ib_desc {};
-    ib_desc.size = sizeof(k_rect_indices);
-    ib_desc.usage = rhi::BufferUsage::Index;
-    ib_desc.memory = rhi::MemoryUsage::GPU_ONLY;
-    ib_desc.data = k_rect_indices;
-    out.index_buffer = device.create_buffer(ib_desc);
-    if (!rhi::is_valid(out.index_buffer)) {
-        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers: 索引缓冲失败");
-        device.destroy_buffer(out.vertex_buffer);
-        out.vertex_buffer = {};
-        return false;
-    }
-
-    const vk::DeviceSize ubo_align_raw = static_cast<vk::DeviceSize>(
-        device.physical_device()
-            .getProperties()
-            .limits.minUniformBufferOffsetAlignment);
-    const vk::DeviceSize ubo_align =
-        ubo_align_raw > 0 ? ubo_align_raw : static_cast<vk::DeviceSize>(256);
-    out.ubo_dynamic_stride =
-        std::max<vk::DeviceSize>(ubo_align, sizeof(float));
-    const vk::DeviceSize ubo_pool_bytes =
-        out.ubo_dynamic_stride *
-        static_cast<vk::DeviceSize>(rhi::Device::k_frames_in_flight);
-
-    rhi::BufferDesc ubd {};
-    ubd.size = static_cast<std::size_t>(ubo_pool_bytes);
-    ubd.usage = rhi::BufferUsage::Uniform | rhi::BufferUsage::TransferDst;
-    ubd.memory = rhi::MemoryUsage::GPU_ONLY;
-    ubd.data = nullptr;
-    out.ubo_buffer = device.create_buffer(ubd);
-    if (!rhi::is_valid(out.ubo_buffer)) {
-        LUMEN_APP_LOG_ERROR(
-            "create_rect_gpu_buffers: UBO 池失败（{} 字节）",
-            static_cast<std::uint64_t>(ubo_pool_bytes));
-        device.destroy_buffer(out.index_buffer);
-        device.destroy_buffer(out.vertex_buffer);
-        out.index_buffer = {};
-        out.vertex_buffer = {};
-        return false;
-    }
-    return true;
-}
 
 } // namespace
 
 int main() {
     if (!core::log::Logger::init()) {
-        std::cerr
-            << "[rectangle] Logger::init 失败，请检查工作目录是否可写 logs/\n";
-        return 1;
-    }
-    struct LogShutdown {
-        ~LogShutdown() { core::log::Logger::shutdown(); }
-    } log_shutdown;
-
-    LUMEN_APP_LOG_INFO("rectangle（索引矩形）示例启动");
-
-    lumen::platform::Window window {};
-    lumen::platform::WindowConfig wcfg {};
-    wcfg.title = "rectangle indexed (RHI)";
-    wcfg.width = 960;
-    wcfg.height = 540;
-    if (!window.create(wcfg)) {
-        LUMEN_APP_LOG_ERROR("窗口创建失败");
-        return 1;
-    }
-    LUMEN_APP_LOG_INFO("窗口已创建 逻辑尺寸 {}x{}", wcfg.width, wcfg.height);
-
-    rhi::Context ctx {};
-    rhi::ContextDesc cdesc {};
-    cdesc.windowHandle = &window;
-    cdesc.instanceExtensions = window.get_vulkan_instance_extensions();
-    cdesc.pipeline_cache_file_path =
-        (shader_base_dir() / "lumen_rectangle_vk_pipeline_cache.bin")
-            .string();
-    LUMEN_APP_LOG_INFO("传给 rhi::Context 的实例扩展共 {} 个",
-                       cdesc.instanceExtensions.size());
-    for (const char *name : cdesc.instanceExtensions) {
-        LUMEN_APP_LOG_INFO("  instanceExt: {}",
-                           name != nullptr ? name : "(null)");
-    }
-    if (!ctx.init(cdesc)) {
-        LUMEN_APP_LOG_ERROR("rhi::Context 初始化失败");
-        return 1;
-    }
-    LUMEN_APP_LOG_INFO("rhi::Context 就绪 surface 有效={}",
-                       static_cast<bool>(ctx.surface()));
-
-    rhi::Device device {};
-    if (!device.init(ctx)) {
-        LUMEN_APP_LOG_ERROR("rhi::Device 初始化失败");
-        ctx.shutdown();
-        return 1;
-    }
-    LUMEN_APP_LOG_INFO("rhi::Device 就绪 frames_in_flight={}",
-                       rhi::Device::k_frames_in_flight);
-
-    int fbw = 0;
-    int fbh = 0;
-    window.get_framebuffer_size(&fbw, &fbh);
-    if (fbw <= 0 || fbh <= 0) {
-        LUMEN_APP_LOG_WARN("get_framebuffer_size 无效 {}x{}，回退逻辑尺寸", fbw,
-                           fbh);
-        fbw = static_cast<int>(wcfg.width);
-        fbh = static_cast<int>(wcfg.height);
-    } else {
-        LUMEN_APP_LOG_INFO("framebuffer 像素尺寸 {}x{}", fbw, fbh);
-    }
-
-    rhi::Swapchain swap {};
-    if (!swap.init(&device, ctx.surface(), static_cast<std::uint32_t>(fbw),
-                   static_cast<std::uint32_t>(fbh))) {
-        LUMEN_APP_LOG_ERROR("Swapchain 创建失败（extent {}x{}）", fbw, fbh);
-        device.shutdown();
-        ctx.shutdown();
-        return 1;
-    }
-    {
-        const vk::Extent2D e = swap.extent();
-        LUMEN_APP_LOG_INFO(
-            "Swapchain 就绪 extent={}x{} format={} image_count={}", e.width,
-            e.height, static_cast<int>(swap.format()), swap.image_count());
-    }
-
-    const fs::path shader_dir = shader_base_dir() / "shaders";
-    LUMEN_APP_LOG_INFO("着色器目录 shader_dir={}", shader_dir.generic_string());
-    rhi::DescriptorSetLayoutCache rect_dsl_cache {};
-    rhi::PipelineLayoutCache rect_pl_cache {};
-    rhi::RgGpuCompileContext rect_gpu_ctx {};
-    rect_gpu_ctx.rhi_device = &device;
-    rect_gpu_ctx.vk_device = device.vk_device();
-    rect_gpu_ctx.swapchain = &swap;
-    rect_gpu_ctx.dsl_cache = &rect_dsl_cache;
-    rect_gpu_ctx.pl_cache = &rect_pl_cache;
-
-    const std::shared_ptr<const std::vector<std::byte>> rect_vert_spv =
-        std::make_shared<std::vector<std::byte>>(
-            read_spv(shader_dir / "triangle.vert.spv"));
-    const std::shared_ptr<const std::vector<std::byte>> rect_frag_spv =
-        std::make_shared<std::vector<std::byte>>(
-            read_spv(shader_dir / "triangle.frag.spv"));
-    if (rect_vert_spv->empty() || rect_frag_spv->empty() ||
-        (rect_vert_spv->size() % 4) != 0 || (rect_frag_spv->size() % 4) != 0) {
-        LUMEN_APP_LOG_ERROR("着色器 SPIR-V 无效或缺失（检查 {}）",
-                            shader_dir.generic_string());
-        rect_pl_cache.clear(device.vk_device());
-        rect_dsl_cache.clear(device.vk_device());
-        swap.destroy();
-        device.shutdown();
-        ctx.shutdown();
         return 1;
     }
 
-    RectGpuBundle rect_gpu {};
-    if (!create_rect_gpu_buffers(device, rect_gpu)) {
-        LUMEN_APP_LOG_ERROR("create_rect_gpu_buffers 失败");
-        rect_pl_cache.clear(device.vk_device());
-        rect_dsl_cache.clear(device.vk_device());
-        swap.destroy();
-        device.shutdown();
-        ctx.shutdown();
+    lumen::platform::Window window;
+    lumen::platform::WindowConfig cfg;
+    cfg.title = "Lumen 三角形示例";
+    cfg.width = 960;
+    cfg.height = 540;
+    if (!window.create(cfg)) {
+        core::log::Logger::shutdown();
         return 1;
     }
 
-    vk::Device vkdev = device.vk_device();
-    std::array<vk::Semaphore, rhi::Device::k_frames_in_flight>
-        image_available {};
-    std::array<vk::Semaphore, rhi::Device::k_frames_in_flight>
-        render_finished {};
-    vk::SemaphoreCreateInfo sci {};
-    for (std::uint32_t i = 0; i < rhi::Device::k_frames_in_flight; ++i) {
-        const vk::Result ar =
-            vkdev.createSemaphore(&sci, nullptr, &image_available[i]);
-        const vk::Result dr =
-            vkdev.createSemaphore(&sci, nullptr, &render_finished[i]);
-        if (ar != vk::Result::eSuccess || dr != vk::Result::eSuccess) {
-            LUMEN_APP_LOG_ERROR("createSemaphore 失败 slot={} "
-                                "image_available={} render_finished={}",
-                                i, static_cast<int>(ar), static_cast<int>(dr));
-            for (std::uint32_t j = 0; j < i; ++j) {
-                vkdev.destroySemaphore(image_available[j], nullptr);
-                vkdev.destroySemaphore(render_finished[j], nullptr);
-            }
-            device.destroy_buffer(rect_gpu.ubo_buffer);
-            device.destroy_buffer(rect_gpu.index_buffer);
-            device.destroy_buffer(rect_gpu.vertex_buffer);
-            rect_gpu_ctx.destroy_all(vkdev, &device.graphics_pipeline_cache());
-            swap.destroy();
-            rect_pl_cache.clear(vkdev);
-            rect_dsl_cache.clear(vkdev);
-            device.shutdown();
-            ctx.shutdown();
-            return 1;
-        }
-    }
-    LUMEN_APP_LOG_INFO("同步对象（每帧 semaphore 对）创建完成，进入主循环");
-
-    bool resize_pending = false;
-    std::uint64_t frame_i = 0;
-    const auto app_start = std::chrono::steady_clock::now();
-    while (window.poll_events()) {
-        if (resize_pending) {
-            LUMEN_APP_LOG_DEBUG("处理 resize_pending，wait_idle 后重建交换链");
-            ctx.wait_idle();
-            window.get_framebuffer_size(&fbw, &fbh);
-            if (fbw > 0 && fbh > 0) {
-                bool resized = false;
-                if (!rect_gpu_ctx.compiled.empty() &&
-                    rect_gpu_ctx.compiled[0].has_value()) {
-                    resized = rhi::recreate_swapchain_and_present_framebuffers(
-                        swap, static_cast<std::uint32_t>(fbw),
-                        static_cast<std::uint32_t>(fbh), vkdev,
-                        rect_gpu_ctx.compiled[0]->render_pass,
-                        rect_gpu_ctx.compiled[0]->framebuffers);
-                }
-                if (resized) {
-                    resize_pending = false;
-                    LUMEN_APP_LOG_INFO("交换链与呈现 framebuffer 重建成功 {}x{}",
-                                       fbw, fbh);
-                } else {
-                    LUMEN_APP_LOG_ERROR(
-                        "交换链或呈现 framebuffer 重建失败 {}x{}", fbw, fbh);
-                }
-            } else {
-                LUMEN_APP_LOG_WARN("重建跳过：framebuffer 尺寸仍无效 {}x{}",
-                                   fbw, fbh);
-            }
-            if (resize_pending) {
-                continue;
-            }
-        }
-
-        device.begin_frame();
-        const std::uint32_t slot = device.frame_slot();
-        const vk::Semaphore img_sem = image_available[slot];
-        const vk::Semaphore done_sem = render_finished[slot];
-
-        rhi::SwapchainAcquireResult acq = swap.acquire_next_image(img_sem);
-        if (frame_i < 3) {
-            LUMEN_APP_LOG_DEBUG("帧 {} slot={} acquire result={} imageIndex={}",
-                                frame_i, slot, static_cast<int>(acq.result),
-                                acq.image_index);
-        }
-        if (rhi::swapchain_acquire_needs_recreate(acq.result)) {
-            LUMEN_APP_LOG_WARN("acquire OUT_OF_DATE，标记 resize");
-            device.end_frame();
-            resize_pending = true;
-            ++frame_i;
-            continue;
-        }
-        if (acq.result != vk::Result::eSuccess &&
-            acq.result != vk::Result::eSuboptimalKHR) {
-            LUMEN_APP_LOG_ERROR("acquireNextImageKHR 失败 {}",
-                                static_cast<int>(acq.result));
-            device.end_frame();
-            break;
-        }
-        if (acq.result == vk::Result::eSuboptimalKHR) {
-            LUMEN_APP_LOG_DEBUG("acquire SUBOPTIMAL，本帧继续，稍后重建");
-            resize_pending = true;
-        }
-
-        const vk::Extent2D ext = swap.extent();
-        vk::CommandBuffer vk_cmd = device.frame_command_buffer();
-
-        const float time_sec = std::chrono::duration<float>(
-                                   std::chrono::steady_clock::now() - app_start)
-                                   .count();
-        const vk::DeviceSize ubo_slot_offset =
-            static_cast<vk::DeviceSize>(slot) * rect_gpu.ubo_dynamic_stride;
-        device.upload_buffer(rect_gpu.ubo_buffer, &time_sec, sizeof(time_sec),
-                             ubo_slot_offset);
-
-        const rhi::BufferResource *ubo_res = device.try_get(rect_gpu.ubo_buffer);
-        if (ubo_res == nullptr) {
-            LUMEN_APP_LOG_ERROR("try_get(ubo_buffer) 失败");
-            device.end_frame();
-            break;
-        }
-        const rhi::BufferResource *vb_res = device.try_get(rect_gpu.vertex_buffer);
-        if (vb_res == nullptr) {
-            LUMEN_APP_LOG_ERROR("try_get(vertex_buffer) 失败");
-            device.end_frame();
-            break;
-        }
-        const rhi::BufferResource *ib_res = device.try_get(rect_gpu.index_buffer);
-        if (ib_res == nullptr) {
-            LUMEN_APP_LOG_ERROR("try_get(index_buffer) 失败");
-            device.end_frame();
-            break;
-        }
-
-        const std::uint32_t swap_image_index = acq.image_index;
-        rhi::RenderGraph frame_rg {};
-        const rhi::RgResourceId rg_ubo = frame_rg.create_buffer();
-        const rhi::RgResourceId rg_vb = frame_rg.create_buffer();
-        const rhi::RgResourceId rg_ib = frame_rg.create_buffer();
-        frame_rg.bind_buffer(rg_ubo, ubo_res->buffer, 0, rect_gpu.ubo_buffer);
-        frame_rg.bind_buffer(rg_vb, vb_res->buffer, 0, rect_gpu.vertex_buffer);
-        frame_rg.bind_buffer(rg_ib, ib_res->buffer, 0, rect_gpu.index_buffer);
-        frame_rg.declare_buffer_prior_write(
-            rg_ubo, vk::PipelineStageFlagBits::eTransfer,
-            vk::AccessFlagBits::eTransferWrite);
-
-        frame_rg.add_pass("rectangle_draw")
-            .gpu_shaders(rect_vert_spv, rect_frag_spv)
-            .gpu_bind_uniform_buffer("ubo", rg_ubo, rect_gpu.ubo_dynamic_stride)
-            .gpu_draw_indexed(rg_vb, rg_ib, k_rect_index_count);
-
-        if (!frame_rg.compile(&rect_gpu_ctx)) {
-            LUMEN_APP_LOG_ERROR(
-                "rectangle 帧 RenderGraph::compile（含 GPU 阶段）失败");
-            device.end_frame();
-            break;
-        }
-
-        std::vector<std::optional<rhi::RgGpuExecuteFrame>> exec_frame(
-            frame_rg.passes().size());
-        exec_frame[0].emplace();
-        exec_frame[0]->rhi_device = &device;
-        exec_frame[0]->swap_image_index = swap_image_index;
-        exec_frame[0]->surface_extent = ext;
-        exec_frame[0]->dynamic_uniform_offsets = { ubo_slot_offset };
-
-        rhi::CommandBuffer cmd { vk_cmd };
-        if (!frame_rg.execute(cmd, rect_gpu_ctx, exec_frame)) {
-            LUMEN_APP_LOG_ERROR("rectangle 帧 RenderGraph::execute 失败");
-            device.end_frame();
-            break;
-        }
-
-        device.end_frame(img_sem,
-                         vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                         done_sem);
-
-        const std::array<vk::Semaphore, 1> present_wait { done_sem };
-        const vk::Result pr = swap.present(acq.image_index, present_wait);
-        if (frame_i < 3) {
-            LUMEN_APP_LOG_DEBUG("帧 {} present result={}", frame_i,
-                                static_cast<int>(pr));
-        }
-        if (rhi::swapchain_present_needs_recreate(pr)) {
-            LUMEN_APP_LOG_WARN("present OUT_OF_DATE，标记 resize");
-            resize_pending = true;
-        } else if (pr == vk::Result::eSuboptimalKHR) {
-            LUMEN_APP_LOG_DEBUG("present SUBOPTIMAL，标记 resize");
-            resize_pending = true;
-        } else if (pr != vk::Result::eSuccess) {
-            LUMEN_APP_LOG_ERROR("presentKHR 失败 {}", static_cast<int>(pr));
-            break;
-        }
-        ++frame_i;
+    TriangleExample app;
+    if (!app.init(window)) {
+        core::log::Logger::shutdown();
+        return 1;
     }
 
-    LUMEN_APP_LOG_INFO("主循环结束（窗口关闭或错误），waitIdle 并清理");
-    static_cast<void>(vkdev.waitIdle());
-    for (std::uint32_t i = 0; i < rhi::Device::k_frames_in_flight; ++i) {
-        vkdev.destroySemaphore(image_available[i], nullptr);
-        vkdev.destroySemaphore(render_finished[i], nullptr);
+    lumen::platform::EventPump pump;
+    pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
+        lumen::platform::EventDispatcher d(de);
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &) {
+                app.set_framebuffer_resized();
+            });
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    while (pump.poll()) {
+        app.try_recreate_swapchain();
+        const auto now = std::chrono::steady_clock::now();
+        const float t = std::chrono::duration<float>(now - start).count();
+        app.draw_frame(t);
     }
-    rect_gpu_ctx.destroy_all(vkdev, &device.graphics_pipeline_cache());
-    swap.destroy();
-    rect_pl_cache.clear(vkdev);
-    rect_dsl_cache.clear(vkdev);
-    device.destroy_buffer(rect_gpu.ubo_buffer);
-    device.destroy_buffer(rect_gpu.index_buffer);
-    device.destroy_buffer(rect_gpu.vertex_buffer);
-    device.shutdown();
-    ctx.shutdown();
+
+    app.shutdown();
+    core::log::Logger::shutdown();
+    SDL_Quit();
     return 0;
 }

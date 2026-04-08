@@ -1,9 +1,11 @@
 /**
  * @file event_pump.hpp
- * @brief SDL3 事件轮询：Input 快照 + Hazel 式层链（Overlay / Layer）+ 可选 SDL 钩子
+ * @brief SDL3 事件轮询：Input 快照 + Hazel 式层链（Overlay / Layer）+ 可选 SDL
+ * 钩子
  *
  * 不再提供 `on_key_down` 等按类型的回调；应用在 `push_layer` 内使用
- * `EventDispatcher` 分派，与 Hazel `Application::OnEvent` + `Layer::OnEvent` 一致。
+ * `EventDispatcher` 分派，与 Hazel `Application::OnEvent` + `Layer::OnEvent`
+ * 一致。
  */
 
 #pragma once
@@ -11,9 +13,6 @@
 #include "platform/event.hpp"
 #include "platform/event_dispatcher.hpp"
 #include "platform/input.hpp"
-
-#include <functional>
-#include <vector>
 
 namespace lumen {
 namespace platform {
@@ -38,8 +37,9 @@ namespace platform {
  * while (pump.poll()) { ... }
  * @endcode
  *
- * 与 Hazel `Application::OnEvent` 一致：先执行 **应用级** 回调（窗口关闭、resize 等），
- * 再自前向后遍历 Overlay/Layer 栈；若 `handled` 则不再向下传递。
+ * 与 Hazel `Application::OnEvent` 一致：先执行 **应用级**
+ * 回调（窗口关闭、resize 等）， 再自前向后遍历 Overlay/Layer 栈；若 `handled`
+ * 则不再向下传递。
  */
 class EventPump {
 public:
@@ -54,7 +54,8 @@ public:
     using SDLEventFn = std::function<void(const void *sdlEvent)>;
 
     /**
-     * @brief Overlay：插入队首，最先处理（`ImGuiLayer::attach` 会注册 ImGui Overlay）
+     * @brief Overlay：插入队首，最先处理（`ImGuiLayer::attach` 会注册 ImGui
+     * Overlay）
      */
     void push_overlay(EventFn fn) {
         event_stack_.insert(event_stack_.begin(), std::move(fn));
@@ -69,8 +70,8 @@ public:
      * @brief 应用级事件（对齐 Hazel `Application::OnEvent` 中先于 Layer 栈的
      * `EventDispatcher::Dispatch`）
      *
-     * 典型：`EventQuit`、`EventWindowResize`；若将 `handled` 置为 true，后续 Overlay/Layer
-     * 不会收到该事件。
+     * 典型：`EventQuit`、`EventWindowResize`；若将 `handled` 置为 true，后续
+     * Overlay/Layer 不会收到该事件。
      */
     void set_on_application_event(EventFn f) {
         on_application_event_ = std::move(f);

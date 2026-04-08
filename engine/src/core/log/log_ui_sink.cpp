@@ -5,16 +5,6 @@
 #include "core/log/log_ui_sink.hpp"
 #include "core/log/log_view_buffer.hpp"
 
-#include <array>
-#include <chrono>
-#include <ctime>
-#include <format>
-#include <mutex>
-#include <string>
-
-#include <spdlog/details/log_msg.h>
-#include <spdlog/sinks/base_sink.h>
-
 namespace core::log {
 namespace {
 

@@ -33,6 +33,19 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-glsl)
 target_link_libraries(${ENGINE_TARGET} PUBLIC spirv-cross-cpp)
 target_link_libraries(${ENGINE_TARGET} PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(${ENGINE_TARGET} PUBLIC volk::volk volk::volk_headers)
+target_link_libraries(${ENGINE_TARGET} PUBLIC unofficial::spirv-reflect)
+target_link_libraries(${ENGINE_TARGET} PUBLIC unofficial::shaderc::shaderc)
+target_link_libraries(
+        ${ENGINE_TARGET} PUBLIC 
+        absl::base
+        absl::strings
+        absl::str_format
+        absl::flat_hash_map
+        absl::flat_hash_set
+        absl::synchronization
+        absl::time
+        absl::status
+)
 
 target_precompile_headers(${ENGINE_TARGET} PUBLIC ./src/pch.hpp)
 

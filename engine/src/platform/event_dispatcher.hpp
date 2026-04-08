@@ -1,19 +1,15 @@
 /**
  * @file event_dispatcher.hpp
- * @brief 对齐 Hazel：`EventCategory`、`DispatchableEvent`（payload + handled）、`EventDispatcher`
+ * @brief 对齐 Hazel：`EventCategory`、`DispatchableEvent`（payload +
+ * handled）、`EventDispatcher`
  *
- * 平台负载仍为 `event.hpp` 中的 `Event`（`std::variant`）。层链与 `EventPump::poll`
- * 在 `event_pump.hpp`。
+ * 平台负载仍为 `event.hpp` 中的 `Event`（`std::variant`）。层链与
+ * `EventPump::poll` 在 `event_pump.hpp`。
  */
 
 #pragma once
 
 #include "platform/event.hpp"
-
-#include <cstdint>
-#include <type_traits>
-#include <utility>
-#include <variant>
 
 namespace lumen {
 namespace platform {
@@ -45,7 +41,8 @@ struct DispatchableEvent {
 /**
  * @brief 按具体事件类型分派（与 Hazel `EventDispatcher::Dispatch` 相同用法）
  *
- * 若 `fn` 返回 `bool`，`true` 会合并到 `handled`；返回 `void` 则不修改 `handled`。
+ * 若 `fn` 返回 `bool`，`true` 会合并到 `handled`；返回 `void` 则不修改
+ * `handled`。
  */
 class EventDispatcher {
 public:

@@ -7,10 +7,6 @@
 #include "core/log/logger.hpp"
 #include "platform/event_pump.hpp"
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-#include <SDL3_image/SDL_image.h>
-
 namespace lumen::platform {
 
 bool Window::create(const WindowConfig &config) {
@@ -75,7 +71,7 @@ std::vector<const char *> Window::get_vulkan_instance_extensions() const {
     return result;
 }
 
-vk::SurfaceKHR Window::create_vulkan_surface(vk::Instance instance) const {
+VkSurfaceKHR Window::create_vulkan_surface(VkInstance instance) const {
     if (!window_ || !instance) {
         LUMEN_LOG_WARN("window 或 instance 未初始化");
         return {};
@@ -88,7 +84,7 @@ vk::SurfaceKHR Window::create_vulkan_surface(vk::Instance instance) const {
         return {};
     }
     LUMEN_LOG_DEBUG("Vulkan Surface 创建成功");
-    return vk::SurfaceKHR { surface };
+    return surface;
 }
 
 bool Window::poll_events() {

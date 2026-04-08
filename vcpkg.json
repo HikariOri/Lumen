@@ -41,7 +41,6 @@
       "version>=": "3.2.4",
       "features": ["jpeg", "png", "tiff", "webp"]
     },
-
     {
       "name": "tinygltf",
       "version>=": "2.9.6"
@@ -54,59 +53,13 @@
       "name": "volk",
       "version>=": "1.4.309.0"
     },
-
     {
       "name": "cli11",
       "version>=": "2.6.1"
     },
     {
-      "name": "fmt",
-      "version>=": "11.0.2#1"
-    },
-    {
       "name": "fastgltf",
       "version>=": "0.9.0"
-    },
-    {
-      "name": "drogon",
-      "version>=": "1.9.11",
-      "features": [
-        "ctl",
-        "mysql",
-        "orm",
-        "postgres",
-        "redis",
-        "sqlite3",
-        "yaml"
-      ]
-    },
-    {
-      "name": "sqlite3",
-      "version>=": "3.51.0",
-      "features": [
-        "dbpage-vtab",
-        "dbstat",
-        "fts3",
-        "fts4",
-        "fts5",
-        "geopoly",
-        "json1",
-        "limit",
-        "math",
-        "memsys3",
-        "memsys5",
-        "omit-load-extension",
-        "rtree",
-        "session",
-        "snapshot",
-        "soundex",
-        "tool",
-        "zlib"
-      ]
-    },
-    {
-      "name": "sqlite-orm",
-      "version>=": "1.9.1"
     },
     {
       "name": "cpr",
@@ -116,11 +69,6 @@
     {
       "name": "entt",
       "version>=": "3.15.0"
-    },
-    {
-      "name": "catch2",
-      "version>=": "3.11.0",
-      "features": ["thread-safe-assertions"]
     },
     {
       "name": "nlohmann-json",
@@ -148,11 +96,6 @@
       ]
     },
     {
-      "name": "protobuf",
-      "version>=": "5.29.3#1",
-      "features": ["zlib"]
-    },
-    {
       "name": "doctest",
       "version>=": "2.4.12"
     },
@@ -160,19 +103,9 @@
       "name": "efsw",
       "version>=": "1.5.0"
     },
-
     {
       "name": "ghc-filesystem",
       "version>=": "1.5.14"
-    },
-
-    {
-      "name": "uvw",
-      "version>=": "3.4.0"
-    },
-    {
-      "name": "libuv",
-      "version>=": "1.51.0"
     },
     {
       "name": "tracy",
@@ -184,6 +117,26 @@
         "on-demand",
         "verbose"
       ]
+    },
+    {
+      "name": "spirv-reflect",
+      "version>=": "1.4.341.0"
+    },
+    {
+      "name": "abseil",
+      "version>=": "20260107.1#2"
+    },
+    {
+      "name": "vk-bootstrap",
+      "version>=": "1.4.341"
+    },
+    {
+      "name": "vulkan-headers",
+      "version>=": "1.4.341.0"
+    },
+    {
+      "name": "shaderc",
+      "version>=": "2026.1"
     }
   ]
 }

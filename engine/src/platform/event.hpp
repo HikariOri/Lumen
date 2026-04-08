@@ -10,15 +10,11 @@
  * - 鼠标事件
  * - 窗口大小变化等
  *
- * 应用层通过 EventPump::poll 驱动层链，在 `push_layer` 内用 `EventDispatcher` 处理负载。
+ * 应用层通过 EventPump::poll 驱动层链，在 `push_layer` 内用 `EventDispatcher`
+ * 处理负载。
  */
 
 #pragma once
-
-#include <cstdint>
-#include <string_view>
-#include <variant>
-#include <vector>
 
 namespace lumen {
 namespace platform {

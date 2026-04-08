@@ -5,11 +5,6 @@
 
 #include "platform/event.hpp"
 
-#include <concepts>
-
-#include <SDL3/SDL_keyboard.h>
-#include <SDL3/SDL_scancode.h>
-
 namespace lumen::platform {
 
 std::string_view key_name(KeyCode key) {
