@@ -1,18 +1,23 @@
 /**
  * @file main.cpp
- * @brief Vulkan 三角形示例：`platform::Window` + `EventPump`，其余为最小自管
- * Vulkan
+ * @brief Vulkan 旋转矩形 + 纹理采样示例：`platform::Window` +
+ * `EventPump`；交换链路径使用 `RenderTargetBundle` + `RenderPass`。
  */
 
-#include <VkBootstrap.h>
-
-#include <vector>
+#include <optional>
 
 #include "core/log/logger.hpp"
 #include "platform/event_dispatcher.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
+#include "vulkan/buffer.hpp"
+#include "vulkan/context.hpp"
+#include "vulkan/image.hpp"
 #include "vulkan/pipeline.hpp"
+#include "vulkan/render_pass.hpp"
+#include "vulkan/render_target.hpp"
+#include "vulkan/render_target_bundle.hpp"
+#include "vulkan/shader_reflection.hpp"
 
 namespace {
 
@@ -30,13 +35,20 @@ struct UniformBufferObject {
 
 struct Vertex {
     float position[2];
+    float uv[2];
     float color[3];
 };
 
+/** 轴对齐矩形（NDC）+ UV；纹理顶行对应 v=0（与 stb 行序一致）。 */
 const Vertex k_vertices[] = {
-    { { 0.f, -0.5f }, { 1.f, 0.f, 0.f } },
-    { { 0.5f, 0.5f }, { 0.f, 1.f, 0.f } },
-    { { -0.5f, 0.5f }, { 0.f, 0.f, 1.f } },
+    // 三角形 1：左下、右下、左上
+    { { -0.45f, -0.28f }, { 0.f, 1.f }, { 1.f, 1.f, 1.f } },
+    { { 0.45f, -0.28f }, { 1.f, 1.f }, { 1.f, 1.f, 1.f } },
+    { { -0.45f, 0.28f }, { 0.f, 0.f }, { 1.f, 1.f, 1.f } },
+    // 三角形 2
+    { { 0.45f, -0.28f }, { 1.f, 1.f }, { 1.f, 1.f, 1.f } },
+    { { 0.45f, 0.28f }, { 1.f, 0.f }, { 1.f, 1.f, 1.f } },
+    { { -0.45f, 0.28f }, { 0.f, 0.f }, { 1.f, 1.f, 1.f } },
 };
 
 [[nodiscard]] std::vector<uint32_t>
@@ -55,20 +67,6 @@ read_spirv(const ghc::filesystem::path &path) {
     return code;
 }
 
-[[nodiscard]] uint32_t find_memory_type(VkPhysicalDevice phys,
-                                        uint32_t type_filter,
-                                        VkMemoryPropertyFlags props) {
-    VkPhysicalDeviceMemoryProperties mem {};
-    vkGetPhysicalDeviceMemoryProperties(phys, &mem);
-    for (uint32_t i { 0 }; i < mem.memoryTypeCount; ++i) {
-        if ((type_filter & (1U << i)) &&
-            (mem.memoryTypes[i].propertyFlags & props) == props) {
-            return i;
-        }
-    }
-    return UINT32_MAX;
-}
-
 /** @brief 着色器目录（可执行文件旁 `shaders/`）。SDL3 下 `SDL_GetBasePath`
  * 返回只读串，由 SDL 持有，勿 SDL_free。 */
 [[nodiscard]] ghc::filesystem::path base_path_shaders_dir() {
@@ -79,84 +77,68 @@ read_spirv(const ghc::filesystem::path &path) {
     return ghc::filesystem::path(base) / "shaders";
 }
 
-class TriangleExample {
+/** @brief 可执行文件旁 `assets/`（CMake post-build 拷贝纹理目录）。 */
+[[nodiscard]] ghc::filesystem::path base_path_assets_dir() {
+    const char *base = SDL_GetBasePath();
+    if (base == nullptr) {
+        return ghc::filesystem::path("assets");
+    }
+    return ghc::filesystem::path(base) / "assets";
+}
+
+class RotatingRectExample {
 public:
     bool init(lumen::platform::Window &window) {
         window_ = &window;
 
-        auto vert_code =
+        auto vertCode =
             read_spirv(base_path_shaders_dir() / "triangle.vert.spv");
-        auto frag_code =
+        auto fragCode =
             read_spirv(base_path_shaders_dir() / "triangle.frag.spv");
-        if (vert_code.empty() || frag_code.empty()) {
+        if (vertCode.empty() || fragCode.empty()) {
             LUMEN_APP_LOG_ERROR(
                 "SPIR-V load failed (triangle.*.spv next to executable)");
             return false;
         }
-        vert_spirv_ = std::move(vert_code);
-        frag_spirv_ = std::move(frag_code);
+        vert_spirv_ = std::move(vertCode);
+        frag_spirv_ = std::move(fragCode);
 
-        vkb::InstanceBuilder inst_builder;
-        inst_builder.set_app_name("triangle")
-            .set_engine_name("lumen")
-            .set_app_version(1, 0, 0);
+        int fbw { 0 };
+        int fbh { 0 };
+        window_->get_framebuffer_size(&fbw, &fbh);
+        if (fbw <= 0 || fbh <= 0) {
+            fbw = static_cast<int>(window_->width());
+            fbh = static_cast<int>(window_->height());
+        }
         const auto sdl_exts = window_->get_vulkan_instance_extensions();
-        inst_builder.set_headless(true).enable_extensions(sdl_exts);
-
-#if !defined(NDEBUG)
-        inst_builder.request_validation_layers().use_default_debug_messenger();
+        const bool enable_validation =
+#if defined(NDEBUG)
+            false;
+#else
+            true;
 #endif
-        inst_builder.require_api_version(1, 2, 0);
-
-        const auto inst_ret = inst_builder.build();
-        if (!inst_ret) {
-            app_log_err(std::string("VkInstance failed ec=") +
-                        std::to_string(inst_ret.error().value()));
+        auto ctx_ret =
+            vulkan::ContextBuilder()
+                .set_application_name("rotating-rect")
+                .set_application_version(VK_MAKE_API_VERSION(0, 1, 0, 0))
+                .set_instance_extensions(sdl_exts)
+                .set_initial_size(static_cast<std::uint32_t>(fbw),
+                                  static_cast<std::uint32_t>(fbh))
+                .set_surface_from_instance([this](VkInstance inst) {
+                    return window_->create_vulkan_surface(inst);
+                })
+                .set_enable_validation(enable_validation)
+                .build();
+        if (!ctx_ret) {
+            app_log_err(ctx_ret.error());
             return false;
         }
-        vkb_instance_ = inst_ret.value();
-
-        surface_ = window_->create_vulkan_surface(vkb_instance_.instance);
-        if (surface_ == VK_NULL_HANDLE) {
-            LUMEN_APP_LOG_ERROR("Vulkan surface create failed");
-            return false;
-        }
-
-        vkb::PhysicalDeviceSelector phys_selector { vkb_instance_, surface_ };
-        phys_selector.set_minimum_version(1, 2)
-            .set_surface(surface_)
-            .require_present(true);
-        const auto phys_ret = phys_selector.select();
-        if (!phys_ret) {
-            app_log_err(std::string("PhysicalDevice select failed ec=") +
-                        std::to_string(phys_ret.error().value()));
-            return false;
-        }
-        vkb_phys_ = phys_ret.value();
-
-        vkb::DeviceBuilder dev_builder { vkb_phys_ };
-        const auto dev_ret = dev_builder.build();
-        if (!dev_ret) {
-            app_log_err(std::string("VkDevice failed ec=") +
-                        std::to_string(dev_ret.error().value()));
-            return false;
-        }
-        vkb_device_ = dev_ret.value();
-        device_ = vkb_device_.device;
-
-        const auto gq = vkb_device_.get_queue(vkb::QueueType::graphics);
-        const auto pq = vkb_device_.get_queue(vkb::QueueType::present);
-        if (!gq || !pq) {
-            LUMEN_APP_LOG_ERROR("Graphics or present queue unavailable");
-            return false;
-        }
-        graphics_queue_ = gq.value();
-        present_queue_ = pq.value();
-
-        if (!create_swapchain_internal(VK_NULL_HANDLE)) {
-            return false;
-        }
+        vulkan_ctx_ = std::move(ctx_ret.value());
+        sync_vulkan_handles_from_context();
         if (!create_render_pass()) {
+            return false;
+        }
+        if (!create_texture_()) {
             return false;
         }
         if (!create_pipeline()) {
@@ -184,7 +166,7 @@ public:
     }
 
     void shutdown() {
-        if (device_ == VK_NULL_HANDLE) {
+        if (vulkan_ctx_ == nullptr) {
             return;
         }
         vkDeviceWaitIdle(device_);
@@ -197,39 +179,26 @@ public:
             descriptor_pool_ = VK_NULL_HANDLE;
         }
 
-        for (auto b : uniform_buffers_) {
-            if (b.map != nullptr) {
-                vkUnmapMemory(device_, b.mem);
-            }
-            if (b.buf != VK_NULL_HANDLE) {
-                vkDestroyBuffer(device_, b.buf, nullptr);
-            }
-            if (b.mem != VK_NULL_HANDLE) {
-                vkFreeMemory(device_, b.mem, nullptr);
+        for (auto &b : uniform_buffers_) {
+            if (b.mapped != nullptr) {
+                b.buffer.unmap();
+                b.mapped = nullptr;
             }
         }
         uniform_buffers_.clear();
 
-        if (vertex_buffer_ != VK_NULL_HANDLE) {
-            vkDestroyBuffer(device_, vertex_buffer_, nullptr);
-            vertex_buffer_ = VK_NULL_HANDLE;
-        }
-        if (vertex_buffer_mem_ != VK_NULL_HANDLE) {
-            vkFreeMemory(device_, vertex_buffer_mem_, nullptr);
-            vertex_buffer_mem_ = VK_NULL_HANDLE;
-        }
+        vertex_buffer_ = vulkan::Buffer {};
+
+        destroy_texture_();
 
         cleanup_swapchain();
 
-        vkb::destroy_device(vkb_device_);
-
-        if (surface_ != VK_NULL_HANDLE) {
-            vkb::destroy_surface(vkb_instance_, surface_);
-            surface_ = VK_NULL_HANDLE;
-        }
-
-        vkb::destroy_instance(vkb_instance_);
+        vulkan_ctx_.reset();
         device_ = VK_NULL_HANDLE;
+        graphics_queue_ = VK_NULL_HANDLE;
+        present_queue_ = VK_NULL_HANDLE;
+        swapchain_ = VK_NULL_HANDLE;
+        swap_image_views_.clear();
     }
 
     void set_framebuffer_resized() { framebuffer_resized_ = true; }
@@ -270,7 +239,7 @@ public:
         {
             UniformBufferObject ubo { .time = time_sec };
             auto &ub = uniform_buffers_[current_frame_];
-            std::memcpy(ub.map, &ubo, sizeof(ubo));
+            std::memcpy(ub.mapped, &ubo, sizeof(ubo));
         }
 
         record_command_buffer(image_index, current_frame_);
@@ -331,10 +300,13 @@ public:
 
         cleanup_swapchain_only();
 
-        if (!create_swapchain_internal(VK_NULL_HANDLE)) {
-            LUMEN_APP_LOG_ERROR("Swapchain recreate failed");
+        if (auto r = vulkan_ctx_->recreate_swapchain(
+                static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h));
+            !r) {
+            app_log_err(r.error());
             return;
         }
+        sync_vulkan_handles_from_context();
 
         if (!create_framebuffer()) {
             LUMEN_APP_LOG_ERROR("Framebuffer recreate failed");
@@ -358,60 +330,32 @@ public:
 
 private:
     struct HostUniformBuffer {
-        VkBuffer buf { VK_NULL_HANDLE };
-        VkDeviceMemory mem { VK_NULL_HANDLE };
-        void *map { nullptr };
+        vulkan::Buffer buffer;
+        void *mapped { nullptr };
     };
 
-    bool create_swapchain_internal(VkSwapchainKHR old_swapchain) {
-        vkb::SwapchainBuilder sc_builder { vkb_device_ };
-        sc_builder.set_old_swapchain(old_swapchain);
-        const auto sc_ret = sc_builder.build();
-        if (!sc_ret) {
-            app_log_err(std::string("Swapchain create failed ec=") +
-                        std::to_string(sc_ret.error().value()));
-            return false;
-        }
-        vkb_swapchain_ = sc_ret.value();
-        swapchain_ = vkb_swapchain_.swapchain;
-        extent_ = vkb_swapchain_.extent;
-        swap_format_ = vkb_swapchain_.image_format;
-
-        const auto views_ret = vkb_swapchain_.get_image_views();
-        if (!views_ret) {
-            LUMEN_APP_LOG_ERROR("Swapchain image views failed");
-            return false;
-        }
-        swap_image_views_ = views_ret.value();
-        return true;
+    void sync_vulkan_handles_from_context() {
+        device_ = vulkan_ctx_->device();
+        graphics_queue_ = vulkan_ctx_->graphics_queue();
+        present_queue_ = vulkan_ctx_->present_queue();
+        swapchain_ = vulkan_ctx_->swapchain();
+        swap_format_ = vulkan_ctx_->swapchain_format();
+        extent_.width = vulkan_ctx_->swapchain_width();
+        extent_.height = vulkan_ctx_->swapchain_height();
+        swap_image_views_ = vulkan_ctx_->swapchain_image_views();
     }
 
     void cleanup_swapchain_only() {
-        for (auto fb : framebuffers_) {
-            if (fb != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(device_, fb, nullptr);
-            }
+        for (vulkan::RenderTargetBundle &b : swap_target_bundles_) {
+            b.destroy(device_);
         }
-        framebuffers_.clear();
-
-        if (!swap_image_views_.empty()) {
-            vkb_swapchain_.destroy_image_views(swap_image_views_);
-            swap_image_views_.clear();
-        }
-
-        if (swapchain_ != VK_NULL_HANDLE) {
-            vkb::destroy_swapchain(vkb_swapchain_);
-            swapchain_ = VK_NULL_HANDLE;
-        }
+        swap_target_bundles_.clear();
     }
 
     void cleanup_swapchain() {
         cleanup_swapchain_only();
 
-        if (render_pass_ != VK_NULL_HANDLE) {
-            vkDestroyRenderPass(device_, render_pass_, nullptr);
-            render_pass_ = VK_NULL_HANDLE;
-        }
+        vulkan_render_pass_.reset();
         if (pipeline_ != VK_NULL_HANDLE) {
             vkDestroyPipeline(device_, pipeline_, nullptr);
             pipeline_ = VK_NULL_HANDLE;
@@ -420,105 +364,301 @@ private:
             vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
             pipeline_layout_ = VK_NULL_HANDLE;
         }
-        if (descriptor_set_layout_ != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_,
-                                         nullptr);
-            descriptor_set_layout_ = VK_NULL_HANDLE;
+        destroy_reflected_descriptor_set_layouts_();
+    }
+
+    void destroy_reflected_descriptor_set_layouts_() {
+        for (VkDescriptorSetLayout layout : descriptor_set_layouts_) {
+            if (layout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device_, layout, nullptr);
+            }
         }
+        descriptor_set_layouts_.clear();
+    }
+
+    bool create_texture_() {
+        const ghc::filesystem::path texPath =
+            base_path_assets_dir() / "textures" / "ikun2026_happy_new_year.jpg";
+        int texW { 0 };
+        int texH { 0 };
+        int texChannels { 0 };
+        stbi_uc *pixels { nullptr };
+        pixels =
+            stbi_load(texPath.string().c_str(), &texW, &texH, &texChannels, 4);
+        if (pixels == nullptr || texW <= 0 || texH <= 0) {
+            app_log_err("stbi_load failed: " + texPath.string());
+            if (pixels != nullptr) {
+                stbi_image_free(pixels);
+            }
+            return false;
+        }
+
+        const std::uint32_t qf = vulkan_ctx_->graphics_queue_family();
+
+        const VkDeviceSize imageBytes =
+            static_cast<VkDeviceSize>(texW * texH * 4);
+
+        VmaAllocator allocator { vulkan_ctx_->allocator() };
+
+        vulkan::BufferCreateInfo stagingCi {};
+        stagingCi.size = imageBytes;
+        stagingCi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        stagingCi.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        auto stagingRet = vulkan::Buffer::create(allocator, stagingCi);
+        if (!stagingRet) {
+            stbi_image_free(pixels);
+            app_log_err(stagingRet.error());
+            return false;
+        }
+        vulkan::Buffer staging = std::move(stagingRet.value());
+        {
+            auto mapped = staging.map();
+            if (!mapped) {
+                stbi_image_free(pixels);
+                app_log_err(mapped.error());
+                return false;
+            }
+            std::memcpy(*mapped, pixels, static_cast<size_t>(imageBytes));
+            staging.unmap();
+        }
+        stbi_image_free(pixels);
+
+        vulkan::ImageCreateInfo imgCi {};
+        imgCi.extent.width = static_cast<std::uint32_t>(texW);
+        imgCi.extent.height = static_cast<std::uint32_t>(texH);
+        imgCi.extent.depth = 1;
+        imgCi.format = VK_FORMAT_R8G8B8A8_SRGB;
+        imgCi.usage =
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imgCi.memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
+        imgCi.viewDevice = device_;
+        imgCi.viewAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        auto imageRet = vulkan::Image::create(allocator, imgCi);
+        if (!imageRet) {
+            app_log_err(imageRet.error());
+            return false;
+        }
+        vulkan::Image texImage = std::move(imageRet.value());
+        const VkImage vkTex = texImage.image();
+
+        VkCommandPool uploadPool { VK_NULL_HANDLE };
+        VkCommandPoolCreateInfo cpci {
+            VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        };
+        cpci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+        cpci.queueFamilyIndex = qf;
+        if (vkCreateCommandPool(device_, &cpci, nullptr, &uploadPool) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        VkCommandBuffer uploadCb { VK_NULL_HANDLE };
+        VkCommandBufferAllocateInfo cbai {
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        };
+        cbai.commandPool = uploadPool;
+        cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cbai.commandBufferCount = 1;
+        if (vkAllocateCommandBuffers(device_, &cbai, &uploadCb) != VK_SUCCESS) {
+            vkDestroyCommandPool(device_, uploadPool, nullptr);
+            return false;
+        }
+
+        VkCommandBufferBeginInfo begin {
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        };
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(uploadCb, &begin);
+
+        VkImageMemoryBarrier toCopy {};
+        toCopy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toCopy.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toCopy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toCopy.image = vkTex;
+        toCopy.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        toCopy.subresourceRange.baseMipLevel = 0;
+        toCopy.subresourceRange.levelCount = 1;
+        toCopy.subresourceRange.baseArrayLayer = 0;
+        toCopy.subresourceRange.layerCount = 1;
+        toCopy.srcAccessMask = 0;
+        toCopy.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vkCmdPipelineBarrier(uploadCb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &toCopy);
+
+        VkBufferImageCopy region {};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = { 0, 0, 0 };
+        region.imageExtent.width = static_cast<uint32_t>(texW);
+        region.imageExtent.height = static_cast<uint32_t>(texH);
+        region.imageExtent.depth = 1;
+        vkCmdCopyBufferToImage(uploadCb, staging.buffer(), vkTex,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                               &region);
+
+        VkImageMemoryBarrier toSample {};
+        toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toSample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toSample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        toSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toSample.image = vkTex;
+        toSample.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        toSample.subresourceRange.baseMipLevel = 0;
+        toSample.subresourceRange.levelCount = 1;
+        toSample.subresourceRange.baseArrayLayer = 0;
+        toSample.subresourceRange.layerCount = 1;
+        toSample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(uploadCb, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &toSample);
+
+        vkEndCommandBuffer(uploadCb);
+
+        VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        sub.commandBufferCount = 1;
+        sub.pCommandBuffers = &uploadCb;
+        if (vkQueueSubmit(graphics_queue_, 1, &sub, VK_NULL_HANDLE) !=
+            VK_SUCCESS) {
+            vkDestroyCommandPool(device_, uploadPool, nullptr);
+            return false;
+        }
+        vkQueueWaitIdle(graphics_queue_);
+        vkDestroyCommandPool(device_, uploadPool, nullptr);
+
+        VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        sci.magFilter = VK_FILTER_LINEAR;
+        sci.minFilter = VK_FILTER_LINEAR;
+        sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.mipLodBias = 0.f;
+        sci.anisotropyEnable = VK_FALSE;
+        sci.maxAnisotropy = 1.f;
+        sci.compareEnable = VK_FALSE;
+        sci.minLod = 0.f;
+        sci.maxLod = 0.f;
+        sci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sci.unnormalizedCoordinates = VK_FALSE;
+        if (vkCreateSampler(device_, &sci, nullptr, &texture_sampler_) !=
+            VK_SUCCESS) {
+            return false;
+        }
+
+        texture_image_ = std::move(texImage);
+        return true;
+    }
+
+    void destroy_texture_() {
+        if (device_ == VK_NULL_HANDLE) {
+            return;
+        }
+        if (texture_sampler_ != VK_NULL_HANDLE) {
+            vkDestroySampler(device_, texture_sampler_, nullptr);
+            texture_sampler_ = VK_NULL_HANDLE;
+        }
+        texture_image_ = vulkan::Image {};
     }
 
     bool create_render_pass() {
-        VkAttachmentDescription color {};
-        color.format = swap_format_;
-        color.samples = VK_SAMPLE_COUNT_1_BIT;
-        color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        color.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        VkAttachmentReference ref {};
-        ref.attachment = 0;
-        ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription sub {};
-        sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        sub.colorAttachmentCount = 1;
-        sub.pColorAttachments = &ref;
-
-        VkSubpassDependency dep { VK_SUBPASS_EXTERNAL, 0 };
-        dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dep.srcAccessMask = 0;
-        dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-        VkRenderPassCreateInfo rp { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-        rp.attachmentCount = 1;
-        rp.pAttachments = &color;
-        rp.subpassCount = 1;
-        rp.pSubpasses = &sub;
-        rp.dependencyCount = 1;
-        rp.pDependencies = &dep;
-
-        return vkCreateRenderPass(device_, &rp, nullptr, &render_pass_) ==
-               VK_SUCCESS;
+        if (swap_image_views_.empty()) {
+            app_log_err("create_render_pass: no swapchain image views");
+            return false;
+        }
+        vulkan::RenderTargetBundle template_bundle;
+        if (!template_bundle.add_color_target(vulkan::render_target_from_view(
+                swap_image_views_.front(), swap_format_, extent_.width,
+                extent_.height))) {
+            app_log_err("create_render_pass: add_color_target failed");
+            return false;
+        }
+        auto rp = vulkan::RenderPass::create(device_, template_bundle, true);
+        if (!rp) {
+            app_log_err(rp.error());
+            return false;
+        }
+        vulkan_render_pass_.emplace(std::move(*rp));
+        return true;
     }
 
     bool create_pipeline() {
-        VkDescriptorSetLayoutBinding uboBind {};
-        uboBind.binding = 0;
-        uboBind.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboBind.descriptorCount = 1;
-        uboBind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-        VkDescriptorSetLayoutCreateInfo dsl {
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-        };
-        dsl.bindingCount = 1;
-        dsl.pBindings = &uboBind;
-        if (vkCreateDescriptorSetLayout(device_, &dsl, nullptr,
-                                        &descriptor_set_layout_) !=
-            VK_SUCCESS) {
+        shaderPlb_.clear();
+        const auto vertReflResult =
+            vulkan::reflect_spirv(vert_spirv_, VK_SHADER_STAGE_VERTEX_BIT);
+        if (!vertReflResult) {
+            app_log_err(vertReflResult.error());
+            return false;
+        }
+        const auto fragReflResult =
+            vulkan::reflect_spirv(frag_spirv_, VK_SHADER_STAGE_FRAGMENT_BIT);
+        if (!fragReflResult) {
+            app_log_err(fragReflResult.error());
+            return false;
+        }
+        const vulkan::ShaderReflection &vertRefl = *vertReflResult;
+        const vulkan::ShaderReflection &fragRefl = *fragReflResult;
+        if (auto addVert = shaderPlb_.add(vertRefl); !addVert) {
+            app_log_err(addVert.error());
+            return false;
+        }
+        if (auto addFrag = shaderPlb_.add(fragRefl); !addFrag) {
+            app_log_err(addFrag.error());
             return false;
         }
 
-        VkPipelineLayoutCreateInfo pl {
-            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-        };
-        pl.setLayoutCount = 1;
-        pl.pSetLayouts = &descriptor_set_layout_;
-        if (vkCreatePipelineLayout(device_, &pl, nullptr, &pipeline_layout_) !=
-            VK_SUCCESS) {
+        destroy_reflected_descriptor_set_layouts_();
+        auto layoutsResult = shaderPlb_.create_descriptor_set_layouts(device_);
+        if (!layoutsResult) {
+            app_log_err(layoutsResult.error());
             return false;
         }
+        descriptor_set_layouts_ = std::move(*layoutsResult);
 
-        const std::vector<VkVertexInputBindingDescription> vertex_bindings {
-            VkVertexInputBindingDescription {
-                .binding = 0,
-                .stride = sizeof(Vertex),
-                .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-            },
-        };
-        const std::vector<VkVertexInputAttributeDescription> vertex_attributes {
-            VkVertexInputAttributeDescription {
-                .location = 0,
-                .binding = 0,
-                .format = VK_FORMAT_R32G32_SFLOAT,
-                .offset = offsetof(Vertex, position),
-            },
-            VkVertexInputAttributeDescription {
-                .location = 1,
-                .binding = 0,
-                .format = VK_FORMAT_R32G32B32_SFLOAT,
-                .offset = offsetof(Vertex, color),
-            },
-        };
+        auto pipelineLayoutResult =
+            shaderPlb_.create_pipeline_layout(device_, descriptor_set_layouts_);
+        if (!pipelineLayoutResult) {
+            app_log_err(pipelineLayoutResult.error());
+            vulkan::PipelineLayoutBuilder::destroy_descriptor_set_layouts(
+                device_, descriptor_set_layouts_);
+            descriptor_set_layouts_.clear();
+            return false;
+        }
+        pipeline_layout_ = *pipelineLayoutResult;
+
+        const auto vertexInputResult =
+            vulkan::build_vertex_input_state(vertRefl, 0);
+        if (!vertexInputResult) {
+            app_log_err(vertexInputResult.error());
+            vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+            pipeline_layout_ = VK_NULL_HANDLE;
+            destroy_reflected_descriptor_set_layouts_();
+            return false;
+        }
+        const vulkan::VertexInputState &vertexInput = *vertexInputResult;
+        if (vertexInput.stride != sizeof(Vertex)) {
+            app_log_err(std::string("vertex stride mismatch: reflected=") +
+                        std::to_string(vertexInput.stride) +
+                        " sizeof(Vertex)=" + std::to_string(sizeof(Vertex)));
+            vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+            pipeline_layout_ = VK_NULL_HANDLE;
+            destroy_reflected_descriptor_set_layouts_();
+            return false;
+        }
 
         vulkan::GraphicsPipelineBuilder pipelineBuilder(device_);
         pipelineBuilder.set_vertex_shader(vert_spirv_)
             .set_fragment_shader(frag_spirv_)
-            .set_vertex_layout(vertex_attributes, vertex_bindings)
+            .set_vertex_layout(vertexInput.attributes, vertexInput.bindings)
             .set_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .set_cull_mode(VK_CULL_MODE_NONE)
             .set_front_face(VK_FRONT_FACE_COUNTER_CLOCKWISE)
@@ -526,26 +666,37 @@ private:
             .set_depth_test(false, false)
             .set_blend_off()
             .set_pipeline_layout(pipeline_layout_)
-            .set_render_pass(render_pass_, 0);
+            .set_render_pass(vulkan_render_pass_->vk_render_pass(), 0);
 
         pipeline_ = pipelineBuilder.build();
-        return pipeline_ != VK_NULL_HANDLE;
+        if (pipeline_ == VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device_, pipeline_layout_, nullptr);
+            pipeline_layout_ = VK_NULL_HANDLE;
+            destroy_reflected_descriptor_set_layouts_();
+            return false;
+        }
+        return true;
     }
 
     bool create_framebuffer() {
-        framebuffers_.resize(swap_image_views_.size());
+        if (!vulkan_render_pass_.has_value()) {
+            app_log_err("create_framebuffer: render pass not created");
+            return false;
+        }
+        swap_target_bundles_.clear();
+        swap_target_bundles_.resize(swap_image_views_.size());
+        const VkRenderPass rp = vulkan_render_pass_->vk_render_pass();
         for (size_t i { 0 }; i < swap_image_views_.size(); ++i) {
-            VkFramebufferCreateInfo fb {
-                VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-            };
-            fb.renderPass = render_pass_;
-            fb.attachmentCount = 1;
-            fb.pAttachments = &swap_image_views_[i];
-            fb.width = extent_.width;
-            fb.height = extent_.height;
-            fb.layers = 1;
-            if (vkCreateFramebuffer(device_, &fb, nullptr, &framebuffers_[i]) !=
-                VK_SUCCESS) {
+            if (!swap_target_bundles_[i].add_color_target(
+                    vulkan::render_target_from_view(
+                        swap_image_views_[i], swap_format_, extent_.width,
+                        extent_.height))) {
+                app_log_err("create_framebuffer: add_color_target failed");
+                return false;
+            }
+            auto fb = swap_target_bundles_[i].get_framebuffer(device_, rp);
+            if (!fb) {
+                app_log_err(fb.error());
                 return false;
             }
         }
@@ -553,91 +704,72 @@ private:
     }
 
     bool create_vertex_buffer() {
-        VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        vulkan::BufferCreateInfo bi {};
         bi.size = sizeof(k_vertices);
         bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        if (vkCreateBuffer(device_, &bi, nullptr, &vertex_buffer_) !=
-            VK_SUCCESS) {
+        bi.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        auto ret =
+            vulkan::Buffer::create(vulkan_ctx_->allocator(), bi);
+        if (!ret) {
+            app_log_err(ret.error());
             return false;
         }
-
-        VkMemoryRequirements req {};
-        vkGetBufferMemoryRequirements(device_, vertex_buffer_, &req);
-        const uint32_t mem_index =
-            find_memory_type(vkb_phys_, req.memoryTypeBits,
-                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (mem_index == UINT32_MAX) {
+        vertex_buffer_ = std::move(ret.value());
+        auto mapped = vertex_buffer_.map();
+        if (!mapped) {
+            app_log_err(mapped.error());
+            vertex_buffer_ = vulkan::Buffer {};
             return false;
         }
-        VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        ai.allocationSize = req.size;
-        ai.memoryTypeIndex = mem_index;
-        if (vkAllocateMemory(device_, &ai, nullptr, &vertex_buffer_mem_) !=
-            VK_SUCCESS) {
-            return false;
-        }
-        void *dst { nullptr };
-        vkMapMemory(device_, vertex_buffer_mem_, 0, sizeof(k_vertices), 0,
-                    &dst);
-        std::memcpy(dst, k_vertices, sizeof(k_vertices));
-        vkUnmapMemory(device_, vertex_buffer_mem_);
-        vkBindBufferMemory(device_, vertex_buffer_, vertex_buffer_mem_, 0);
+        std::memcpy(*mapped, k_vertices, sizeof(k_vertices));
+        vertex_buffer_.unmap();
         return true;
     }
 
     bool create_uniform_buffers() {
         uniform_buffers_.resize(k_frames_in_flight);
+        VmaAllocator allocator { vulkan_ctx_->allocator() };
         for (auto &ub : uniform_buffers_) {
-            VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+            vulkan::BufferCreateInfo bi {};
             bi.size = sizeof(UniformBufferObject);
             bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-            bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            if (vkCreateBuffer(device_, &bi, nullptr, &ub.buf) != VK_SUCCESS) {
+            bi.memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+            auto ret = vulkan::Buffer::create(allocator, bi);
+            if (!ret) {
+                app_log_err(ret.error());
                 return false;
             }
-            VkMemoryRequirements req {};
-            vkGetBufferMemoryRequirements(device_, ub.buf, &req);
-            const uint32_t mem_index =
-                find_memory_type(vkb_phys_, req.memoryTypeBits,
-                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            if (mem_index == UINT32_MAX) {
+            ub.buffer = std::move(ret.value());
+            auto mapped = ub.buffer.map();
+            if (!mapped) {
+                app_log_err(mapped.error());
                 return false;
             }
-            VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-            ai.allocationSize = req.size;
-            ai.memoryTypeIndex = mem_index;
-            if (vkAllocateMemory(device_, &ai, nullptr, &ub.mem) !=
-                VK_SUCCESS) {
-                return false;
-            }
-            vkBindBufferMemory(device_, ub.buf, ub.mem, 0);
-            vkMapMemory(device_, ub.mem, 0, sizeof(UniformBufferObject), 0,
-                        &ub.map);
+            ub.mapped = mapped.value();
         }
         return true;
     }
 
     bool create_descriptor_pool_and_sets() {
-        VkDescriptorPoolSize pool_size {};
-        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        pool_size.descriptorCount = k_frames_in_flight;
-
-        VkDescriptorPoolCreateInfo pci {
-            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
-        };
-        pci.maxSets = k_frames_in_flight;
-        pci.poolSizeCount = 1;
-        pci.pPoolSizes = &pool_size;
-        if (vkCreateDescriptorPool(device_, &pci, nullptr, &descriptor_pool_) !=
-            VK_SUCCESS) {
+        auto poolResult = vulkan::create_descriptor_pool_for_merged_bindings(
+            device_, shaderPlb_.merged_bindings(), k_frames_in_flight);
+        if (!poolResult) {
+            app_log_err(poolResult.error());
+            return false;
+        }
+        descriptor_pool_ = *poolResult;
+        if (descriptor_pool_ == VK_NULL_HANDLE) {
+            app_log_err(
+                "create_descriptor_pool_and_sets: empty descriptor pool");
             return false;
         }
 
-        std::vector<VkDescriptorSetLayout> layouts(k_frames_in_flight,
-                                                   descriptor_set_layout_);
+        if (descriptor_set_layouts_.empty()) {
+            app_log_err("create_descriptor_pool_and_sets: no set layouts");
+            return false;
+        }
+        std::vector<VkDescriptorSetLayout> layouts(
+            k_frames_in_flight, descriptor_set_layouts_.front());
         VkDescriptorSetAllocateInfo ai {
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
         };
@@ -650,36 +782,56 @@ private:
             return false;
         }
 
+        const vulkan::BindingKey uboKey { 0, 0 };
+        const auto &merged = shaderPlb_.merged_bindings();
+        const auto uboIt = merged.find(uboKey);
+        if (uboIt == merged.end()) {
+            app_log_err(
+                "create_descriptor_pool_and_sets: missing set=0 binding=0 "
+                "from reflection");
+            return false;
+        }
+
+        const vulkan::BindingKey texKey { 0, 1 };
+        const auto texIt = merged.find(texKey);
+        if (texIt == merged.end()) {
+            app_log_err(
+                "create_descriptor_pool_and_sets: missing set=0 binding=1 "
+                "(combined image sampler) from reflection");
+            return false;
+        }
+
         for (uint32_t i { 0 }; i < k_frames_in_flight; ++i) {
             VkDescriptorBufferInfo binfo {};
-            binfo.buffer = uniform_buffers_[i].buf;
+            binfo.buffer = uniform_buffers_[i].buffer.buffer();
             binfo.offset = 0;
             binfo.range = sizeof(UniformBufferObject);
 
-            VkWriteDescriptorSet write {
-                VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-            };
-            write.dstSet = descriptor_sets_[i];
-            write.dstBinding = 0;
-            write.dstArrayElement = 0;
-            write.descriptorCount = 1;
-            write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            write.pBufferInfo = &binfo;
-            vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+            VkDescriptorImageInfo imgInfo {};
+            imgInfo.sampler = texture_sampler_;
+            imgInfo.imageView = texture_image_.view();
+            imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet writes[2] {};
+            vulkan::init_write_descriptor_set(writes[0], descriptor_sets_[i],
+                                              uboIt->second);
+            writes[0].pBufferInfo = &binfo;
+
+            vulkan::init_write_descriptor_set(writes[1], descriptor_sets_[i],
+                                              texIt->second);
+            writes[1].pImageInfo = &imgInfo;
+
+            vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
         }
         return true;
     }
 
     bool create_command_pool_and_buffers() {
-        const auto qf = vkb_device_.get_queue_index(vkb::QueueType::graphics);
-        if (!qf) {
-            return false;
-        }
         VkCommandPoolCreateInfo pci {
             VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
         };
         pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        pci.queueFamilyIndex = qf.value();
+        pci.queueFamilyIndex = vulkan_ctx_->graphics_queue_family();
         if (vkCreateCommandPool(device_, &pci, nullptr, &command_pool_) !=
             VK_SUCCESS) {
             return false;
@@ -716,11 +868,25 @@ private:
         };
         vkBeginCommandBuffer(cb, &bi);
 
+        if (!vulkan_render_pass_.has_value() ||
+            image_index >= swap_target_bundles_.size()) {
+            vkEndCommandBuffer(cb);
+            return;
+        }
+
         VkClearValue clear {};
         clear.color = { { 0.05f, 0.06f, 0.09f, 1.f } };
+        auto fb_res = swap_target_bundles_[image_index].get_framebuffer(
+            device_, vulkan_render_pass_->vk_render_pass());
+        if (!fb_res) {
+            app_log_err(fb_res.error());
+            vkEndCommandBuffer(cb);
+            return;
+        }
+
         VkRenderPassBeginInfo rp { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-        rp.renderPass = render_pass_;
-        rp.framebuffer = framebuffers_[image_index];
+        rp.renderPass = vulkan_render_pass_->vk_render_pass();
+        rp.framebuffer = fb_res.value();
         rp.renderArea.extent = extent_;
         rp.clearValueCount = 1;
         rp.pClearValues = &clear;
@@ -739,13 +905,14 @@ private:
         vkCmdSetScissor(cb, Offset, 1, &scissor);
 
         const VkDeviceSize vb_offset { 0 };
-        vkCmdBindVertexBuffers(cb, 0, 1, &vertex_buffer_, &vb_offset);
+        VkBuffer vb = vertex_buffer_.buffer();
+        vkCmdBindVertexBuffers(cb, 0, 1, &vb, &vb_offset);
 
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 pipeline_layout_, 0, 1,
                                 &descriptor_sets_[frame_index], 0, nullptr);
 
-        vkCmdDraw(cb, 3, 1, 0, 0);
+        vkCmdDraw(cb, 6, 1, 0, 0);
         vkCmdEndRenderPass(cb);
         vkEndCommandBuffer(cb);
     }
@@ -815,25 +982,25 @@ private:
     std::vector<uint32_t> vert_spirv_;
     std::vector<uint32_t> frag_spirv_;
 
-    vkb::Instance vkb_instance_;
-    vkb::PhysicalDevice vkb_phys_;
-    vkb::Device vkb_device_;
-    VkSurfaceKHR surface_ { VK_NULL_HANDLE };
+    vulkan::PipelineLayoutBuilder shaderPlb_;
 
-    vkb::Swapchain vkb_swapchain_;
+    std::unique_ptr<vulkan::Context> vulkan_ctx_;
+
     VkSwapchainKHR swapchain_ { VK_NULL_HANDLE };
     std::vector<VkImageView> swap_image_views_;
     VkFormat swap_format_ { VK_FORMAT_UNDEFINED };
     VkExtent2D extent_ {};
 
-    VkRenderPass render_pass_ { VK_NULL_HANDLE };
+    std::optional<vulkan::RenderPass> vulkan_render_pass_;
+    std::vector<vulkan::RenderTargetBundle> swap_target_bundles_;
     VkPipelineLayout pipeline_layout_ { VK_NULL_HANDLE };
     VkPipeline pipeline_ { VK_NULL_HANDLE };
-    VkDescriptorSetLayout descriptor_set_layout_ { VK_NULL_HANDLE };
-    std::vector<VkFramebuffer> framebuffers_;
+    std::vector<VkDescriptorSetLayout> descriptor_set_layouts_;
 
-    VkBuffer vertex_buffer_ { VK_NULL_HANDLE };
-    VkDeviceMemory vertex_buffer_mem_ { VK_NULL_HANDLE };
+    vulkan::Buffer vertex_buffer_;
+    vulkan::Image texture_image_;
+    VkSampler texture_sampler_ { VK_NULL_HANDLE };
+
     std::vector<HostUniformBuffer> uniform_buffers_;
 
     VkDescriptorPool descriptor_pool_ { VK_NULL_HANDLE };
@@ -864,41 +1031,45 @@ int main() {
         return 1;
     }
 
-    lumen::platform::Window window;
-    lumen::platform::WindowConfig cfg;
-    cfg.title = "Lumen 三角形示例";
-    cfg.width = 960;
-    cfg.height = 540;
-    if (!window.create(cfg)) {
-        core::log::Logger::shutdown();
-        return 1;
+    int exit_code { 0 };
+    {
+        lumen::platform::Window window;
+        lumen::platform::WindowConfig cfg;
+        cfg.title = "Lumen 旋转矩形示例";
+        cfg.width = 960;
+        cfg.height = 540;
+        if (!window.create(cfg)) {
+            exit_code = 1;
+        } else {
+            RotatingRectExample app;
+            if (!app.init(window)) {
+                exit_code = 1;
+            } else {
+                lumen::platform::EventPump pump;
+                pump.set_on_application_event(
+                    [&](lumen::platform::DispatchableEvent &de) {
+                        lumen::platform::EventDispatcher d(de);
+                        d.dispatch<lumen::platform::EventWindowResize>(
+                            [&](lumen::platform::EventWindowResize &) {
+                                app.set_framebuffer_resized();
+                            });
+                    });
+
+                const auto start = std::chrono::steady_clock::now();
+                while (pump.poll()) {
+                    app.try_recreate_swapchain();
+                    const auto now = std::chrono::steady_clock::now();
+                    const float t =
+                        std::chrono::duration<float>(now - start).count();
+                    app.draw_frame(t);
+                }
+
+                app.shutdown();
+            }
+        }
     }
 
-    TriangleExample app;
-    if (!app.init(window)) {
-        core::log::Logger::shutdown();
-        return 1;
-    }
-
-    lumen::platform::EventPump pump;
-    pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
-        lumen::platform::EventDispatcher d(de);
-        d.dispatch<lumen::platform::EventWindowResize>(
-            [&](lumen::platform::EventWindowResize &) {
-                app.set_framebuffer_resized();
-            });
-    });
-
-    auto start = std::chrono::steady_clock::now();
-    while (pump.poll()) {
-        app.try_recreate_swapchain();
-        const auto now = std::chrono::steady_clock::now();
-        const float t = std::chrono::duration<float>(now - start).count();
-        app.draw_frame(t);
-    }
-
-    app.shutdown();
     core::log::Logger::shutdown();
     SDL_Quit();
-    return 0;
+    return exit_code;
 }

@@ -8,6 +8,11 @@ file(
 
 add_library(${ENGINE_TARGET} STATIC ${ENGINE_SOURCES})
 
+set_source_files_properties(
+  ./src/stb_impl.cpp ./src/vma_impl.cpp
+  PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+)
+
 target_include_directories(${ENGINE_TARGET} PUBLIC src)
 
 target_link_libraries(${ENGINE_TARGET} PUBLIC Vulkan::Vulkan)

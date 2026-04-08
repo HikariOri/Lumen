@@ -1,32 +1,39 @@
+/**
+ * @file pipeline.hpp
+ * @brief Vulkan 图形管线链式构建器 `GraphicsPipelineBuilder` 的声明。
+ *
+ * @details
+ * 将固定功能阶段与动态状态分步配置后，一次调用 build() 即可完成
+ * `vkCreateGraphicsPipelines`。
+ * 着色器模块在成功 build() 之后由本类销毁；若 build()
+ * 失败则保留模块便于调试或重试。
+ */
+
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include <vulkan/vulkan.h>
-
-#include "core/log/logger.hpp"
 
 namespace vulkan {
 
 /**
- * @brief 多边形光栅化模式（与 `VkPolygonMode` 一一对应：填充 / 线框 / 点）
- */
-enum class PolygonDrawMode : std::uint32_t {
-    Fill = VK_POLYGON_MODE_FILL,
-    Line = VK_POLYGON_MODE_LINE,
-    Point = VK_POLYGON_MODE_POINT,
-};
-
-/**
- * @brief 链式构建
- * `VkGraphicsPipeline`，成员与私有方法按固定功能管线阶段分组便于阅读。
+ * @class GraphicsPipelineBuilder
+ * @brief 以链式 API 组装 `VkGraphicsPipelineCreateInfo` 并创建管线。
  *
- * @note 成功 `build()` 后顶点/片段着色器模块会在内部销毁（管线已内联 SPIR-V）；
- *       `build()` 失败则保留模块，便于调用方排查或再次尝试。
+ * @note 需要有效的 @c VkDevice 的生命周期不短于本对象。
+ * @note 须在调用 build() 前设置顶点着色器、@c VkPipelineLayout 与 @c
+ *       VkRenderPass；非动态视口模式下还需 set_viewport()。
  */
 class GraphicsPipelineBuilder {
 public:
-    explicit GraphicsPipelineBuilder(VkDevice device) : device_(device) {}
+    /**
+     * @param device 用于创建着色器模块与管线的逻辑设备。
+     */
+    explicit GraphicsPipelineBuilder(VkDevice device);
 
     GraphicsPipelineBuilder(const GraphicsPipelineBuilder &) = delete;
     GraphicsPipelineBuilder &
@@ -34,537 +41,289 @@ public:
     GraphicsPipelineBuilder(GraphicsPipelineBuilder &&) = delete;
     GraphicsPipelineBuilder &operator=(GraphicsPipelineBuilder &&) = delete;
 
-    ~GraphicsPipelineBuilder() { destroy_shader_modules_(); }
+    /** @brief 析构时销毁尚未移交的着色器模块（若仍有效）。 */
+    ~GraphicsPipelineBuilder();
 
-    // -------------------------------------------------------------------------
-    // 阶段 A：着色器模块（SPIR-V）
-    // -------------------------------------------------------------------------
+    /** @{ @name 着色器（SPIR-V） */
 
+    /**
+     * @brief 从 SPIR-V 创建顶点着色器模块并设置入口名（会替换已有顶点模块）。
+     * @param spirv 32 位字对齐的 SPIR-V 缓冲区。
+     * @param entry_name 入口点名，默认 @c "main"（存于内部 `std::string`，
+     *                   直至 `build()` 使用 `c_str()`）。
+     */
     GraphicsPipelineBuilder &
-    set_vertex_shader(const std::vector<std::uint32_t> &spirv) {
-        if (vertexShaderModule_ != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(device_, vertexShaderModule_, nullptr);
-            vertexShaderModule_ = VK_NULL_HANDLE;
-        }
-        if (!create_shader_module_(spirv, vertexShaderModule_)) {
-            LUMEN_LOG_ERROR("vertex shader module create failed");
-        }
-        return *this;
-    }
+    set_vertex_shader(const std::vector<std::uint32_t> &spirv,
+                      std::string entry_name = "main");
 
+    /**
+     * @brief 从 SPIR-V 创建片段着色器模块并设置入口名（会替换已有片段模块）。
+     * @param spirv 32 位字对齐的 SPIR-V 缓冲区。
+     * @param entry_name 入口点名，默认 @c "main" 。
+     */
     GraphicsPipelineBuilder &
-    set_fragment_shader(const std::vector<std::uint32_t> &spirv) {
-        if (fragmentShaderModule_ != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(device_, fragmentShaderModule_, nullptr);
-            fragmentShaderModule_ = VK_NULL_HANDLE;
-        }
-        if (!create_shader_module_(spirv, fragmentShaderModule_)) {
-            LUMEN_LOG_ERROR("fragment shader module create failed");
-        }
-        return *this;
-    }
+    set_fragment_shader(const std::vector<std::uint32_t> &spirv,
+                        std::string entry_name = "main");
 
-    /** @brief 覆盖默认入口名 @c "main" */
-    GraphicsPipelineBuilder &set_vertex_entry(std::string entryName = "main") {
-        vertexEntry_ = std::move(entryName);
-        return *this;
-    }
+    /** @} */
 
-    GraphicsPipelineBuilder &
-    set_fragment_entry(std::string entryName = "main") {
-        fragmentEntry_ = std::move(entryName);
-        return *this;
-    }
+    /** @{ @name 顶点输入 */
 
-    // -------------------------------------------------------------------------
-    // 阶段 B：顶点输入（binding / attribute）
-    // -------------------------------------------------------------------------
-
+    /**
+     * @brief 设置顶点属性与绑定描述（对应
+     * `VkPipelineVertexInputStateCreateInfo`）。
+     * @param vertex_attributes `pVertexAttributeDescriptions`
+     * @param vertex_bindings `pVertexBindingDescriptions`
+     */
     GraphicsPipelineBuilder &set_vertex_layout(
         const std::vector<VkVertexInputAttributeDescription> &vertex_attributes,
-        const std::vector<VkVertexInputBindingDescription> &vertex_bindings) {
-        vertexAttributes_ = vertex_attributes;
-        vertexBindings_ = vertex_bindings;
-        return *this;
-    }
+        const std::vector<VkVertexInputBindingDescription> &vertex_bindings);
 
-    // -------------------------------------------------------------------------
-    // 阶段 C：图元装配、光栅、多重采样
-    // -------------------------------------------------------------------------
+    /** @} */
 
+    /** @{ @name 图元装配、光栅化、多重采样 */
+
+    /** @brief 图元拓扑，默认三角列表。 */
     GraphicsPipelineBuilder &
-    set_topology(VkPrimitiveTopology primitiveTopology) {
-        primitiveTopology_ = primitiveTopology;
-        return *this;
-    }
-
-    /** @brief 对应
-     * `VkPipelineInputAssemblyStateCreateInfo::primitiveRestartEnable`，默认关
-     */
-    GraphicsPipelineBuilder &set_primitive_restart(bool enable = false) {
-        primitiveRestartEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &set_polygon_mode(PolygonDrawMode polygonMode) {
-        polygonMode_ = polygonMode;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &set_cull_mode(VkCullModeFlags cullMode) {
-        cullMode_ = cullMode;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &set_front_face(VkFrontFace frontFace) {
-        frontFace_ = frontFace;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &set_line_width(float lineWidth) {
-        lineWidth_ = lineWidth;
-        return *this;
-    }
-
-    /** @brief 对应
-     * `VkPipelineRasterizationStateCreateInfo::depthClampEnable`，默认关 */
-    GraphicsPipelineBuilder &set_depth_clamp(bool enable = false) {
-        depthClampEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
-
-    /** @brief 对应 `rasterizerDiscardEnable`，默认关 */
-    GraphicsPipelineBuilder &set_rasterizer_discard(bool enable = false) {
-        rasterizerDiscardEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
-
-    /** @brief 对应 `depthBiasEnable`，默认关 */
-    GraphicsPipelineBuilder &set_depth_bias_enable(bool enable = false) {
-        depthBiasEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
-
-    /** @brief 对应 `depthBiasConstantFactor`，默认 0 */
-    GraphicsPipelineBuilder &set_depth_bias_constant_factor(float value = 0.F) {
-        depthBiasConstantFactor_ = value;
-        return *this;
-    }
-
-    /** @brief 对应 `depthBiasClamp`，默认 0 */
-    GraphicsPipelineBuilder &set_depth_bias_clamp(float value = 0.F) {
-        depthBiasClamp_ = value;
-        return *this;
-    }
-
-    /** @brief 对应 `depthBiasSlopeFactor`，默认 0 */
-    GraphicsPipelineBuilder &set_depth_bias_slope_factor(float value = 0.F) {
-        depthBiasSlopeFactor_ = value;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &
-    set_sample_count(VkSampleCountFlagBits rasterizationSamples) {
-        rasterizationSamples_ = rasterizationSamples;
-        return *this;
-    }
-
-    GraphicsPipelineBuilder &set_sample_shading(bool enable,
-                                                float minSampleShading = 1.F) {
-        sampleShadingEnable_ = enable ? VK_TRUE : VK_FALSE;
-        minSampleShading_ = minSampleShading;
-        return *this;
-    }
-
-    /** @brief 仅调整 `minSampleShading`，默认 1（与 `set_sample_shading`
-     * 中一致） */
-    GraphicsPipelineBuilder &set_min_sample_shading(float value = 1.F) {
-        minSampleShading_ = value;
-        return *this;
-    }
+    set_topology(VkPrimitiveTopology primitiveTopology);
 
     /**
-     * @brief 对应 `pSampleMask`；空 vector 表示 `nullptr`（规范中等价于全 1
-     * 掩码）
+     * @brief `VkPipelineInputAssemblyStateCreateInfo::primitiveRestartEnable`。
+     * @param enable 是否启用 primitive restart 索引。
+     */
+    GraphicsPipelineBuilder &set_primitive_restart(bool enable = false);
+
+    /** @brief 多边形光栅化模式（填充 / 线框 / 点）。 */
+    GraphicsPipelineBuilder &set_polygon_mode(VkPolygonMode polygonMode);
+
+    /** @brief 面剔除掩码（`VkCullModeFlags`）。 */
+    GraphicsPipelineBuilder &set_cull_mode(VkCullModeFlags cullMode);
+
+    /** @brief 正面顶点绕序。 */
+    GraphicsPipelineBuilder &set_front_face(VkFrontFace frontFace);
+
+    /** @brief `VkPipelineRasterizationStateCreateInfo::lineWidth`。 */
+    GraphicsPipelineBuilder &set_line_width(float lineWidth);
+
+    /**
+     * @brief `depthClampEnable`，默认关闭。
+     * @param enable 需要设备支持 depth clamp 等特性方可实际生效。
+     */
+    GraphicsPipelineBuilder &set_depth_clamp(bool enable = false);
+
+    /** @brief `rasterizerDiscardEnable`，默认关闭。 */
+    GraphicsPipelineBuilder &set_rasterizer_discard(bool enable = false);
+
+    /** @brief `depthBiasEnable`，默认关闭。 */
+    GraphicsPipelineBuilder &set_depth_bias_enable(bool enable = false);
+
+    /** @brief `depthBiasConstantFactor`，默认 0 。 */
+    GraphicsPipelineBuilder &set_depth_bias_constant_factor(float value = 0.F);
+
+    /** @brief `depthBiasClamp`，默认 0 。 */
+    GraphicsPipelineBuilder &set_depth_bias_clamp(float value = 0.F);
+
+    /** @brief `depthBiasSlopeFactor`，默认 0 。 */
+    GraphicsPipelineBuilder &set_depth_bias_slope_factor(float value = 0.F);
+
+    /** @brief 光栅化样本数（`rasterizationSamples`）。 */
+    GraphicsPipelineBuilder &
+    set_sample_count(VkSampleCountFlagBits rasterizationSamples);
+
+    /**
+     * @brief 逐样本着色（`sampleShadingEnable` / `minSampleShading`）。
+     * @param enable 是否启用 sample shading（需设备支持）。
+     * @param minSampleShading 最小着色覆盖率，默认 1.0 。
+     */
+    GraphicsPipelineBuilder &set_sample_shading(bool enable,
+                                                float minSampleShading = 1.F);
+
+    /** @brief 仅更新 `minSampleShading`。 */
+    GraphicsPipelineBuilder &set_min_sample_shading(float value = 1.F);
+
+    /**
+     * @brief `pSampleMask`；空容器表示 @c nullptr （规范中等价全 1 掩码）。
+     * @param masks 每个元素的位数与 `rasterizationSamples` 一致。
      */
     GraphicsPipelineBuilder &
-    set_sample_mask(const std::vector<VkSampleMask> &masks) {
-        sampleMask_ = masks;
-        return *this;
-    }
+    set_sample_mask(const std::vector<VkSampleMask> &masks);
 
-    /** @brief 对应 `alphaToCoverageEnable`，默认关 */
-    GraphicsPipelineBuilder &set_alpha_to_coverage(bool enable = false) {
-        alphaToCoverageEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
+    /** @brief `alphaToCoverageEnable`。 */
+    GraphicsPipelineBuilder &set_alpha_to_coverage(bool enable = false);
 
-    /** @brief 对应 `alphaToOneEnable`，默认关 */
-    GraphicsPipelineBuilder &set_alpha_to_one(bool enable = false) {
-        alphaToOneEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
+    /** @brief `alphaToOneEnable`。 */
+    GraphicsPipelineBuilder &set_alpha_to_one(bool enable = false);
 
-    // -------------------------------------------------------------------------
-    // 阶段 D：视口与裁剪（静态；若启用动态 viewport/scissor 可只设 count=1 与
-    // nullptr）
-    // -------------------------------------------------------------------------
+    /** @} */
 
+    /** @{ @name 视口与裁剪 */
+
+    /**
+     * @brief 静态视口与裁剪矩形（数量必须一致且非空，除非使用动态视口）。
+     * @param viewports `pViewports`
+     * @param scissors `pScissors`
+     */
     GraphicsPipelineBuilder &
     set_viewport(const std::vector<VkViewport> &viewports,
-                 const std::vector<VkRect2D> &scissors) {
-        viewports_ = viewports;
-        scissors_ = scissors;
-        return *this;
-    }
+                 const std::vector<VkRect2D> &scissors);
 
-    /** @brief 使用动态 VK_DYNAMIC_STATE_VIEWPORT / SCISSOR 时调用 */
+    /**
+     * @brief 使用动态 `VK_DYNAMIC_STATE_VIEWPORT` / `SCISSOR`。
+     * @param viewportCount 动态视口个数。
+     * @param scissorCount 动态裁剪个数。
+     */
     GraphicsPipelineBuilder &set_viewport_dynamic(uint32_t viewportCount = 1,
-                                                  uint32_t scissorCount = 1) {
-        viewports_.clear();
-        scissors_.clear();
-        dynamicViewport_ = true;
-        dynamicViewportCount_ = viewportCount;
-        dynamicScissorCount_ = scissorCount;
-        return *this;
-    }
+                                                  uint32_t scissorCount = 1);
 
-    // -------------------------------------------------------------------------
-    // 阶段 E：深度 / 模板
-    // -------------------------------------------------------------------------
+    /** @} */
 
+    /** @{ @name 深度 / 模板 */
+
+    /**
+     * @brief 深度测试、写入与比较函数。
+     * @param depthTest `depthTestEnable`
+     * @param depthWrite `depthWriteEnable`
+     * @param depthCompare `depthCompareOp`，默认 `VK_COMPARE_OP_LESS` 。
+     */
     GraphicsPipelineBuilder &
     set_depth_test(bool depthTest, bool depthWrite,
-                   VkCompareOp depthCompare = VK_COMPARE_OP_LESS) {
-        depthTestEnable_ = depthTest ? VK_TRUE : VK_FALSE;
-        depthWriteEnable_ = depthWrite ? VK_TRUE : VK_FALSE;
-        depthCompareOp_ = depthCompare;
-        return *this;
-    }
+                   VkCompareOp depthCompare = VK_COMPARE_OP_LESS);
 
-    GraphicsPipelineBuilder &set_depth_bounds_test(bool enable) {
-        depthBoundsTestEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
+    /** @brief `depthBoundsTestEnable`。 */
+    GraphicsPipelineBuilder &set_depth_bounds_test(bool enable);
 
-    GraphicsPipelineBuilder &set_stencil_test(bool enable) {
-        stencilTestEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
+    /** @brief `stencilTestEnable`。 */
+    GraphicsPipelineBuilder &set_stencil_test(bool enable);
 
-    /** @brief 对应 `front`（`VkStencilOpState`），默认零初始化 */
+    /** @brief 模板前向面状态（`VkStencilOpState::front`）。 */
     GraphicsPipelineBuilder &
-    set_stencil_front(const VkStencilOpState &state = {}) {
-        stencilFront_ = state;
-        return *this;
-    }
+    set_stencil_front(const VkStencilOpState &state = {});
 
-    /** @brief 对应 `back`，默认零初始化 */
+    /** @brief 模板背向面状态（`back`）。 */
     GraphicsPipelineBuilder &
-    set_stencil_back(const VkStencilOpState &state = {}) {
-        stencilBack_ = state;
-        return *this;
-    }
+    set_stencil_back(const VkStencilOpState &state = {});
 
-    /** @brief `front` / `back` 设为同一套模板操作 */
-    GraphicsPipelineBuilder &set_stencil_ops(const VkStencilOpState &state) {
-        stencilFront_ = state;
-        stencilBack_ = state;
-        return *this;
-    }
+    /** @brief 将 front / back 设为同一套模板操作。 */
+    GraphicsPipelineBuilder &set_stencil_ops(const VkStencilOpState &state);
 
-    /** @brief 对应 `minDepthBounds` / `maxDepthBounds`，默认 [0, 1] */
+    /**
+     * @brief `minDepthBounds` / `maxDepthBounds`，默认 [0, 1] 。
+     * @param min_bounds 深度下界。
+     * @param max_bounds 深度上界。
+     */
     GraphicsPipelineBuilder &set_depth_bounds(float min_bounds = 0.F,
-                                              float max_bounds = 1.F) {
-        minDepthBounds_ = min_bounds;
-        maxDepthBounds_ = max_bounds;
-        return *this;
-    }
+                                              float max_bounds = 1.F);
 
-    // -------------------------------------------------------------------------
-    // 阶段 F：颜色混合
-    // -------------------------------------------------------------------------
+    /** @} */
 
-    GraphicsPipelineBuilder &set_blend_off() {
-        colorBlendAttachments_.clear();
-        colorBlendAttachments_.push_back(make_blend_attachment_disabled_());
-        return *this;
-    }
+    /** @{ @name 颜色混合 */
 
-    /** @brief 单 color attachment 的常用 alpha 混合（预乘或非预乘由 attachment
-     * 决定） */
-    GraphicsPipelineBuilder &set_blend_alpha() {
-        VkPipelineColorBlendAttachmentState attachment {};
-        attachment.blendEnable = VK_TRUE;
-        attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        attachment.colorBlendOp = VK_BLEND_OP_ADD;
-        attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        attachment.alphaBlendOp = VK_BLEND_OP_ADD;
-        attachment.colorWriteMask =
-            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachments_.clear();
-        colorBlendAttachments_.push_back(attachment);
-        return *this;
-    }
+    /** @brief 单 attachment：关闭混合，全通道写入。 */
+    GraphicsPipelineBuilder &set_blend_off();
 
+    /**
+     * @brief 单 attachment：常用 SrcAlpha / InvSrcAlpha 颜色混合。
+     * @note 是否与预乘 Alpha 匹配取决于 attachment 数据布局。
+     */
+    GraphicsPipelineBuilder &set_blend_alpha();
+
+    /** @brief 直接替换整表 color blend attachment 状态。 */
     GraphicsPipelineBuilder &set_color_blend_attachments(
-        std::vector<VkPipelineColorBlendAttachmentState> attachments) {
-        colorBlendAttachments_ = std::move(attachments);
-        return *this;
-    }
+        std::vector<VkPipelineColorBlendAttachmentState> attachments);
 
+    /** @brief `blendConstants`（四分量）。 */
     GraphicsPipelineBuilder &set_blend_constants(float r, float g, float b,
-                                                 float a) {
-        blendConstants_[0] = r;
-        blendConstants_[1] = g;
-        blendConstants_[2] = b;
-        blendConstants_[3] = a;
-        return *this;
-    }
+                                                 float a);
 
-    // 与 set_blend_constants(r,g,b,a) 等价，避免相邻 float 参数误传
-    GraphicsPipelineBuilder &set_blend_constants(std::array<float, 4> rgba) {
-        blendConstants_ = rgba;
-        return *this;
-    }
+    /** @brief 与四 float 版等价，避免相邻标量参数误传。 */
+    GraphicsPipelineBuilder &set_blend_constants(std::array<float, 4> rgba);
 
-    /** @brief 对应 `logicOpEnable`；为真时使用帧缓冲逻辑运算，默认关 */
-    GraphicsPipelineBuilder &set_logic_op_enable(bool enable = false) {
-        logicOpEnable_ = enable ? VK_TRUE : VK_FALSE;
-        return *this;
-    }
+    /** @brief `logicOpEnable`；为真时对帧缓冲做逻辑运算。 */
+    GraphicsPipelineBuilder &set_logic_op_enable(bool enable = false);
 
-    /** @brief 对应 `logicOp`；仅在 `logicOpEnable` 为真时生效，默认 `COPY` */
-    GraphicsPipelineBuilder &set_logic_op(VkLogicOp op = VK_LOGIC_OP_COPY) {
-        logicOp_ = op;
-        return *this;
-    }
+    /** @brief `logicOp`；仅在 logic 开启时有效。 */
+    GraphicsPipelineBuilder &set_logic_op(VkLogicOp op = VK_LOGIC_OP_COPY);
 
-    // -------------------------------------------------------------------------
-    // 阶段 G：动态状态
-    // -------------------------------------------------------------------------
+    /** @} */
 
+    /** @{ @name 动态状态 */
+
+    /** @brief 替换整表动态状态枚举列表。 */
     GraphicsPipelineBuilder &
-    set_dynamic_state(std::vector<VkDynamicState> states) {
-        dynamicStates_ = std::move(states);
-        return *this;
-    }
+    set_dynamic_state(std::vector<VkDynamicState> states);
 
-    GraphicsPipelineBuilder &add_dynamic_state(VkDynamicState state) {
-        dynamicStates_.push_back(state);
-        return *this;
-    }
+    /** @brief 追加一项动态状态（不会去重）。 */
+    GraphicsPipelineBuilder &add_dynamic_state(VkDynamicState state);
 
-    /** @brief 动态线宽（`vkCmdSetLineWidth`） */
-    GraphicsPipelineBuilder &add_dynamic_line_width() {
-        add_dynamic_state_unique_(VK_DYNAMIC_STATE_LINE_WIDTH);
-        return *this;
-    }
-
-    /** @brief 动态面剔除（`vkCmdSetCullMode`），需 extended dynamic state */
-    GraphicsPipelineBuilder &add_dynamic_cull_mode() {
-        add_dynamic_state_unique_(VK_DYNAMIC_STATE_CULL_MODE);
-        return *this;
-    }
-
-    /** @brief 动态正面顺序（`vkCmdSetFrontFace`） */
-    GraphicsPipelineBuilder &add_dynamic_front_face() {
-        add_dynamic_state_unique_(VK_DYNAMIC_STATE_FRONT_FACE);
-        return *this;
-    }
-
-    /** @brief 动态图元拓扑（`vkCmdSetPrimitiveTopology`） */
-    GraphicsPipelineBuilder &add_dynamic_primitive_topology() {
-        add_dynamic_state_unique_(VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY);
-        return *this;
-    }
+    /** @brief 动态线宽（`vkCmdSetLineWidth`）。 */
+    GraphicsPipelineBuilder &add_dynamic_line_width();
 
     /**
-     * @brief 动态多边形模式（实心 / 线框 / 点，`vkCmdSetPolygonModeEXT`）
-     * @note 需 `VK_EXT_extended_dynamic_state3`（或等价特性）
+     * @brief 动态剔除模式（`vkCmdSetCullMode`）。
+     * @note 需 Vulkan 1.3+ 或 `VK_EXT_extended_dynamic_state` 等。
      */
-    GraphicsPipelineBuilder &add_dynamic_polygon_mode() {
-        add_dynamic_state_unique_(VK_DYNAMIC_STATE_POLYGON_MODE_EXT);
-        return *this;
-    }
+    GraphicsPipelineBuilder &add_dynamic_cull_mode();
+
+    /** @brief 动态正面绕序（`vkCmdSetFrontFace`）。 */
+    GraphicsPipelineBuilder &add_dynamic_front_face();
+
+    /** @brief 动态图元拓扑（`vkCmdSetPrimitiveTopology`）。 */
+    GraphicsPipelineBuilder &add_dynamic_primitive_topology();
 
     /**
-     * @brief 依次加入上述五项常用光栅 / 装配动态状态（与已有列表去重合并）
+     * @brief 动态多边形模式（`VK_DYNAMIC_STATE_POLYGON_MODE_EXT`）。
+     * @note 需 `VK_EXT_extended_dynamic_state3`（或等价）。
      */
-    GraphicsPipelineBuilder &add_dynamic_raster_common() {
-        add_dynamic_line_width();
-        add_dynamic_cull_mode();
-        add_dynamic_front_face();
-        add_dynamic_primitive_topology();
-        add_dynamic_polygon_mode();
-        return *this;
-    }
+    GraphicsPipelineBuilder &add_dynamic_polygon_mode();
 
-    // -------------------------------------------------------------------------
-    // 阶段 H：布局与 RenderPass
-    // -------------------------------------------------------------------------
+    /** @brief 依次加入上述五项常用动态状态（与已有列表去重合并）。 */
+    GraphicsPipelineBuilder &add_dynamic_raster_common();
 
+    /** @} */
+
+    /** @{ @name 布局与渲染Pass */
+
+    /** @brief `layout`（`VkPipelineLayout`）。 */
     GraphicsPipelineBuilder &
-    set_pipeline_layout(VkPipelineLayout pipelineLayout) {
-        pipelineLayout_ = pipelineLayout;
-        return *this;
-    }
+    set_pipeline_layout(VkPipelineLayout pipelineLayout);
 
+    /**
+     * @brief `renderPass` 与子通道索引。
+     * @param renderPass 兼容的 render pass 句柄。
+     * @param subpassIndex `subpass` 下标。
+     */
     GraphicsPipelineBuilder &set_render_pass(VkRenderPass renderPass,
-                                             uint32_t subpassIndex = 0) {
-        renderPass_ = renderPass;
-        subpass_ = subpassIndex;
-        return *this;
-    }
+                                             uint32_t subpassIndex = 0);
 
+    /** @brief `VkGraphicsPipelineCreateInfo::flags`。 */
     GraphicsPipelineBuilder &
-    set_pipeline_create_flags(VkPipelineCreateFlags pipelineCreateFlags) {
-        pipelineCreateFlags_ = pipelineCreateFlags;
-        return *this;
-    }
+    set_pipeline_create_flags(VkPipelineCreateFlags pipelineCreateFlags);
 
-    // -------------------------------------------------------------------------
-    // 构建
-    // -------------------------------------------------------------------------
+    /** @} */
 
-    [[nodiscard]] VkPipeline build() {
-        if (vertexShaderModule_ == VK_NULL_HANDLE) {
-            LUMEN_LOG_ERROR("GraphicsPipelineBuilder: vertex shader not set");
-            return VK_NULL_HANDLE;
-        }
-        if (pipelineLayout_ == VK_NULL_HANDLE ||
-            renderPass_ == VK_NULL_HANDLE) {
-            LUMEN_LOG_ERROR("GraphicsPipelineBuilder: pipeline layout or "
-                            "render pass not set");
-            return VK_NULL_HANDLE;
-        }
-        if (!dynamicViewport_) {
-            if (viewports_.empty() || scissors_.empty() ||
-                viewports_.size() != scissors_.size()) {
-                LUMEN_LOG_ERROR("GraphicsPipelineBuilder: static "
-                                "viewport/scissor mismatch or "
-                                "empty; use set_viewport_dynamic()");
-                return VK_NULL_HANDLE;
-            }
-        }
-
-        // ---- 1. Shader stages ----
-        const std::vector<VkPipelineShaderStageCreateInfo> shaderStages =
-            create_shader_stages_();
-        if (shaderStages.empty()) {
-            LUMEN_LOG_ERROR("GraphicsPipelineBuilder: no shader stages");
-            return VK_NULL_HANDLE;
-        }
-
-        // ---- 2. Vertex input ----
-        const VkPipelineVertexInputStateCreateInfo vertexInput =
-            create_vertex_input_state_();
-
-        // ---- 3. Input assembly ----
-        const VkPipelineInputAssemblyStateCreateInfo inputAssembly =
-            create_input_assembly_state_();
-
-        // ---- 4. Viewport / scissor ----
-        const VkPipelineViewportStateCreateInfo viewportState =
-            create_viewport_state_();
-
-        // ---- 5. Rasterization ----
-        const VkPipelineRasterizationStateCreateInfo rasterization =
-            create_rasterization_state_();
-
-        // ---- 6. Multisample ----
-        const VkPipelineMultisampleStateCreateInfo multisampleState =
-            create_multisample_state_();
-
-        // ---- 7. Depth / stencil ----
-        const VkPipelineDepthStencilStateCreateInfo depthStencilState =
-            create_depth_stencil_state_();
-
-        // ---- 8. Color blend ----
-        ensure_color_blend_attachments_();
-        const VkPipelineColorBlendStateCreateInfo colorBlendState =
-            create_color_blend_state_();
-
-        // ---- 9. Dynamic（动态视口时自动补全 VIEWPORT / SCISSOR） ----
-        std::vector<VkDynamicState> dynamicMerged = dynamicStates_;
-        if (dynamicViewport_) {
-            auto appendIfMissing =
-                [&dynamicMerged](VkDynamicState dynamicState) {
-                    if (std::find(dynamicMerged.begin(), dynamicMerged.end(),
-                                  dynamicState) == dynamicMerged.end()) {
-                        dynamicMerged.push_back(dynamicState);
-                    }
-                };
-            appendIfMissing(VK_DYNAMIC_STATE_VIEWPORT);
-            appendIfMissing(VK_DYNAMIC_STATE_SCISSOR);
-        }
-        VkPipelineDynamicStateCreateInfo dynamicStateInfo {};
-        dynamicStateInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-        dynamicStateInfo.dynamicStateCount =
-            static_cast<uint32_t>(dynamicMerged.size());
-        dynamicStateInfo.pDynamicStates =
-            dynamicMerged.empty() ? nullptr : dynamicMerged.data();
-        const VkPipelineDynamicStateCreateInfo *dynamicStatePtr =
-            dynamicMerged.empty() ? nullptr : &dynamicStateInfo;
-
-        VkGraphicsPipelineCreateInfo pipelineInfo {};
-        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipelineInfo.flags = pipelineCreateFlags_;
-        pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-        pipelineInfo.pStages = shaderStages.data();
-        pipelineInfo.pVertexInputState = &vertexInput;
-        pipelineInfo.pInputAssemblyState = &inputAssembly;
-        pipelineInfo.pViewportState = &viewportState;
-        pipelineInfo.pRasterizationState = &rasterization;
-        pipelineInfo.pMultisampleState = &multisampleState;
-        pipelineInfo.pDepthStencilState = &depthStencilState;
-        pipelineInfo.pColorBlendState = &colorBlendState;
-        pipelineInfo.pDynamicState = dynamicStatePtr; // nullptr 表示无动态状态
-        pipelineInfo.layout = pipelineLayout_;
-        pipelineInfo.renderPass = renderPass_;
-        pipelineInfo.subpass = subpass_;
-        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-        pipelineInfo.basePipelineIndex = -1;
-
-        VkPipeline pipeline { VK_NULL_HANDLE };
-        const VkResult vkResult = vkCreateGraphicsPipelines(
-            device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline);
-        if (vkResult != VK_SUCCESS) {
-            LUMEN_LOG_ERROR("vkCreateGraphicsPipelines failed");
-            return VK_NULL_HANDLE;
-        }
-
-        destroy_shader_modules_();
-        return pipeline;
-    }
+    /**
+     * @brief 校验配置并调用 `vkCreateGraphicsPipelines`。
+     * @return 成功返回管线句柄；失败返回 `VK_NULL_HANDLE` 并写引擎日志。
+     * @note 成功时销毁内部顶点/片段着色器模块；失败时保留模块。
+     */
+    [[nodiscard]] VkPipeline build();
 
 private:
-    // =========================================================================
-    // 资源：按阶段分组（私有成员：camelCase_）
-    // =========================================================================
-
     VkDevice device_ { VK_NULL_HANDLE };
 
-    // --- 阶段 A：着色器 ---
     VkShaderModule vertexShaderModule_ { VK_NULL_HANDLE };
     VkShaderModule fragmentShaderModule_ { VK_NULL_HANDLE };
     std::string vertexEntry_ { "main" };
     std::string fragmentEntry_ { "main" };
 
-    // --- 阶段 B：顶点输入 ---
     std::vector<VkVertexInputAttributeDescription> vertexAttributes_;
     std::vector<VkVertexInputBindingDescription> vertexBindings_;
 
-    // --- 阶段 C：装配 / 光栅 / 采样 ---
     VkPrimitiveTopology primitiveTopology_ {
         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     };
     VkBool32 primitiveRestartEnable_ { VK_FALSE };
-    PolygonDrawMode polygonMode_ { PolygonDrawMode::Fill };
+    VkPolygonMode polygonMode_ { VK_POLYGON_MODE_FILL };
     VkCullModeFlags cullMode_ { VK_CULL_MODE_NONE };
     VkFrontFace frontFace_ { VK_FRONT_FACE_COUNTER_CLOCKWISE };
     VkBool32 depthClampEnable_ { VK_FALSE };
@@ -581,14 +340,12 @@ private:
     VkBool32 alphaToCoverageEnable_ { VK_FALSE };
     VkBool32 alphaToOneEnable_ { VK_FALSE };
 
-    // --- 阶段 D：视口 ---
     std::vector<VkViewport> viewports_;
     std::vector<VkRect2D> scissors_;
     bool dynamicViewport_ { false };
     uint32_t dynamicViewportCount_ { 1 };
     uint32_t dynamicScissorCount_ { 1 };
 
-    // --- 阶段 E：深度 / 模板 ---
     VkBool32 depthTestEnable_ { VK_TRUE };
     VkBool32 depthWriteEnable_ { VK_TRUE };
     VkCompareOp depthCompareOp_ { VK_COMPARE_OP_LESS };
@@ -599,229 +356,56 @@ private:
     float minDepthBounds_ { 0.F };
     float maxDepthBounds_ { 1.F };
 
-    // --- 阶段 F：混合 ---
     std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments_;
     std::array<float, 4> blendConstants_ {};
     VkBool32 logicOpEnable_ { VK_FALSE };
     VkLogicOp logicOp_ { VK_LOGIC_OP_COPY };
 
-    // --- 阶段 G：动态状态 ---
     std::vector<VkDynamicState> dynamicStates_;
 
-    // --- 阶段 H：布局 / Pass ---
     VkPipelineLayout pipelineLayout_ { VK_NULL_HANDLE };
     VkRenderPass renderPass_ { VK_NULL_HANDLE };
     uint32_t subpass_ { 0 };
     VkPipelineCreateFlags pipelineCreateFlags_ { 0 };
 
-    // =========================================================================
-    // 私有方法：snake_case + 尾部 _（与引擎私有辅助一致）
-    // =========================================================================
+    void append_unique_dynamic_state_(std::vector<VkDynamicState> &into,
+                                      VkDynamicState state);
 
-    void add_dynamic_state_unique_(VkDynamicState state) {
-        if (std::find(dynamicStates_.begin(), dynamicStates_.end(), state) ==
-            dynamicStates_.end()) {
-            dynamicStates_.push_back(state);
-        }
-    }
+    void add_dynamic_state_unique_(VkDynamicState state);
 
-    // --- 阶段 A ---
+    void destroy_shader_module_(VkShaderModule &module);
 
-    void destroy_shader_modules_() {
-        if (device_ == VK_NULL_HANDLE) {
-            return;
-        }
-        if (vertexShaderModule_ != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(device_, vertexShaderModule_, nullptr);
-            vertexShaderModule_ = VK_NULL_HANDLE;
-        }
-        if (fragmentShaderModule_ != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(device_, fragmentShaderModule_, nullptr);
-            fragmentShaderModule_ = VK_NULL_HANDLE;
-        }
-    }
+    void destroy_shader_modules_();
 
     [[nodiscard]] bool
     create_shader_module_(const std::vector<std::uint32_t> &spirv,
-                          VkShaderModule &outModule) {
-        if (spirv.empty()) {
-            return false;
-        }
-        VkShaderModuleCreateInfo createInfo {};
-        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.codeSize = spirv.size() * sizeof(std::uint32_t);
-        createInfo.pCode = spirv.data();
-        return vkCreateShaderModule(device_, &createInfo, nullptr,
-                                    &outModule) == VK_SUCCESS;
-    }
+                          VkShaderModule &outModule);
 
     [[nodiscard]] std::vector<VkPipelineShaderStageCreateInfo>
-    create_shader_stages_() const {
-        std::vector<VkPipelineShaderStageCreateInfo> stages;
-        stages.reserve(2);
-        if (vertexShaderModule_ != VK_NULL_HANDLE) {
-            VkPipelineShaderStageCreateInfo stageInfo {};
-            stageInfo.sType =
-                VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            stageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-            stageInfo.module = vertexShaderModule_;
-            stageInfo.pName = vertexEntry_.c_str();
-            stages.push_back(stageInfo);
-        }
-        if (fragmentShaderModule_ != VK_NULL_HANDLE) {
-            VkPipelineShaderStageCreateInfo stageInfo {};
-            stageInfo.sType =
-                VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-            stageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-            stageInfo.module = fragmentShaderModule_;
-            stageInfo.pName = fragmentEntry_.c_str();
-            stages.push_back(stageInfo);
-        }
-        return stages;
-    }
-
-    // --- 阶段 B ---
+    create_shader_stages_() const;
 
     [[nodiscard]] VkPipelineVertexInputStateCreateInfo
-    create_vertex_input_state_() const {
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo {};
-        vertexInputInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount =
-            static_cast<uint32_t>(vertexBindings_.size());
-        vertexInputInfo.pVertexBindingDescriptions =
-            vertexBindings_.empty() ? nullptr : vertexBindings_.data();
-        vertexInputInfo.vertexAttributeDescriptionCount =
-            static_cast<uint32_t>(vertexAttributes_.size());
-        vertexInputInfo.pVertexAttributeDescriptions =
-            vertexAttributes_.empty() ? nullptr : vertexAttributes_.data();
-        return vertexInputInfo;
-    }
-
-    // --- 阶段 C ---
+    create_vertex_input_state_() const;
 
     [[nodiscard]] VkPipelineInputAssemblyStateCreateInfo
-    create_input_assembly_state_() const {
-        VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo {};
-        inputAssemblyInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssemblyInfo.topology = primitiveTopology_;
-        inputAssemblyInfo.primitiveRestartEnable = primitiveRestartEnable_;
-        return inputAssemblyInfo;
-    }
+    create_input_assembly_state_() const;
 
     [[nodiscard]] VkPipelineRasterizationStateCreateInfo
-    create_rasterization_state_() const {
-        VkPipelineRasterizationStateCreateInfo rasterizationInfo {};
-        rasterizationInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterizationInfo.depthClampEnable = depthClampEnable_;
-        rasterizationInfo.rasterizerDiscardEnable = rasterizerDiscardEnable_;
-        rasterizationInfo.polygonMode =
-            static_cast<VkPolygonMode>(polygonMode_);
-        rasterizationInfo.cullMode = cullMode_;
-        rasterizationInfo.frontFace = frontFace_;
-        rasterizationInfo.depthBiasEnable = depthBiasEnable_;
-        rasterizationInfo.depthBiasConstantFactor = depthBiasConstantFactor_;
-        rasterizationInfo.depthBiasClamp = depthBiasClamp_;
-        rasterizationInfo.depthBiasSlopeFactor = depthBiasSlopeFactor_;
-        rasterizationInfo.lineWidth = lineWidth_;
-        return rasterizationInfo;
-    }
+    create_rasterization_state_() const;
 
     [[nodiscard]] VkPipelineMultisampleStateCreateInfo
-    create_multisample_state_() const {
-        VkPipelineMultisampleStateCreateInfo multisampleInfo {};
-        multisampleInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampleInfo.rasterizationSamples = rasterizationSamples_;
-        multisampleInfo.sampleShadingEnable = sampleShadingEnable_;
-        multisampleInfo.minSampleShading = minSampleShading_;
-        multisampleInfo.pSampleMask =
-            sampleMask_.empty() ? nullptr : sampleMask_.data();
-        multisampleInfo.alphaToCoverageEnable = alphaToCoverageEnable_;
-        multisampleInfo.alphaToOneEnable = alphaToOneEnable_;
-        return multisampleInfo;
-    }
-
-    // --- 阶段 D ---
+    create_multisample_state_() const;
 
     [[nodiscard]] VkPipelineViewportStateCreateInfo
-    create_viewport_state_() const {
-        VkPipelineViewportStateCreateInfo viewportInfo {};
-        viewportInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        if (dynamicViewport_) {
-            viewportInfo.viewportCount = dynamicViewportCount_;
-            viewportInfo.pViewports = nullptr;
-            viewportInfo.scissorCount = dynamicScissorCount_;
-            viewportInfo.pScissors = nullptr;
-        } else {
-            viewportInfo.viewportCount =
-                static_cast<uint32_t>(viewports_.size());
-            viewportInfo.pViewports =
-                viewports_.empty() ? nullptr : viewports_.data();
-            viewportInfo.scissorCount = static_cast<uint32_t>(scissors_.size());
-            viewportInfo.pScissors =
-                scissors_.empty() ? nullptr : scissors_.data();
-        }
-        return viewportInfo;
-    }
-
-    // --- 阶段 E ---
+    create_viewport_state_() const;
 
     [[nodiscard]] VkPipelineDepthStencilStateCreateInfo
-    create_depth_stencil_state_() const {
-        VkPipelineDepthStencilStateCreateInfo depthStencilInfo {};
-        depthStencilInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-        depthStencilInfo.depthTestEnable = depthTestEnable_;
-        depthStencilInfo.depthWriteEnable = depthWriteEnable_;
-        depthStencilInfo.depthCompareOp = depthCompareOp_;
-        depthStencilInfo.depthBoundsTestEnable = depthBoundsTestEnable_;
-        depthStencilInfo.stencilTestEnable = stencilTestEnable_;
-        depthStencilInfo.front = stencilFront_;
-        depthStencilInfo.back = stencilBack_;
-        depthStencilInfo.minDepthBounds = minDepthBounds_;
-        depthStencilInfo.maxDepthBounds = maxDepthBounds_;
-        return depthStencilInfo;
-    }
+    create_depth_stencil_state_() const;
 
-    // --- 阶段 F ---
-
-    [[nodiscard]] static VkPipelineColorBlendAttachmentState
-    make_blend_attachment_disabled_() {
-        VkPipelineColorBlendAttachmentState attachment {};
-        attachment.blendEnable = VK_FALSE;
-        attachment.colorWriteMask =
-            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        return attachment;
-    }
-
-    void ensure_color_blend_attachments_() {
-        if (colorBlendAttachments_.empty()) {
-            colorBlendAttachments_.push_back(make_blend_attachment_disabled_());
-        }
-    }
+    void ensure_color_blend_attachments_();
 
     [[nodiscard]] VkPipelineColorBlendStateCreateInfo
-    create_color_blend_state_() const {
-        VkPipelineColorBlendStateCreateInfo colorBlendInfo {};
-        colorBlendInfo.sType =
-            VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlendInfo.logicOpEnable = logicOpEnable_;
-        colorBlendInfo.logicOp = logicOp_;
-        colorBlendInfo.attachmentCount =
-            static_cast<uint32_t>(colorBlendAttachments_.size());
-        colorBlendInfo.pAttachments = colorBlendAttachments_.empty()
-                                          ? nullptr
-                                          : colorBlendAttachments_.data();
-        for (size_t i { 0 }; i < 4; ++i) {
-            colorBlendInfo.blendConstants[i] = blendConstants_[i];
-        }
-        return colorBlendInfo;
-    }
+    create_color_blend_state_() const;
 };
 
 } // namespace vulkan
