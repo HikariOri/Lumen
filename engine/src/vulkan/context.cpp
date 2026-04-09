@@ -13,8 +13,9 @@ namespace {
 
 constexpr std::uint32_t kApiVersion = VK_API_VERSION_1_4;
 
-[[nodiscard]] bool format_has_depth_stencil_attachment(
-    VkPhysicalDevice physicalDevice, VkFormat candidateFormat) {
+[[nodiscard]] bool
+format_has_depth_stencil_attachment(VkPhysicalDevice physicalDevice,
+                                    VkFormat candidateFormat) {
     VkFormatProperties formatProps {};
     vkGetPhysicalDeviceFormatProperties(physicalDevice, candidateFormat,
                                         &formatProps);
@@ -31,10 +32,9 @@ std::expected<std::unique_ptr<Context>, std::string> Context::create(
     const std::function<VkSurfaceKHR(VkInstance)> &surfaceFromInstance,
     const bool enableValidation) {
     std::unique_ptr<Context> context { new Context() };
-    if (auto initResult =
-            context->init(appName, appVersion, surfaceFromInstance,
-                          instanceExtensions, windowWidth, windowHeight,
-                          enableValidation);
+    if (auto initResult = context->init(
+            appName, appVersion, surfaceFromInstance, instanceExtensions,
+            windowWidth, windowHeight, enableValidation);
         !initResult.has_value()) {
         return std::unexpected(initResult.error());
     }
@@ -109,8 +109,7 @@ std::expected<void, std::string> Context::init(
     if (auto vmaResult = create_vma_allocator(); !vmaResult.has_value()) {
         return vmaResult;
     }
-    if (auto swapchainResult =
-            create_swapchain(windowWidth, windowHeight);
+    if (auto swapchainResult = create_swapchain(windowWidth, windowHeight);
         !swapchainResult.has_value()) {
         return swapchainResult;
     }
@@ -173,8 +172,9 @@ void Context::setup_debug_messenger() {
     VkDebugUtilsMessengerCreateInfoEXT messengerInfo {
         VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT
     };
-    messengerInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    messengerInfo.messageSeverity =
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     messengerInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
@@ -183,7 +183,8 @@ void Context::setup_debug_messenger() {
 
     const auto createDebugMessengerFn =
         reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-            vkGetInstanceProcAddr(vkInstance_, "vkCreateDebugUtilsMessengerEXT"));
+            vkGetInstanceProcAddr(vkInstance_,
+                                  "vkCreateDebugUtilsMessengerEXT"));
     if (createDebugMessengerFn == nullptr) {
         LUMEN_LOG_WARN("Context: vkCreateDebugUtilsMessengerEXT unavailable");
         return;
@@ -229,8 +230,8 @@ Context::find_graphics_queue_family(const VkPhysicalDevice physicalDevice) {
 
     for (std::uint32_t familyIndex { 0 }; familyIndex < queueFamilyCount;
          ++familyIndex) {
-        if ((queueFamilyProps[familyIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT) !=
-            0U) {
+        if ((queueFamilyProps[familyIndex].queueFlags &
+             VK_QUEUE_GRAPHICS_BIT) != 0U) {
             return familyIndex;
         }
     }
@@ -310,8 +311,7 @@ std::expected<void, std::string> Context::pick_physical_device() {
     int bestDeviceScore { -1 };
 
     for (VkPhysicalDevice candidateDevice : physicalDevices) {
-        const auto graphicsFamily =
-            find_graphics_queue_family(candidateDevice);
+        const auto graphicsFamily = find_graphics_queue_family(candidateDevice);
         const auto presentFamily =
             find_present_queue_family(candidateDevice, vkSurface_);
         if (!graphicsFamily.has_value() || !presentFamily.has_value()) {
@@ -447,9 +447,9 @@ Context::create_swapchain(const std::uint32_t width, const std::uint32_t height,
                                          &surfaceFormatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> surfaceFormats(surfaceFormatCount);
     if (surfaceFormatCount > 0) {
-        vkGetPhysicalDeviceSurfaceFormatsKHR(
-            physicalDevice_, vkSurface_, &surfaceFormatCount,
-            surfaceFormats.data());
+        vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice_, vkSurface_,
+                                             &surfaceFormatCount,
+                                             surfaceFormats.data());
     }
 
     std::uint32_t presentModeCount { 0 };
@@ -457,12 +457,14 @@ Context::create_swapchain(const std::uint32_t width, const std::uint32_t height,
                                               &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount > 0) {
-        vkGetPhysicalDeviceSurfacePresentModesKHR(
-            physicalDevice_, vkSurface_, &presentModeCount, presentModes.data());
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice_, vkSurface_,
+                                                  &presentModeCount,
+                                                  presentModes.data());
     }
 
-    VkSurfaceFormatKHR chosenSurfaceFormat { VK_FORMAT_B8G8R8A8_UNORM,
-                                             VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
+    VkSurfaceFormatKHR chosenSurfaceFormat {
+        VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+    };
     if (!surfaceFormats.empty()) {
         const auto preferredFormatIt = std::find_if(
             surfaceFormats.begin(), surfaceFormats.end(),
@@ -490,9 +492,9 @@ Context::create_swapchain(const std::uint32_t width, const std::uint32_t height,
         swapchainExtent.width =
             std::clamp(swapchainExtent.width, surfaceCaps.minImageExtent.width,
                        surfaceCaps.maxImageExtent.width);
-        swapchainExtent.height =
-            std::clamp(swapchainExtent.height, surfaceCaps.minImageExtent.height,
-                       surfaceCaps.maxImageExtent.height);
+        swapchainExtent.height = std::clamp(swapchainExtent.height,
+                                            surfaceCaps.minImageExtent.height,
+                                            surfaceCaps.maxImageExtent.height);
     }
 
     std::uint32_t minImageCount { surfaceCaps.minImageCount + 1 };
@@ -516,8 +518,8 @@ Context::create_swapchain(const std::uint32_t width, const std::uint32_t height,
     swapchainCreateInfo.imageArrayLayers = 1;
     swapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     swapchainCreateInfo.preTransform = surfaceCaps.currentTransform;
-    if ((surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) !=
-        0U) {
+    if ((surfaceCaps.supportedCompositeAlpha &
+         VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) != 0U) {
         swapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     } else if ((surfaceCaps.supportedCompositeAlpha &
                 VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) != 0U) {

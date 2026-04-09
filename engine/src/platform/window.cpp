@@ -7,12 +7,26 @@
 #include "core/log/logger.hpp"
 #include "platform/event_pump.hpp"
 
+#include <utility>
+
 namespace lumen::platform {
 
-bool Window::create(const WindowConfig &config) {
+std::expected<Window, std::string>
+Window::create(const WindowConfig &config) {
+    Window w;
+    if (auto r = w.try_create_(config); !r) {
+        return std::unexpected(std::move(r.error()));
+    }
+    return w;
+}
+
+std::expected<void, std::string>
+Window::try_create_(const WindowConfig &config) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        LUMEN_LOG_ERROR("SDL_Init 失败: {}", SDL_GetError());
-        return false;
+        const char *err = SDL_GetError();
+        LUMEN_LOG_ERROR("SDL_Init 失败: {}", err != nullptr ? err : "");
+        return std::unexpected(
+            std::string("SDL_Init 失败: ") + (err != nullptr ? err : ""));
     }
 
     auto flags = SDL_WINDOW_VULKAN;
@@ -24,9 +38,12 @@ bool Window::create(const WindowConfig &config) {
         SDL_CreateWindow(config.title.c_str(), static_cast<int>(config.width),
                          static_cast<int>(config.height), flags);
     if (!window_) {
-        LUMEN_LOG_ERROR("SDL_CreateWindow 失败: {}", SDL_GetError());
+        const char *err = SDL_GetError();
+        LUMEN_LOG_ERROR("SDL_CreateWindow 失败: {}", err != nullptr ? err : "");
         SDL_Quit();
-        return false;
+        return std::unexpected(
+            std::string("SDL_CreateWindow 失败: ") +
+            (err != nullptr ? err : ""));
     }
 
     width_ = config.width;
@@ -48,7 +65,7 @@ bool Window::create(const WindowConfig &config) {
     }
 
     LUMEN_LOG_DEBUG("窗口创建成功 {}x{} \"{}\"", width_, height_, config.title);
-    return true;
+    return {};
 }
 
 std::vector<const char *> Window::get_vulkan_instance_extensions() const {

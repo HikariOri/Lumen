@@ -9,6 +9,14 @@
 
 #pragma once
 
+#include <cstdint>
+#include <expected>
+#include <string>
+#include <vector>
+
+#include <SDL3/SDL.h>
+#include <vulkan/vulkan.h>
+
 namespace lumen {
 namespace platform {
 
@@ -84,18 +92,16 @@ public:
     ~Window();
 
     /**
-     * @brief 创建窗口
+     * @brief 按配置创建窗口（静态工厂）
      *
      * @param config 窗口配置
-     * @return 成功返回 true，失败返回 false
+     * @return 成功返回 `Window`；失败返回错误说明（SDL 初始化或创建窗口失败等）
      *
      * @note
-     * - 创建失败通常意味着 SDL 初始化或窗口创建失败
-     * - 成功后 window_ 不为空
-     * - 若 `config.icon_path`
-     * 非空，会尝试设置图标；加载失败仅打日志，不导致本函数返回 false
+     * - 若 `config.icon_path` 非空，会尝试设置图标；加载失败仅打日志，仍视为成功
      */
-    bool create(const WindowConfig &config);
+    [[nodiscard]] static std::expected<Window, std::string>
+    create(const WindowConfig &config);
 
     /**
      * @brief 获取 Vulkan Instance 所需扩展
@@ -220,6 +226,9 @@ public:
     [[nodiscard]] bool is_valid() const { return window_ != nullptr; }
 
 private:
+    [[nodiscard]] std::expected<void, std::string>
+    try_create_(const WindowConfig &config);
+
     /**
      * @brief 销毁窗口资源
      *

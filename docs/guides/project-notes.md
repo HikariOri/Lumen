@@ -7,7 +7,7 @@
 ### 1.1 路径工具 `core::get_base_path()` / `get_resource_path()`
 
 - **依赖**：必须等 `SDL_Init` 执行后再调用
-- **建议**：在 `Window::create()` 之后使用（Window 内部会调用 SDL_Init）
+- **建议**：在 `Window::create(config)` 成功返回之后使用（`Window` 内部会调用 `SDL_Init`）
 - **失败时**：`get_base_path()` 返回空字符串；`get_resource_path()` 会退化为仅返回 `subpath`
 
 ### 1.2 时间工具（`core/time.hpp`）
