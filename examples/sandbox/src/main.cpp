@@ -507,22 +507,22 @@ int main() {
 
             {
                 // clang-format off
-                graphicsPipelineCreateInfo.stageCount = 2;
-                graphicsPipelineCreateInfo.pStages = shaderStages.data();
-                graphicsPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
-                graphicsPipelineCreateInfo.pInputAssemblyState = &inputAssembly;
-                // graphicsPipelineCreateInfo.pTessellationState;
-                graphicsPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
-                graphicsPipelineCreateInfo.pRasterizationState = &rasterizerCreateInfo;
-                graphicsPipelineCreateInfo.pMultisampleState = &multisamplingCreateInfo;
-                graphicsPipelineCreateInfo.pDepthStencilState = &depthStencilCreateInfo;
-                graphicsPipelineCreateInfo.pColorBlendState = &colorBlendingCreateInfo;
-                graphicsPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
-                graphicsPipelineCreateInfo.layout =pipelineLayout;
-                graphicsPipelineCreateInfo.renderPass = renderPass;
-                graphicsPipelineCreateInfo.subpass = 0;
-                // graphicsPipelineCreateInfo.basePipelineHandle;
-                // graphicsPipelineCreateInfo.basePipelineIndex;
+                  graphicsPipelineCreateInfo.stageCount = 2;
+                  graphicsPipelineCreateInfo.pStages = shaderStages.data();
+                  graphicsPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+                  graphicsPipelineCreateInfo.pInputAssemblyState = &inputAssembly;
+                  // graphicsPipelineCreateInfo.pTessellationState;
+                  graphicsPipelineCreateInfo.pViewportState = &viewportStateCreateInfo;
+                  graphicsPipelineCreateInfo.pRasterizationState = &rasterizerCreateInfo;
+                  graphicsPipelineCreateInfo.pMultisampleState = &multisamplingCreateInfo;
+                  graphicsPipelineCreateInfo.pDepthStencilState = &depthStencilCreateInfo;
+                  graphicsPipelineCreateInfo.pColorBlendState = &colorBlendingCreateInfo;
+                  graphicsPipelineCreateInfo.pDynamicState = &dynamicStateCreateInfo;
+                  graphicsPipelineCreateInfo.layout =pipelineLayout;
+                  graphicsPipelineCreateInfo.renderPass = renderPass;
+                  graphicsPipelineCreateInfo.subpass = 0;
+                  // graphicsPipelineCreateInfo.basePipelineHandle;
+                  // graphicsPipelineCreateInfo.basePipelineIndex;
                 // clang-format on
             }
 
@@ -574,16 +574,13 @@ int main() {
 
     std::vector<VkSemaphore> imageAvailableSemaphores(
         MAX_FRAMES_IN_FLIGHT); // image 可用
-                               // 渲染完成
+    // std::vector<VkSemaphore> renderFinishedSemaphores {
+    // MAX_FRAMES_IN_FLIGHT
+    // }; // 渲染完成
     std::vector<VkSemaphore> presentSemaphores(
-        context->swapchain_image_views().size());              // 显示完成
-    std::vector<VkFence> inFlightFences(MAX_FRAMES_IN_FLIGHT); // CPU 等 GPU
-    std::vector<VkFence> imagesInFlight(
-        context->swapchain_image_views().size());
+        context->swapchain_image_views().size()); // 显示完成
 
-    for (size_t i = 0; i < context->swapchain_image_views().size(); i++) {
-        imagesInFlight[i] = VK_NULL_HANDLE;
-    }
+    VkSemaphore timelineSemaphore {};
 
     {
         VkSemaphoreCreateInfo semaphoreCreateInfo {
@@ -601,11 +598,6 @@ int main() {
                 LUMEN_APP_LOG_ERROR(
                     "Failed to create image available semaphore");
             }
-
-            if (vkCreateFence(context->device(), &fenceCreateInfo, nullptr,
-                              &inFlightFences[i])) {
-                LUMEN_APP_LOG_ERROR("Failed to create in flight fence");
-            }
         }
 
         for (size_t i = 0; i < context->swapchain_image_views().size(); i++) {
@@ -614,37 +606,50 @@ int main() {
                 LUMEN_APP_LOG_ERROR("Failed to create present semaphore");
             }
         }
+
+        VkSemaphoreTypeCreateInfo timelineInfo {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
+        };
+        timelineInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        timelineInfo.initialValue = 0;
+
+        VkSemaphoreCreateInfo createInfo {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+        };
+        createInfo.pNext = &timelineInfo;
+
+        vkCreateSemaphore(device, &createInfo, nullptr, &timelineSemaphore);
     }
 
     std::uint32_t currentFrame = 0;
 
+    std::uint64_t timelineValue = 0;
+
     // 渲染循环
     while (running && pump.poll()) {
 
-        VkSemaphore imageAvailable = imageAvailableSemaphores[currentFrame];
-        VkFence fence = inFlightFences[currentFrame];
-
         // 等上一帧 GPU 完成
-        vkWaitForFences(device, 1, &fence, true, UINT64_MAX);
+        {
+            uint64_t waitValue = timelineValue;
+
+            VkSemaphoreWaitInfo waitInfo {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO
+            };
+            waitInfo.semaphoreCount = 1;
+            waitInfo.pSemaphores = &timelineSemaphore;
+            waitInfo.pValues = &waitValue;
+
+            vkWaitSemaphores(device, &waitInfo, UINT64_MAX);
+        }
 
         // 获取 swapchiain image
         std::uint32_t imageIndex {};
         vkAcquireNextImageKHR(device, context->swapchain(), UINT64_MAX,
-                              imageAvailable, VK_NULL_HANDLE, &imageIndex);
-        if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
-            vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE,
-                            UINT64_MAX);
-        }
-
-        // 标记 image 被当前 frame 使用
-        imagesInFlight[imageIndex] = inFlightFences[currentFrame];
-
-        // reset fence（重要）
-        vkResetFences(device, 1, &fence);
+                              imageAvailableSemaphores[currentFrame],
+                              VK_NULL_HANDLE, &imageIndex);
 
         // 重置并录制 command buffer
         vkResetCommandBuffer(commandBuffers[imageIndex], 0);
-        // recordCommandBuffer(commandBuffers[imageIndex], imageIndex);
 
         VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
@@ -705,26 +710,51 @@ int main() {
 
         vkEndCommandBuffer(commandBuffers[imageIndex]);
 
-        // 提交 GPU
+        // 提交 GPU（混用 binary + timeline 时，Timeline 扩展里 value
+        // 数组长度须与 wait/signal 数量一致；binary 对应项的值会被忽略）
+        const std::uint64_t signalValue = timelineValue + 1;
+        std::array<std::uint64_t, 2> waitSemaphoreValues { 0, timelineValue };
+        std::array<std::uint64_t, 2> signalSemaphoreValues { signalValue, 0 };
+
+        VkTimelineSemaphoreSubmitInfo timelineSubmit {
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
+        };
+        timelineSubmit.waitSemaphoreValueCount =
+            static_cast<std::uint32_t>(waitSemaphoreValues.size());
+        timelineSubmit.pWaitSemaphoreValues = waitSemaphoreValues.data();
+        timelineSubmit.signalSemaphoreValueCount =
+            static_cast<std::uint32_t>(signalSemaphoreValues.size());
+        timelineSubmit.pSignalSemaphoreValues = signalSemaphoreValues.data();
+
         VkSubmitInfo submitInfo { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
 
-        VkSemaphore waitSemaphores[] { imageAvailable };
-        VkPipelineStageFlags waitStags[] = {
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+        VkSemaphore waitSemaphores[] = {
+            imageAvailableSemaphores[currentFrame], // acquire
+            timelineSemaphore                       // timeline
+        };
+        VkPipelineStageFlags waitStages[] = {
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+        };
+        VkSemaphore signalSemaphores[] = {
+            timelineSemaphore,            // GPU进度
+            presentSemaphores[imageIndex] // 给 present
         };
 
-        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pNext = &timelineSubmit;
+
+        submitInfo.waitSemaphoreCount = 2;
         submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStags;
+        submitInfo.pWaitDstStageMask = waitStages;
+
+        submitInfo.signalSemaphoreCount = 2;
+        submitInfo.pSignalSemaphores = signalSemaphores;
 
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
 
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &presentSemaphores[imageIndex];
-
-        vkQueueSubmit(context->graphics_queue(), 1, &submitInfo, fence);
-
+        vkQueueSubmit(context->graphics_queue(), 1, &submitInfo,
+                      VK_NULL_HANDLE);
         // present
         VkPresentInfoKHR presentInfo { .sType =
                                            VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
@@ -740,6 +770,7 @@ int main() {
         vkQueuePresentKHR(context->present_queue(), &presentInfo);
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        timelineValue++;
     }
 
     vkDeviceWaitIdle(device);
@@ -757,12 +788,14 @@ int main() {
 
     for (std::size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-        // vkDestroySemaphore(device, presentSemaphores[i], nullptr);
-        vkDestroyFence(device, inFlightFences[i], nullptr);
     }
 
     for (VkSemaphore semaphore : presentSemaphores) {
         vkDestroySemaphore(device, semaphore, nullptr);
+    }
+
+    if (timelineSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(device, timelineSemaphore, nullptr);
     }
 
     vkDestroyCommandPool(device, commandPool, nullptr);
