@@ -29,27 +29,21 @@ make_blend_attachment_disabled() {
 GraphicsPipelineBuilder::GraphicsPipelineBuilder(VkDevice device)
     : device_(device) {}
 
-GraphicsPipelineBuilder::~GraphicsPipelineBuilder() {
-    destroy_shader_modules_();
-}
+GraphicsPipelineBuilder::~GraphicsPipelineBuilder() = default;
 
-GraphicsPipelineBuilder &GraphicsPipelineBuilder::set_vertex_shader(
-    const std::vector<std::uint32_t> &spirv, std::string entry_name) {
+GraphicsPipelineBuilder &
+GraphicsPipelineBuilder::set_vertex_shader(const VkShaderModule module,
+                                           std::string entry_name) {
     vertexEntry_ = std::move(entry_name);
-    destroy_shader_module_(vertexShaderModule_);
-    if (!create_shader_module_(spirv, vertexShaderModule_)) {
-        LUMEN_LOG_ERROR("vertex shader module create failed");
-    }
+    vertexShaderModule_ = module;
     return *this;
 }
 
-GraphicsPipelineBuilder &GraphicsPipelineBuilder::set_fragment_shader(
-    const std::vector<std::uint32_t> &spirv, std::string entry_name) {
+GraphicsPipelineBuilder &
+GraphicsPipelineBuilder::set_fragment_shader(const VkShaderModule module,
+                                              std::string entry_name) {
     fragmentEntry_ = std::move(entry_name);
-    destroy_shader_module_(fragmentShaderModule_);
-    if (!create_shader_module_(spirv, fragmentShaderModule_)) {
-        LUMEN_LOG_ERROR("fragment shader module create failed");
-    }
+    fragmentShaderModule_ = module;
     return *this;
 }
 
@@ -447,7 +441,6 @@ GraphicsPipelineBuilder &GraphicsPipelineBuilder::set_pipeline_create_flags(
         return VK_NULL_HANDLE;
     }
 
-    destroy_shader_modules_();
     return pipeline;
 }
 
@@ -460,32 +453,6 @@ void GraphicsPipelineBuilder::append_unique_dynamic_state_(
 
 void GraphicsPipelineBuilder::add_dynamic_state_unique_(VkDynamicState state) {
     append_unique_dynamic_state_(dynamicStates_, state);
-}
-
-void GraphicsPipelineBuilder::destroy_shader_module_(VkShaderModule &module) {
-    if (module == VK_NULL_HANDLE || device_ == VK_NULL_HANDLE) {
-        return;
-    }
-    vkDestroyShaderModule(device_, module, nullptr);
-    module = VK_NULL_HANDLE;
-}
-
-void GraphicsPipelineBuilder::destroy_shader_modules_() {
-    destroy_shader_module_(vertexShaderModule_);
-    destroy_shader_module_(fragmentShaderModule_);
-}
-
-[[nodiscard]] bool GraphicsPipelineBuilder::create_shader_module_(
-    const std::vector<std::uint32_t> &spirv, VkShaderModule &outModule) {
-    if (spirv.empty()) {
-        return false;
-    }
-    VkShaderModuleCreateInfo createInfo {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = spirv.size() * sizeof(std::uint32_t);
-    createInfo.pCode = spirv.data();
-    return vkCreateShaderModule(device_, &createInfo, nullptr, &outModule) ==
-           VK_SUCCESS;
 }
 
 [[nodiscard]] std::vector<VkPipelineShaderStageCreateInfo>

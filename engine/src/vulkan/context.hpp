@@ -108,6 +108,12 @@ public:
     swapchain_image_views() const noexcept {
         return swapchainImageViews_;
     }
+    /// 与 `swapchain_image_views()` 一一对应；供 `RenderGraph` 等在每帧 `acquire`
+    /// 后做 layout 屏障或调试。
+    [[nodiscard]] const std::vector<VkImage> &
+    swapchain_images() const noexcept {
+        return swapchainImages_;
+    }
 
 private:
     Context() = default;

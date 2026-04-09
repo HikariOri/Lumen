@@ -3,6 +3,9 @@
  * @brief SPIR-V（SPIRV-Reflect）→ 中间层 `ShaderReflection` → 合并描述符与 push
  *        constant → `VkDescriptorSetLayout` / `VkPipelineLayout`
  * 的最小可用内核。
+ *
+ * @note `vulkan::Shader` 在 `create` / `load_spv` 时会调用 `reflect_spirv` 并缓存
+ *       `ShaderReflection`；多阶段合并请使用 `ShaderProgram`。
  */
 
 #pragma once

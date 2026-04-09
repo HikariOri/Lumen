@@ -18,10 +18,9 @@ bool RenderTargetBundle::is_output_to_swapchain() const noexcept {
 
 RenderTargetBundle::~RenderTargetBundle() {
     if (framebuffer_device_ != VK_NULL_HANDLE && !framebuffers_.empty()) {
-        for (const auto &entry : framebuffers_) {
-            if (entry.second != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(framebuffer_device_, entry.second,
-                                     nullptr);
+        for (const auto &[_, framebuffer] : framebuffers_) {
+            if (framebuffer != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(framebuffer_device_, framebuffer, nullptr);
             }
         }
         framebuffers_.clear();
@@ -105,7 +104,9 @@ RenderTargetBundle::get_framebuffer(const VkDevice device,
         attachments.push_back(depth_target_.view);
     }
 
-    VkFramebufferCreateInfo info { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    VkFramebufferCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+    };
     info.renderPass = render_pass;
     info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
     info.pAttachments = attachments.data();
@@ -137,6 +138,14 @@ void RenderTargetBundle::destroy(const VkDevice device) noexcept {
     }
     framebuffers_.clear();
     framebuffer_device_ = VK_NULL_HANDLE;
+}
+
+void RenderTargetBundle::reset(const VkDevice device) noexcept {
+    destroy(device);
+    color_targets_.clear();
+    depth_target_ = {};
+    width_ = 0;
+    height_ = 0;
 }
 
 } // namespace vulkan

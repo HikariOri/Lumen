@@ -60,6 +60,12 @@ public:
 
     void destroy(VkDevice device) noexcept;
 
+    /**
+     * @brief 销毁已缓存的 framebuffer，并清空附件与尺寸（用于每帧替换交换链
+     * `VkImageView` 等）。
+     */
+    void reset(VkDevice device) noexcept;
+
     [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
     [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
     [[nodiscard]] const std::vector<RenderTarget> &color_targets() const noexcept {

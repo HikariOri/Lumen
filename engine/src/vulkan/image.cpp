@@ -201,4 +201,48 @@ Image::create(const VmaAllocator allocator, const ImageCreateInfo &info) {
                  info.format, info.mipLevels, info.arrayLayers);
 }
 
+namespace {
+
+[[nodiscard]] VkImageAspectFlags default_aspect_for_format(const VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_D16_UNORM:
+    case VK_FORMAT_D32_SFLOAT:
+    case VK_FORMAT_X8_D24_UNORM_PACK32:
+        return VK_IMAGE_ASPECT_DEPTH_BIT;
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    default:
+        return VK_IMAGE_ASPECT_COLOR_BIT;
+    }
+}
+
+} // namespace
+
+void Image::record_layout_barrier(
+    const VkCommandBuffer cmd, const VkImageLayout old_layout,
+    const VkImageLayout new_layout, const VkPipelineStageFlags src_stage_mask,
+    const VkPipelineStageFlags dst_stage_mask,
+    const VkAccessFlags src_access_mask, const VkAccessFlags dst_access_mask,
+    const VkImageAspectFlags aspect) const {
+    if (!is_valid() || cmd == VK_NULL_HANDLE || old_layout == new_layout) {
+        return;
+    }
+    const VkImageAspectFlags asp =
+        aspect != 0U ? aspect : default_aspect_for_format(format_);
+    VkImageMemoryBarrier barrier { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = vkImage_;
+    barrier.subresourceRange.aspectMask = asp;
+    barrier.subresourceRange.levelCount = mipLevels_;
+    barrier.subresourceRange.layerCount = arrayLayers_;
+    barrier.srcAccessMask = src_access_mask;
+    barrier.dstAccessMask = dst_access_mask;
+    vkCmdPipelineBarrier(cmd, src_stage_mask, dst_stage_mask, 0, 0, nullptr,
+                         0, nullptr, 1, &barrier);
+}
+
 } // namespace vulkan

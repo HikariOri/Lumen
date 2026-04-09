@@ -80,6 +80,18 @@ public:
         return vkImage_ != VK_NULL_HANDLE;
     }
 
+    /**
+     * @brief 录制整幅图像（单 mip、单层）的布局屏障；`aspect` 为 0 时按 `format_`
+     * 推断颜色或深度/模板方面。
+     */
+    void record_layout_barrier(VkCommandBuffer cmd, VkImageLayout old_layout,
+                               VkImageLayout new_layout,
+                               VkPipelineStageFlags src_stage_mask,
+                               VkPipelineStageFlags dst_stage_mask,
+                               VkAccessFlags src_access_mask,
+                               VkAccessFlags dst_access_mask,
+                               VkImageAspectFlags aspect = 0) const;
+
 private:
     Image(VmaAllocator allocator, VkDevice viewDevice, VkImage img,
           VkImageView imageView, VmaAllocation allocation, VkExtent3D extent,

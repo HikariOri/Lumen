@@ -9,7 +9,8 @@
 
 namespace vulkan {
 
-RenderPass::RenderPass(const VkDevice device, const VkRenderPass render_pass) noexcept
+RenderPass::RenderPass(const VkDevice device,
+                       const VkRenderPass render_pass) noexcept
     : device_(device), vk_render_pass_(render_pass) {}
 
 void RenderPass::destroy() noexcept {
@@ -20,9 +21,7 @@ void RenderPass::destroy() noexcept {
     vk_render_pass_ = VK_NULL_HANDLE;
 }
 
-RenderPass::~RenderPass() {
-    destroy();
-}
+RenderPass::~RenderPass() { destroy(); }
 
 RenderPass::RenderPass(RenderPass &&other) noexcept
     : device_(other.device_), vk_render_pass_(other.vk_render_pass_) {
@@ -50,8 +49,7 @@ std::expected<RenderPass, std::string>
 RenderPass::create(const VkDevice device, const RenderTargetBundle &bundle,
                    const bool color_final_present_src) {
     if (device == VK_NULL_HANDLE) {
-        return std::unexpected(
-            std::string("RenderPass::create: null device"));
+        return std::unexpected(std::string("RenderPass::create: null device"));
     }
     if (bundle.color_targets().empty() && !bundle.has_depth()) {
         return std::unexpected(
@@ -153,7 +151,9 @@ RenderPass::create(const VkDevice device, const RenderTargetBundle &bundle,
         dep.dstAccessMask = dst_access;
     }
 
-    VkRenderPassCreateInfo info { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    VkRenderPassCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+    };
     info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
     info.pAttachments = attachments.data();
     info.subpassCount = 1;
@@ -162,8 +162,7 @@ RenderPass::create(const VkDevice device, const RenderTargetBundle &bundle,
     info.pDependencies = &dep;
 
     VkRenderPass rp { VK_NULL_HANDLE };
-    const VkResult res =
-        vkCreateRenderPass(device, &info, nullptr, &rp);
+    const VkResult res = vkCreateRenderPass(device, &info, nullptr, &rp);
     if (res != VK_SUCCESS) {
         return std::unexpected(
             std::string("RenderPass::create: vkCreateRenderPass failed ec=") +

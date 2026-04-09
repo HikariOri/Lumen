@@ -5,8 +5,8 @@
  * @details
  * 将固定功能阶段与动态状态分步配置后，一次调用 build() 即可完成
  * `vkCreateGraphicsPipelines`。
- * 着色器模块在成功 build() 之后由本类销毁；若 build()
- * 失败则保留模块便于调试或重试。
+ * 顶点/片段着色器模块由调用方提供并在 `build()` 完成前保持有效；本类不创建、不销毁
+ * `VkShaderModule`（可与 `vulkan::Shader` 等 RAII 配合使用）。
  */
 
 #pragma once
@@ -31,7 +31,7 @@ namespace vulkan {
 class GraphicsPipelineBuilder {
 public:
     /**
-     * @param device 用于创建着色器模块与管线的逻辑设备。
+     * @param device 用于创建图形管线的逻辑设备。
      */
     explicit GraphicsPipelineBuilder(VkDevice device);
 
@@ -41,29 +41,24 @@ public:
     GraphicsPipelineBuilder(GraphicsPipelineBuilder &&) = delete;
     GraphicsPipelineBuilder &operator=(GraphicsPipelineBuilder &&) = delete;
 
-    /** @brief 析构时销毁尚未移交的着色器模块（若仍有效）。 */
     ~GraphicsPipelineBuilder();
 
-    /** @{ @name 着色器（SPIR-V） */
+    /** @{ @name 着色器模块 */
 
     /**
-     * @brief 从 SPIR-V 创建顶点着色器模块并设置入口名（会替换已有顶点模块）。
-     * @param spirv 32 位字对齐的 SPIR-V 缓冲区。
-     * @param entry_name 入口点名，默认 @c "main"（存于内部 `std::string`，
-     *                   直至 `build()` 使用 `c_str()`）。
+     * @brief 设置顶点着色器模块与入口名（替换已有配置）。
+     * @param module 有效 `VkShaderModule`；须在 `build()` 返回前保持有效。
+     * @param entry_name 入口点名，默认 @c "main"（内部以 `std::string` 保存至 `build()`）。
      */
-    GraphicsPipelineBuilder &
-    set_vertex_shader(const std::vector<std::uint32_t> &spirv,
-                      std::string entry_name = "main");
+    GraphicsPipelineBuilder &set_vertex_shader(VkShaderModule module,
+                                               std::string entry_name = "main");
 
     /**
-     * @brief 从 SPIR-V 创建片段着色器模块并设置入口名（会替换已有片段模块）。
-     * @param spirv 32 位字对齐的 SPIR-V 缓冲区。
-     * @param entry_name 入口点名，默认 @c "main" 。
+     * @brief 设置片段着色器模块与入口名（替换已有配置）。
+     * @param module 有效 `VkShaderModule`；须在 `build()` 返回前保持有效。
      */
-    GraphicsPipelineBuilder &
-    set_fragment_shader(const std::vector<std::uint32_t> &spirv,
-                        std::string entry_name = "main");
+    GraphicsPipelineBuilder &set_fragment_shader(VkShaderModule module,
+                                                 std::string entry_name = "main");
 
     /** @} */
 
@@ -304,7 +299,7 @@ public:
     /**
      * @brief 校验配置并调用 `vkCreateGraphicsPipelines`。
      * @return 成功返回管线句柄；失败返回 `VK_NULL_HANDLE` 并写引擎日志。
-     * @note 成功时销毁内部顶点/片段着色器模块；失败时保留模块。
+     * @note 不销毁传入的着色器模块；管线创建成功后调用方可按需销毁模块。
      */
     [[nodiscard]] VkPipeline build();
 
@@ -372,14 +367,6 @@ private:
                                       VkDynamicState state);
 
     void add_dynamic_state_unique_(VkDynamicState state);
-
-    void destroy_shader_module_(VkShaderModule &module);
-
-    void destroy_shader_modules_();
-
-    [[nodiscard]] bool
-    create_shader_module_(const std::vector<std::uint32_t> &spirv,
-                          VkShaderModule &outModule);
 
     [[nodiscard]] std::vector<VkPipelineShaderStageCreateInfo>
     create_shader_stages_() const;

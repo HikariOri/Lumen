@@ -1,6 +1,6 @@
 /**
  * @file shader.cpp
- * @brief `vulkan::Shader` 实现。
+ * @brief `vulkan::Shader`：模块创建与 SPIR-V 反射。
  */
 
 #include "vulkan/shader.hpp"
@@ -11,8 +11,10 @@
 namespace vulkan {
 
 Shader::Shader(const VkDevice device, const VkShaderModule mod,
-               const VkShaderStageFlagBits stage) noexcept
-    : vk_device_(device), vk_module_(mod), stage_(stage) {}
+               const VkShaderStageFlagBits stage,
+               ShaderReflection &&reflection) noexcept
+    : vk_device_(device), vk_module_(mod), stage_(stage),
+      reflection_(std::move(reflection)) {}
 
 void Shader::destroy() noexcept {
     if (vk_device_ != VK_NULL_HANDLE && vk_module_ != VK_NULL_HANDLE) {
@@ -20,6 +22,7 @@ void Shader::destroy() noexcept {
     }
     vk_device_ = VK_NULL_HANDLE;
     vk_module_ = VK_NULL_HANDLE;
+    reflection_ = {};
 }
 
 Shader::~Shader() {
@@ -28,7 +31,7 @@ Shader::~Shader() {
 
 Shader::Shader(Shader &&other) noexcept
     : vk_device_(other.vk_device_), vk_module_(other.vk_module_),
-      stage_(other.stage_) {
+      stage_(other.stage_), reflection_(std::move(other.reflection_)) {
     other.vk_device_ = VK_NULL_HANDLE;
     other.vk_module_ = VK_NULL_HANDLE;
 }
@@ -39,6 +42,7 @@ Shader &Shader::operator=(Shader &&other) noexcept {
         vk_device_ = other.vk_device_;
         vk_module_ = other.vk_module_;
         stage_ = other.stage_;
+        reflection_ = std::move(other.reflection_);
         other.vk_device_ = VK_NULL_HANDLE;
         other.vk_module_ = VK_NULL_HANDLE;
     }
@@ -47,12 +51,18 @@ Shader &Shader::operator=(Shader &&other) noexcept {
 
 std::expected<Shader, std::string>
 Shader::create(const VkDevice device, const std::vector<std::uint32_t> &spirv,
-                const VkShaderStageFlagBits stage) {
+               const VkShaderStageFlagBits stage) {
     if (device == VK_NULL_HANDLE) {
         return std::unexpected(std::string("Shader::create: null device"));
     }
     if (spirv.empty()) {
         return std::unexpected(std::string("Shader::create: empty SPIR-V"));
+    }
+
+    auto reflection = reflect_spirv(spirv, stage);
+    if (!reflection.has_value()) {
+        return std::unexpected(std::string("Shader::create: ") +
+                               reflection.error());
     }
 
     VkShaderModuleCreateInfo info { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
@@ -67,7 +77,7 @@ Shader::create(const VkDevice device, const std::vector<std::uint32_t> &spirv,
             std::string("Shader::create: vkCreateShaderModule failed ec=") +
             std::to_string(static_cast<int>(res)));
     }
-    return Shader(device, mod, stage);
+    return Shader(device, mod, stage, std::move(*reflection));
 }
 
 std::expected<Shader, std::string>
