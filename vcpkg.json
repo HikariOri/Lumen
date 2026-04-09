@@ -46,14 +46,6 @@
       "version>=": "2.9.6"
     },
     {
-      "name": "vulkan-memory-allocator",
-      "version>=": "3.3.0"
-    },
-    {
-      "name": "volk",
-      "version>=": "1.4.309.0"
-    },
-    {
       "name": "cli11",
       "version>=": "2.6.1"
     },
@@ -119,24 +111,16 @@
       ]
     },
     {
-      "name": "spirv-reflect",
-      "version>=": "1.4.341.0"
-    },
-    {
       "name": "abseil",
       "version>=": "20260107.1#2"
     },
     {
-      "name": "vk-bootstrap",
-      "version>=": "1.4.341"
-    },
-    {
-      "name": "vulkan-headers",
-      "version>=": "1.4.341.0"
-    },
-    {
       "name": "shaderc",
       "version>=": "2026.1"
+    },
+    {
+      "name": "spirv-reflect",
+      "version>=": "1.4.341.0"
     }
   ]
 }

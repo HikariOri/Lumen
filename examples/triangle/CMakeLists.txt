@@ -1,8 +1,9 @@
 add_executable(triangle src/main.cpp)
 
-target_link_libraries(triangle PRIVATE engine)
 
-target_precompile_headers(triangle REUSE_FROM engine)
+target_link_libraries(triangle PUBLIC SDL3::SDL3)
+target_link_libraries(triangle PUBLIC $<IF:$<TARGET_EXISTS:SDL3_image::SDL3_image-shared>,SDL3_image::SDL3_image-shared,SDL3_image::SDL3_image-static>)
+target_link_libraries(triangle PUBLIC glm::glm)
 
 add_custom_command(
   TARGET triangle
@@ -15,12 +16,6 @@ add_custom_command(
   COMMAND ${GLSLC_COMPILER}
           "${CMAKE_CURRENT_LIST_DIR}/shaders/triangle.frag"
           -o "$<TARGET_FILE_DIR:triangle>/shaders/triangle.frag.spv"
-  COMMAND ${CMAKE_COMMAND} -E make_directory
-          "$<TARGET_FILE_DIR:triangle>/assets/textures"
-  COMMAND ${CMAKE_COMMAND} -E copy
-          "${CMAKE_SOURCE_DIR}/assets/textures/ikun2026_happy_new_year.jpg"
-          "$<TARGET_FILE_DIR:triangle>/assets/textures/ikun2026_happy_new_year.jpg"
-  COMMENT "Compile GLSL shaders for triangle example and copy demo texture"
+  COMMENT "Compile GLSL shaders for SDL GPU triangle example"
   VERBATIM
 )
-

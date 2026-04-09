@@ -52,6 +52,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_subdirectory(third_party)
 
-add_subdirectory(engine)
+# add_subdirectory(engine)
 add_subdirectory(examples)
 add_subdirectory(test)
