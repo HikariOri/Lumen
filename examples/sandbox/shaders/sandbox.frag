@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 proj;
     mat4 viewProj;
 
-    vec4 cameraPos;
+    vec3 cameraPos;
 
     vec4 exposureIblMips;
 
