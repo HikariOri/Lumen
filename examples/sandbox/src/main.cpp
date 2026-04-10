@@ -4,6 +4,7 @@
  */
 
 #include "core/log/logger.hpp"
+#include "pch.hpp"
 #include "platform/event.hpp"
 #include "platform/event_dispatcher.hpp"
 #include "platform/event_pump.hpp"
@@ -15,6 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <print>
 #include <string>
@@ -51,6 +53,23 @@
     }
     return out;
 }
+
+struct AllocatedBuffer {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+};
+
+struct UploadContext {
+    VkFence fence;
+
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
+};
+
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+};
 
 int main() {
     // 初始化日志
@@ -141,6 +160,41 @@ int main() {
             LUMEN_APP_LOG_ERROR("Failed to create fragment shader module");
         }
     }
+
+    // shader 数据
+    std::vector<Vertex> vertices = {
+        { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+        { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
+        { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+    };
+
+    // vertex buffer
+    // VkBuffer vertexBuffer {};
+    // VmaAllocation vertexAllocation {};
+
+    // {
+    //     VkBufferCreateInfo bufferCreateInfo {
+    //         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+    //     };
+    //     bufferCreateInfo.size = sizeof(Vertex) * vertices.size();
+    //     bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    //     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    //     VmaAllocationCreateInfo allocationCreateInfo {};
+    //     allocationCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    //     allocationCreateInfo.flags =
+    //         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+    //         VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    //     VmaAllocationInfo allocResult {};
+
+    //     vmaCreateBuffer(context->allocator(), &bufferCreateInfo,
+    //                     &allocationCreateInfo, &vertexBuffer,
+    //                     &vertexAllocation, &allocResult);
+
+    //     memcpy(allocResult.pMappedData, vertices.data(),
+    //            sizeof(Vertex) * vertices.size());
+    // }
 
     // 创建 Renader Pass
     VkRenderPass renderPass {};
@@ -331,10 +385,30 @@ int main() {
         };
 
         {
-            vertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
-            vertexInputStateCreateInfo.pVertexBindingDescriptions = nullptr;
-            vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
-            vertexInputStateCreateInfo.pVertexAttributeDescriptions = nullptr;
+
+            VkVertexInputBindingDescription binding {};
+            binding.binding = 0;
+            binding.stride = sizeof(Vertex);
+            binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+            std::array<VkVertexInputAttributeDescription, 2> attributes {};
+            attributes[0].binding = 0;
+            attributes[0].location = 0;
+            attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributes[0].offset = offsetof(Vertex, pos);
+
+            attributes[1].binding = 0;
+            attributes[1].location = 1;
+            attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributes[1].offset = offsetof(Vertex, color);
+
+            vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
+            vertexInputStateCreateInfo.pVertexBindingDescriptions = &binding;
+
+            vertexInputStateCreateInfo.vertexAttributeDescriptionCount =
+                attributes.size();
+            vertexInputStateCreateInfo.pVertexAttributeDescriptions =
+                attributes.data();
         }
 
         // 3. input assembly
@@ -625,6 +699,138 @@ int main() {
 
     std::uint64_t timelineValue = 0;
 
+    UploadContext uploadContext {};
+    {
+        VkFenceCreateInfo fenceCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+        };
+        fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        vkCreateFence(device, &fenceCreateInfo, nullptr, &uploadContext.fence);
+
+        VkCommandPoolCreateInfo commandPoolCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        };
+        commandPoolCreateInfo.flags =
+            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        commandPoolCreateInfo.queueFamilyIndex =
+            context->graphics_queue_family();
+        vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr,
+                            &uploadContext.commandPool);
+
+        VkCommandBufferAllocateInfo commandBufferAllocateInfo {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        };
+        commandBufferAllocateInfo.commandPool = uploadContext.commandPool;
+        commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        commandBufferAllocateInfo.commandBufferCount = 1;
+        vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
+                                 &uploadContext.commandBuffer);
+    }
+
+    const auto immediate_submit =
+        [&](std::function<void(VkCommandBuffer cmd)> &&function) {
+            // 1. 等 GPU 完成上一次上传
+            vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
+                            UINT64_MAX);
+
+            // 2. 重置 fence
+            vkResetFences(device, 1, &uploadContext.fence);
+
+            // 3. 重置  command buffer
+            vkResetCommandBuffer(uploadContext.commandBuffer, 0);
+
+            // 4. 开始录制
+            VkCommandBufferBeginInfo beginInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+            };
+            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+            vkBeginCommandBuffer(uploadContext.commandBuffer, &beginInfo);
+
+            // 5. 用户录制 copy / barrier 等命令
+            function(uploadContext.commandBuffer);
+
+            vkEndCommandBuffer(uploadContext.commandBuffer);
+
+            // 6.提交
+            VkSubmitInfo2 submitInfo { .sType =
+                                           VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+
+            VkCommandBufferSubmitInfo commandBufferInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO
+            };
+            commandBufferInfo.commandBuffer = uploadContext.commandBuffer;
+            // commandBufferInfo.deviceMask = 1;
+
+            submitInfo.commandBufferInfoCount = 1;
+            submitInfo.pCommandBufferInfos = &commandBufferInfo;
+
+            vkQueueSubmit2(context->graphics_queue(), 1, &submitInfo,
+                           uploadContext.fence);
+        };
+
+    const auto create_buffer = [&](std::size_t size, VkBufferUsageFlags usage,
+                                   VmaMemoryUsage memoryUsage,
+                                   VmaAllocationCreateFlags flags) {
+        AllocatedBuffer buffer {};
+
+        VkBufferCreateInfo bufferCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        };
+        bufferCreateInfo.size = size;
+        bufferCreateInfo.usage = usage;
+
+        VmaAllocationCreateInfo allocationCreateInfo {};
+        allocationCreateInfo.usage = memoryUsage;
+        allocationCreateInfo.flags = flags;
+
+        vmaCreateBuffer(context->allocator(), &bufferCreateInfo,
+                        &allocationCreateInfo, &buffer.buffer,
+                        &buffer.allocation, nullptr);
+
+        return buffer;
+    };
+
+    // vertex buffer
+    AllocatedBuffer vertexBuffer {};
+    {
+        // 创建 staging buffer
+        AllocatedBuffer stagingBuffer = create_buffer(
+            sizeof(Vertex) * vertices.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VMA_MEMORY_USAGE_AUTO,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
+        // 映射内存
+        void *mapped {};
+        vmaMapMemory(context->allocator(), stagingBuffer.allocation, &mapped);
+        // 复制数据
+        memcpy(mapped, vertices.data(), sizeof(Vertex) * vertices.size());
+        // 解映射
+        vmaUnmapMemory(context->allocator(), stagingBuffer.allocation);
+
+        vertexBuffer =
+            create_buffer(sizeof(Vertex) * vertices.size(),
+                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                          VMA_MEMORY_USAGE_GPU_ONLY,
+                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+        // copy 内存
+
+        immediate_submit([&](VkCommandBuffer cmd) {
+            VkBufferCopy copy {};
+            copy.srcOffset = 0;
+            copy.dstOffset = 0;
+            copy.size = sizeof(Vertex) * vertices.size();
+
+            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, vertexBuffer.buffer, 1,
+                            &copy);
+        });
+
+        vmaDestroyBuffer(context->allocator(), stagingBuffer.buffer,
+                         stagingBuffer.allocation);
+    }
+
     // 渲染循环
     while (running && pump.poll()) {
 
@@ -653,6 +859,7 @@ int main() {
                 .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR
             };
 
+            acquireNextImageInfo.deviceMask = 1;
             acquireNextImageInfo.swapchain = context->swapchain();
             acquireNextImageInfo.timeout = UINT64_MAX;
             acquireNextImageInfo.semaphore =
@@ -717,6 +924,10 @@ int main() {
             };
             vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &dynamicScissor);
 
+            VkDeviceSize offsets {};
+
+            vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1,
+                                   &vertexBuffer.buffer, &offsets);
             vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 
             vkCmdEndRenderPass(commandBuffers[imageIndex]);
@@ -806,6 +1017,13 @@ int main() {
 
     vkDeviceWaitIdle(device);
 
+    // 须先于 vmaDestroyBuffer(vertex)：录制过 bind/copy 的 command buffer
+    // 仍引用该 buffer，校验层在 pool 仍存在时会报
+    // VUID-vkDestroyBuffer-buffer-00922。
+    vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
+    vkDestroyFence(device, uploadContext.fence, nullptr);
+    vkDestroyCommandPool(device, commandPool, nullptr);
+
     for (VkFramebuffer fb : framebuffers) {
         vkDestroyFramebuffer(device, fb, nullptr);
     }
@@ -816,6 +1034,9 @@ int main() {
 
     vkDestroyImageView(device, depthImageView, nullptr);
     vmaDestroyImage(context->allocator(), depthImage, depthAllocation);
+
+    vmaDestroyBuffer(context->allocator(), vertexBuffer.buffer,
+                     vertexBuffer.allocation);
 
     for (std::size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
@@ -828,8 +1049,6 @@ int main() {
     if (timelineSemaphore != VK_NULL_HANDLE) {
         vkDestroySemaphore(device, timelineSemaphore, nullptr);
     }
-
-    vkDestroyCommandPool(device, commandPool, nullptr);
 
     core::log::Logger::shutdown();
     SDL_Quit();

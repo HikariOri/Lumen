@@ -392,14 +392,33 @@ std::expected<void, std::string> Context::create_device() {
 
     const char *swapchainExtensionName = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 
+    VkPhysicalDeviceSynchronization2Features synchronization2Features {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+        .synchronization2 = VK_TRUE,
+    };
+
+    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
+        .pNext = &synchronization2Features,
+        .timelineSemaphore = VK_TRUE,
+    };
+
+    VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &timelineSemaphoreFeatures,
+        .features = {},
+    };
+
     VkDeviceCreateInfo deviceCreateInfo {
         VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
     };
+    deviceCreateInfo.pNext = &physicalDeviceFeatures2;
     deviceCreateInfo.queueCreateInfoCount =
         static_cast<std::uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.enabledExtensionCount = 1;
     deviceCreateInfo.ppEnabledExtensionNames = &swapchainExtensionName;
+    deviceCreateInfo.pEnabledFeatures = nullptr;
 
     const VkResult createResult =
         vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &vkDevice_);
