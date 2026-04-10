@@ -642,11 +642,25 @@ int main() {
             vkWaitSemaphores(device, &waitInfo, UINT64_MAX);
         }
 
-        // 获取 swapchiain image
+        // 获取 swapchiain image index
         std::uint32_t imageIndex {};
-        vkAcquireNextImageKHR(device, context->swapchain(), UINT64_MAX,
-                              imageAvailableSemaphores[currentFrame],
-                              VK_NULL_HANDLE, &imageIndex);
+        {
+            // VkDevice                                    device,
+            // const VkAcquireNextImageInfoKHR*            pAcquireInfo,
+            // uint32_t*                                   pImageIndex;
+
+            VkAcquireNextImageInfoKHR acquireNextImageInfo {
+                .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR
+            };
+
+            acquireNextImageInfo.swapchain = context->swapchain();
+            acquireNextImageInfo.timeout = UINT64_MAX;
+            acquireNextImageInfo.semaphore =
+                imageAvailableSemaphores[currentFrame];
+            acquireNextImageInfo.fence = VK_NULL_HANDLE;
+
+            vkAcquireNextImage2KHR(device, &acquireNextImageInfo, &imageIndex);
+        }
 
         // 重置并录制 command buffer
         vkResetCommandBuffer(commandBuffers[imageIndex], 0);
@@ -712,62 +726,79 @@ int main() {
 
         // 提交 GPU（混用 binary + timeline 时，Timeline 扩展里 value
         // 数组长度须与 wait/signal 数量一致；binary 对应项的值会被忽略）
-        const std::uint64_t signalValue = timelineValue + 1;
-        std::array<std::uint64_t, 2> waitSemaphoreValues { 0, timelineValue };
-        std::array<std::uint64_t, 2> signalSemaphoreValues { signalValue, 0 };
+        {
+            const std::uint64_t signalValue = timelineValue + 1;
 
-        VkTimelineSemaphoreSubmitInfo timelineSubmit {
-            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
-        };
-        timelineSubmit.waitSemaphoreValueCount =
-            static_cast<std::uint32_t>(waitSemaphoreValues.size());
-        timelineSubmit.pWaitSemaphoreValues = waitSemaphoreValues.data();
-        timelineSubmit.signalSemaphoreValueCount =
-            static_cast<std::uint32_t>(signalSemaphoreValues.size());
-        timelineSubmit.pSignalSemaphoreValues = signalSemaphoreValues.data();
+            // wait
+            std::array<VkSemaphoreSubmitInfo, 2> waitInfos {};
 
-        VkSubmitInfo submitInfo { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+            // imageAvailableSemaphores[currentFrame] (binary)
+            waitInfos[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            waitInfos[0].semaphore = imageAvailableSemaphores[currentFrame];
+            waitInfos[0].value = 0; // 忽略
+            waitInfos[0].stageMask =
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-        VkSemaphore waitSemaphores[] = {
-            imageAvailableSemaphores[currentFrame], // acquire
-            timelineSemaphore                       // timeline
-        };
-        VkPipelineStageFlags waitStages[] = {
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-        };
-        VkSemaphore signalSemaphores[] = {
-            timelineSemaphore,            // GPU进度
-            presentSemaphores[imageIndex] // 给 present
-        };
+            waitInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            waitInfos[1].semaphore = timelineSemaphore;
+            waitInfos[1].value = timelineValue;
+            waitInfos[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
-        submitInfo.pNext = &timelineSubmit;
+            // signal
+            std::array<VkSemaphoreSubmitInfo, 2> signalInfos {};
 
-        submitInfo.waitSemaphoreCount = 2;
-        submitInfo.pWaitSemaphores = waitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
+            // timeline
+            signalInfos[0].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            signalInfos[0].semaphore = timelineSemaphore;
+            signalInfos[0].value = signalValue;
+            signalInfos[0].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
-        submitInfo.signalSemaphoreCount = 2;
-        submitInfo.pSignalSemaphores = signalSemaphores;
+            // presentSemaphores[imageIndex] (binary)
+            signalInfos[1].sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+            signalInfos[1].semaphore = presentSemaphores[imageIndex];
+            signalInfos[1].value = 0; // 忽略
+            signalInfos[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
+            // command buffer
+            VkCommandBufferSubmitInfo commandBufferInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO
+            };
 
-        vkQueueSubmit(context->graphics_queue(), 1, &submitInfo,
-                      VK_NULL_HANDLE);
+            commandBufferInfo.commandBuffer = commandBuffers[imageIndex];
+            // uint32_t           deviceMask;
+
+            VkSubmitInfo2 submitInfo { .sType =
+                                           VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+
+            submitInfo.waitSemaphoreInfoCount = waitInfos.size();
+            submitInfo.pWaitSemaphoreInfos = waitInfos.data();
+
+            submitInfo.signalSemaphoreInfoCount = signalInfos.size();
+            submitInfo.pSignalSemaphoreInfos = signalInfos.data();
+
+            submitInfo.commandBufferInfoCount = 1;
+            submitInfo.pCommandBufferInfos = &commandBufferInfo;
+
+            vkQueueSubmit2(context->graphics_queue(), 1, &submitInfo,
+                           VK_NULL_HANDLE);
+        }
+
         // present
-        VkPresentInfoKHR presentInfo { .sType =
-                                           VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        {
+            VkPresentInfoKHR presentInfo {
+                .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+            };
 
-        auto swapchain = context->swapchain();
-        presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &presentSemaphores[imageIndex];
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &swapchain;
-        presentInfo.pImageIndices = &imageIndex;
-        // presentInfo.pResults;
+            auto swapchain = context->swapchain();
+            presentInfo.waitSemaphoreCount = 1;
+            presentInfo.pWaitSemaphores = &presentSemaphores[imageIndex];
+            presentInfo.swapchainCount = 1;
+            presentInfo.pSwapchains = &swapchain;
+            presentInfo.pImageIndices = &imageIndex;
+            // presentInfo.pResults;
 
-        vkQueuePresentKHR(context->present_queue(), &presentInfo);
+            vkQueuePresentKHR(context->present_queue(), &presentInfo);
+        }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
         timelineValue++;
