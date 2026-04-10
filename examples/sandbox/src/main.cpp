@@ -29,15 +29,15 @@
 struct AllocatedBuffer {
     VkBuffer buffer;
     VmaAllocation allocation;
-};  
+};
 
 struct UploadContext {
     VkFence fence;
 
-    VkCommandPool commandPool;   
+    VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
 };
-   
+
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
@@ -53,11 +53,16 @@ struct FrameUBO {
     float time {};
 
     glm::vec2 sceenSize;
+
+    glm::vec4 exposureIblMips;
+
+    int debugMode;
 };
 
 // 每 Object 一个，用 ring buffer 管理
 struct ObjectUBO {
     glm::mat4 model;
+    glm::mat4 normalMatrix;
 };
 
 int main() {
@@ -320,8 +325,7 @@ int main() {
     // 创建图形管线
     VkPipeline graphicsPipeline {};
     VkPipelineLayout pipelineLayout {};
-    VkDescriptorSetLayout descriptorSetLayoutScene {};
-    VkDescriptorSetLayout descriptorSetLayoutEmpty {};
+    VkDescriptorSetLayout descriptorSetLayoutFrame {};
     VkDescriptorSetLayout descriptorSetLayoutObject {};
     {
 
@@ -518,35 +522,26 @@ int main() {
                 dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
             }
 
-            // 10. layout：shader 使用 set0=SceneUBO、set2=ObjectUBO，须提供 set1 空
-            // layout 占位（pipelineLayout 下标与 GLSL set 号一致）。
+            // 10. layout：与 sandbox.vert 一致 — set0=FrameUBO，set1=ObjectUBO
             {
                 VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
                 };
 
-                VkDescriptorSetLayoutBinding sceneBinding {};
-                sceneBinding.binding = 0;
-                sceneBinding.descriptorType =
+                VkDescriptorSetLayoutBinding frameBinding {};
+                frameBinding.binding = 0;
+                frameBinding.descriptorType =
                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-                sceneBinding.descriptorCount = 1;
-                sceneBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+                frameBinding.descriptorCount = 1;
+                frameBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-                VkDescriptorSetLayoutCreateInfo sceneLayoutInfo {
+                VkDescriptorSetLayoutCreateInfo frameLayoutInfo {
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
                 };
-                sceneLayoutInfo.bindingCount = 1;
-                sceneLayoutInfo.pBindings = &sceneBinding;
-                vkCreateDescriptorSetLayout(context->device(), &sceneLayoutInfo,
-                                            nullptr, &descriptorSetLayoutScene);
-
-                VkDescriptorSetLayoutCreateInfo emptyLayoutInfo {
-                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-                };
-                emptyLayoutInfo.bindingCount = 0;
-                emptyLayoutInfo.pBindings = nullptr;
-                vkCreateDescriptorSetLayout(context->device(), &emptyLayoutInfo,
-                                            nullptr, &descriptorSetLayoutEmpty);
+                frameLayoutInfo.bindingCount = 1;
+                frameLayoutInfo.pBindings = &frameBinding;
+                vkCreateDescriptorSetLayout(context->device(), &frameLayoutInfo,
+                                            nullptr, &descriptorSetLayoutFrame);
 
                 VkDescriptorSetLayoutBinding objectBinding {};
                 objectBinding.binding = 0;
@@ -560,18 +555,19 @@ int main() {
                 };
                 objectLayoutInfo.bindingCount = 1;
                 objectLayoutInfo.pBindings = &objectBinding;
-                vkCreateDescriptorSetLayout(context->device(), &objectLayoutInfo,
-                                            nullptr, &descriptorSetLayoutObject);
+                vkCreateDescriptorSetLayout(context->device(),
+                                            &objectLayoutInfo, nullptr,
+                                            &descriptorSetLayoutObject);
 
-                const std::array<VkDescriptorSetLayout, 3> pipelineSetLayouts {
-                    descriptorSetLayoutScene,
-                    descriptorSetLayoutEmpty,
+                const std::array<VkDescriptorSetLayout, 2> pipelineSetLayouts {
+                    descriptorSetLayoutFrame,
                     descriptorSetLayoutObject,
                 };
 
                 pipelineLayoutCreateInfo.setLayoutCount =
                     static_cast<std::uint32_t>(pipelineSetLayouts.size());
-                pipelineLayoutCreateInfo.pSetLayouts = pipelineSetLayouts.data();
+                pipelineLayoutCreateInfo.pSetLayouts =
+                    pipelineSetLayouts.data();
 
                 pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
                 pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
@@ -885,9 +881,9 @@ int main() {
     vmaMapMemory(context->allocator(), objectiformBuffer.allocation,
                  &objectUBOMapped);
 
-    // 描述符：set0=Scene/frame UBO，set1 空，set2=Object UBO（与 shader set 号一致）
+    // 描述符：set0=FrameUBO，set1=ObjectUBO（与 sandbox.vert 一致）
     VkDescriptorPool descriptorPool {};
-    std::array<VkDescriptorSet, 3> descriptorSets {};
+    std::array<VkDescriptorSet, 2> descriptorSets {};
     {
         VkDescriptorPoolSize poolSize {};
         poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -896,15 +892,14 @@ int main() {
         VkDescriptorPoolCreateInfo poolCreateInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
         };
-        poolCreateInfo.maxSets = 3;
+        poolCreateInfo.maxSets = 2;
         poolCreateInfo.poolSizeCount = 1;
         poolCreateInfo.pPoolSizes = &poolSize;
         vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
                                &descriptorPool);
 
-        const std::array<VkDescriptorSetLayout, 3> allocSetLayouts {
-            descriptorSetLayoutScene,
-            descriptorSetLayoutEmpty,
+        const std::array<VkDescriptorSetLayout, 2> allocSetLayouts {
+            descriptorSetLayoutFrame,
             descriptorSetLayoutObject,
         };
 
@@ -941,7 +936,7 @@ int main() {
         writeDescriptorSets[0].descriptorCount = 1;
         writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
 
-        writeDescriptorSets[1].dstSet = descriptorSets[2];
+        writeDescriptorSets[1].dstSet = descriptorSets[1];
         writeDescriptorSets[1].dstBinding = 0;
         writeDescriptorSets[1].dstArrayElement = 0;
         writeDescriptorSets[1].descriptorType =
@@ -975,6 +970,9 @@ int main() {
 
                 objectUBO.model =
                     glm::rotate(glm::mat4(1.0F), time, glm::vec3(0, 0, 1));
+                const glm::mat3 normal3 =
+                    glm::transpose(glm::inverse(glm::mat3(objectUBO.model)));
+                objectUBO.normalMatrix = glm::mat4(normal3);
                 memcpy(dst, &objectUBO, sizeof(objectUBO));
             }
         }
@@ -1196,8 +1194,7 @@ int main() {
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorSetLayout(device, descriptorSetLayoutObject, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutEmpty, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutScene, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutFrame, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
 
     vkDestroyImageView(device, depthImageView, nullptr);
