@@ -24,51 +24,40 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
-[[nodiscard]] std::vector<std::byte> load_spirv(const std::string &filename) {
-    std::ifstream file { filename, std::ios::ate | std::ios::binary };
-
-    if (!file) {
-        LUMEN_APP_LOG_ERROR("Failed to open file: {}", filename);
-        return {};
-    }
-
-    const auto end = file.tellg();
-    if (end <= 0) {
-        LUMEN_APP_LOG_ERROR("SPIR-V 文件为空或无效: {}", filename);
-        return {};
-    }
-    const auto size = static_cast<std::size_t>(end);
-    if (size % sizeof(std::uint32_t) != 0U) {
-        LUMEN_APP_LOG_ERROR("SPIR-V 文件大小须为 4 的倍数: {}", filename);
-        return {};
-    }
-
-    file.seekg(0);
-    std::vector<std::byte> out(size);
-    file.read(reinterpret_cast<char *>(out.data()), // NOLINT
-              static_cast<std::streamsize>(size));
-    if (!file) {
-        LUMEN_APP_LOG_ERROR("SPIR-V 读取失败: {}", filename);
-        return {};
-    }
-    return out;
-}
+#include "utils.hpp"
 
 struct AllocatedBuffer {
     VkBuffer buffer;
     VmaAllocation allocation;
-};
+};  
 
 struct UploadContext {
     VkFence fence;
 
-    VkCommandPool commandPool;
+    VkCommandPool commandPool;   
     VkCommandBuffer commandBuffer;
 };
-
+   
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
+};
+
+// 建议：每帧一个，用 ring buffer 管理
+struct FrameUBO {
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 viewProj;
+
+    glm::vec3 cameraPos;
+    float time {};
+
+    glm::vec2 sceenSize;
+};
+
+// 每 Object 一个，用 ring buffer 管理
+struct ObjectUBO {
+    glm::mat4 model;
 };
 
 int main() {
@@ -167,34 +156,6 @@ int main() {
         { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
         { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
     };
-
-    // vertex buffer
-    // VkBuffer vertexBuffer {};
-    // VmaAllocation vertexAllocation {};
-
-    // {
-    //     VkBufferCreateInfo bufferCreateInfo {
-    //         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
-    //     };
-    //     bufferCreateInfo.size = sizeof(Vertex) * vertices.size();
-    //     bufferCreateInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    //     bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    //     VmaAllocationCreateInfo allocationCreateInfo {};
-    //     allocationCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    //     allocationCreateInfo.flags =
-    //         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-    //         VMA_ALLOCATION_CREATE_MAPPED_BIT;
-
-    //     VmaAllocationInfo allocResult {};
-
-    //     vmaCreateBuffer(context->allocator(), &bufferCreateInfo,
-    //                     &allocationCreateInfo, &vertexBuffer,
-    //                     &vertexAllocation, &allocResult);
-
-    //     memcpy(allocResult.pMappedData, vertices.data(),
-    //            sizeof(Vertex) * vertices.size());
-    // }
 
     // 创建 Renader Pass
     VkRenderPass renderPass {};
@@ -359,6 +320,9 @@ int main() {
     // 创建图形管线
     VkPipeline graphicsPipeline {};
     VkPipelineLayout pipelineLayout {};
+    VkDescriptorSetLayout descriptorSetLayoutScene {};
+    VkDescriptorSetLayout descriptorSetLayoutEmpty {};
+    VkDescriptorSetLayout descriptorSetLayoutObject {};
     {
 
         // 1. shader stages
@@ -554,18 +518,63 @@ int main() {
                 dynamicStateCreateInfo.pDynamicStates = dynamicStates.data();
             }
 
-            // 10. layout
+            // 10. layout：shader 使用 set0=SceneUBO、set2=ObjectUBO，须提供 set1 空
+            // layout 占位（pipelineLayout 下标与 GLSL set 号一致）。
             {
                 VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
                 };
 
-                {
-                    pipelineLayoutCreateInfo.setLayoutCount = 0;
-                    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
-                    pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
-                    pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
-                }
+                VkDescriptorSetLayoutBinding sceneBinding {};
+                sceneBinding.binding = 0;
+                sceneBinding.descriptorType =
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+                sceneBinding.descriptorCount = 1;
+                sceneBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+                VkDescriptorSetLayoutCreateInfo sceneLayoutInfo {
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                };
+                sceneLayoutInfo.bindingCount = 1;
+                sceneLayoutInfo.pBindings = &sceneBinding;
+                vkCreateDescriptorSetLayout(context->device(), &sceneLayoutInfo,
+                                            nullptr, &descriptorSetLayoutScene);
+
+                VkDescriptorSetLayoutCreateInfo emptyLayoutInfo {
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                };
+                emptyLayoutInfo.bindingCount = 0;
+                emptyLayoutInfo.pBindings = nullptr;
+                vkCreateDescriptorSetLayout(context->device(), &emptyLayoutInfo,
+                                            nullptr, &descriptorSetLayoutEmpty);
+
+                VkDescriptorSetLayoutBinding objectBinding {};
+                objectBinding.binding = 0;
+                objectBinding.descriptorType =
+                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+                objectBinding.descriptorCount = 1;
+                objectBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+                VkDescriptorSetLayoutCreateInfo objectLayoutInfo {
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                };
+                objectLayoutInfo.bindingCount = 1;
+                objectLayoutInfo.pBindings = &objectBinding;
+                vkCreateDescriptorSetLayout(context->device(), &objectLayoutInfo,
+                                            nullptr, &descriptorSetLayoutObject);
+
+                const std::array<VkDescriptorSetLayout, 3> pipelineSetLayouts {
+                    descriptorSetLayoutScene,
+                    descriptorSetLayoutEmpty,
+                    descriptorSetLayoutObject,
+                };
+
+                pipelineLayoutCreateInfo.setLayoutCount =
+                    static_cast<std::uint32_t>(pipelineSetLayouts.size());
+                pipelineLayoutCreateInfo.pSetLayouts = pipelineSetLayouts.data();
+
+                pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+                pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
 
                 if (vkCreatePipelineLayout(context->device(),
                                            &pipelineLayoutCreateInfo, nullptr,
@@ -767,6 +776,11 @@ int main() {
 
             vkQueueSubmit2(context->graphics_queue(), 1, &submitInfo,
                            uploadContext.fence);
+
+            // 须在本次 submit 之后再等 fence，否则 staging 可能在 copy
+            // 完成前被销毁。
+            vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
+                            UINT64_MAX);
         };
 
     const auto create_buffer = [&](std::size_t size, VkBufferUsageFlags usage,
@@ -831,9 +845,139 @@ int main() {
                          stagingBuffer.allocation);
     }
 
+    AllocatedBuffer frameUniformBuffer {};
+    void *frameUBOMapped {};
+
+    VkPhysicalDeviceProperties physicalDeviceProps {};
+    vkGetPhysicalDeviceProperties(context->physical_device(),
+                                  &physicalDeviceProps);
+    const VkDeviceSize minUniformBufferOffsetAlignment =
+        physicalDeviceProps.limits.minUniformBufferOffsetAlignment;
+    const VkDeviceSize frameUBOalignedUboSize =
+        (static_cast<VkDeviceSize>(sizeof(FrameUBO)) +
+         minUniformBufferOffsetAlignment - 1) &
+        ~(minUniformBufferOffsetAlignment - 1);
+
+    // 分配 UBO（多帧环形：勿在内层再声明 uniformBuffer，否则会遮蔽外层句柄）
+    frameUniformBuffer = create_buffer(
+        static_cast<std::size_t>(
+            frameUBOalignedUboSize *
+            static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    vmaMapMemory(context->allocator(), frameUniformBuffer.allocation,
+                 &frameUBOMapped);
+
+    AllocatedBuffer objectiformBuffer {};
+    void *objectUBOMapped {};
+
+    const VkDeviceSize ubjectUBOalignedUboSize =
+        (static_cast<VkDeviceSize>(sizeof(ObjectUBO)) +
+         minUniformBufferOffsetAlignment - 1) &
+        ~(minUniformBufferOffsetAlignment - 1);
+
+    objectiformBuffer = create_buffer(
+        static_cast<std::size_t>(
+            ubjectUBOalignedUboSize *
+            static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+    vmaMapMemory(context->allocator(), objectiformBuffer.allocation,
+                 &objectUBOMapped);
+
+    // 描述符：set0=Scene/frame UBO，set1 空，set2=Object UBO（与 shader set 号一致）
+    VkDescriptorPool descriptorPool {};
+    std::array<VkDescriptorSet, 3> descriptorSets {};
+    {
+        VkDescriptorPoolSize poolSize {};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        poolSize.descriptorCount = 2;
+
+        VkDescriptorPoolCreateInfo poolCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        };
+        poolCreateInfo.maxSets = 3;
+        poolCreateInfo.poolSizeCount = 1;
+        poolCreateInfo.pPoolSizes = &poolSize;
+        vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
+                               &descriptorPool);
+
+        const std::array<VkDescriptorSetLayout, 3> allocSetLayouts {
+            descriptorSetLayoutScene,
+            descriptorSetLayoutEmpty,
+            descriptorSetLayoutObject,
+        };
+
+        VkDescriptorSetAllocateInfo allocInfo {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+        };
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount =
+            static_cast<std::uint32_t>(allocSetLayouts.size());
+        allocInfo.pSetLayouts = allocSetLayouts.data();
+
+        vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data());
+
+        VkDescriptorBufferInfo bufferInfoFrame {};
+        bufferInfoFrame.buffer = frameUniformBuffer.buffer;
+        bufferInfoFrame.offset = 0;
+        bufferInfoFrame.range = frameUBOalignedUboSize;
+
+        VkDescriptorBufferInfo bufferInfoObject {};
+        bufferInfoObject.buffer = objectiformBuffer.buffer;
+        bufferInfoObject.offset = 0;
+        bufferInfoObject.range = ubjectUBOalignedUboSize;
+
+        std::array<VkWriteDescriptorSet, 2> writeDescriptorSets {};
+
+        writeDescriptorSets[0].sType = writeDescriptorSets[1].sType =
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+
+        writeDescriptorSets[0].dstSet = descriptorSets[0];
+        writeDescriptorSets[0].dstBinding = 0;
+        writeDescriptorSets[0].dstArrayElement = 0;
+        writeDescriptorSets[0].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        writeDescriptorSets[0].descriptorCount = 1;
+        writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
+
+        writeDescriptorSets[1].dstSet = descriptorSets[2];
+        writeDescriptorSets[1].dstBinding = 0;
+        writeDescriptorSets[1].dstArrayElement = 0;
+        writeDescriptorSets[1].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        writeDescriptorSets[1].descriptorCount = 1;
+        writeDescriptorSets[1].pBufferInfo = &bufferInfoObject;
+
+        vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
+                               writeDescriptorSets.data(), 0, nullptr);
+    }
+
     // 渲染循环
     while (running && pump.poll()) {
 
+        // 更新 UBO
+        int frameIndex = currentFrame;
+        {
+            auto time = static_cast<float>(SDL_GetTicks() / 1000.0F);
+            {
+                char *dst = (char *)frameUBOMapped +
+                            frameIndex * frameUBOalignedUboSize;
+                FrameUBO frameUBO {};
+                frameUBO.time = time;
+                memcpy(dst, &frameUBO, sizeof(frameUBO));
+            }
+
+            {
+                ObjectUBO objectUBO {};
+                char *dst = (char *)objectUBOMapped +
+                            frameIndex * ubjectUBOalignedUboSize;
+
+                objectUBO.model =
+                    glm::rotate(glm::mat4(1.0F), time, glm::vec3(0, 0, 1));
+                memcpy(dst, &objectUBO, sizeof(objectUBO));
+            }
+        }
         // 等上一帧 GPU 完成
         {
             uint64_t waitValue = timelineValue;
@@ -928,6 +1072,21 @@ int main() {
 
             vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1,
                                    &vertexBuffer.buffer, &offsets);
+
+            const std::array<uint32_t, 2> dynamicOffsets {
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
+                                      frameUBOalignedUboSize),
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
+                                      ubjectUBOalignedUboSize),
+            };
+            vkCmdBindDescriptorSets(
+                commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                pipelineLayout, 0,
+                static_cast<std::uint32_t>(descriptorSets.size()),
+                descriptorSets.data(),
+                static_cast<std::uint32_t>(dynamicOffsets.size()),
+                dynamicOffsets.data());
+
             vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 
             vkCmdEndRenderPass(commandBuffers[imageIndex]);
@@ -1017,9 +1176,14 @@ int main() {
 
     vkDeviceWaitIdle(device);
 
-    // 须先于 vmaDestroyBuffer(vertex)：录制过 bind/copy 的 command buffer
-    // 仍引用该 buffer，校验层在 pool 仍存在时会报
+    // 清空录制内容再销毁 pool：部分校验层在 pool 仍存在时，仍认为 CB「引用」
+    // vertex/uniform buffer（即使已 wait idle），导致
     // VUID-vkDestroyBuffer-buffer-00922。
+    vkResetCommandBuffer(uploadContext.commandBuffer, 0);
+    for (VkCommandBuffer cb : commandBuffers) {
+        vkResetCommandBuffer(cb, 0);
+    }
+
     vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
     vkDestroyFence(device, uploadContext.fence, nullptr);
     vkDestroyCommandPool(device, commandPool, nullptr);
@@ -1030,10 +1194,22 @@ int main() {
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutObject, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutEmpty, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutScene, nullptr);
     vkDestroyRenderPass(device, renderPass, nullptr);
 
     vkDestroyImageView(device, depthImageView, nullptr);
     vmaDestroyImage(context->allocator(), depthImage, depthAllocation);
+
+    vmaUnmapMemory(context->allocator(), frameUniformBuffer.allocation);
+    vmaDestroyBuffer(context->allocator(), frameUniformBuffer.buffer,
+                     frameUniformBuffer.allocation);
+
+    vmaUnmapMemory(context->allocator(), objectiformBuffer.allocation);
+    vmaDestroyBuffer(context->allocator(), objectiformBuffer.buffer,
+                     objectiformBuffer.allocation);
 
     vmaDestroyBuffer(context->allocator(), vertexBuffer.buffer,
                      vertexBuffer.allocation);
