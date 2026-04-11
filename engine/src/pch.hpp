@@ -88,6 +88,8 @@
 
 #include <stb_image.h>
 
+#include <boost/pfr.hpp>
+
 // ===== base =====
 #include <absl/base/attributes.h>
 #include <absl/base/macros.h>

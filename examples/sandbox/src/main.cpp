@@ -10,6 +10,8 @@
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "vulkan/context.hpp"
+#include "vulkan/shader/material/shader_material.hpp"
+#include "vulkan/shader/reflection/shader_reflection.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -22,6 +24,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 #include <vulkan/vulkan_core.h>
 
 #include "utils.hpp"
@@ -38,6 +41,7 @@ struct UploadContext {
     VkCommandBuffer commandBuffer;
 };
 
+/// 聚合体，声明顺序须与顶点着色器中 `location` 0..N 一致（Boost.PFR 自动反射）。
 struct Vertex {
     glm::vec2 pos;
     glm::vec3 color;
@@ -130,15 +134,54 @@ int main() {
 
     auto device = context->device();
 
+    const auto vertexSpirv = load_spirv("./shaders/sandbox.vert.spv");
+    const auto fragmentSpirv = load_spirv("./shaders/sandbox.frag.spv");
+
+    // 约定：set0 / set1 为 ring UBO → 反射后将 UNIFORM_BUFFER 映为
+    // UNIFORM_BUFFER_DYNAMIC
+    vulkan::shader::reflection::ReflectOptions reflectOpts {};
+    reflectOpts.ringUniformMaxSet = 1u;
+
+    vulkan::shader::reflection::ShaderReflection mergedReflection {};
+    mergedReflection.reflect(VK_SHADER_STAGE_VERTEX_BIT, vertexSpirv,
+                             reflectOpts);
+    vulkan::shader::reflection::ShaderReflection fragmentReflection {};
+    fragmentReflection.reflect(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentSpirv,
+                               reflectOpts);
+    mergedReflection.merge(fragmentReflection);
+
+    if (!mergedReflection.validateVertexLayout(
+            vulkan::shader::reflection::reflect_vertex_members<Vertex>(),
+            sizeof(Vertex))) {
+        LUMEN_APP_LOG_CRITICAL("顶点布局与着色器不一致（见引擎日志）");
+        return 1;
+    }
+
+    mergedReflection.create_layouts(device);
+    VkPipelineLayout pipelineLayout = mergedReflection.pipeline_layout();
+
+    // 3. 直接创建材质（自动 Pool + Set）
+    auto material = std::make_unique<vulkan::shader::material::ShaderMaterial>(
+        device, mergedReflection);
+
+    VkDescriptorSetLayout descriptorSetLayoutFrame {};
+    VkDescriptorSetLayout descriptorSetLayoutObject {};
+    {
+        const auto &ord = mergedReflection.set_layouts();
+        if (ord.size() > 0U) {
+            descriptorSetLayoutFrame = ord[0];
+        }
+        if (ord.size() > 1U) {
+            descriptorSetLayoutObject = ord[1];
+        }
+    }
+
     VkShaderModule vertexShader {};
     VkShaderModule fragmentShader {};
     {
         VkShaderModuleCreateInfo createInfo {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
         };
-
-        auto vertexSpirv = load_spirv("./shaders/sandbox.vert.spv");
-        auto fragmentSpirv = load_spirv("./shaders/sandbox.frag.spv");
 
         createInfo.codeSize = vertexSpirv.size();
         createInfo.pCode = (const std::uint32_t *)vertexSpirv.data();
@@ -322,11 +365,8 @@ int main() {
         }
     }
 
-    // 创建图形管线
+    // 创建图形管线（VkPipelineLayout / set layouts 已由着色器反射创建）
     VkPipeline graphicsPipeline {};
-    VkPipelineLayout pipelineLayout {};
-    VkDescriptorSetLayout descriptorSetLayoutFrame {};
-    VkDescriptorSetLayout descriptorSetLayoutObject {};
     {
 
         // 1. shader stages
@@ -348,9 +388,15 @@ int main() {
         }
 
         // 2 vertex Input
+
         VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
         };
+        const auto &attrs = mergedReflection.vertex_input();
+        std::vector<VkVertexInputAttributeDescription> attributes(attrs.size());
+        // 3. 直接生成完整顶点输入状态
+        auto vertexInputInfo =
+            mergedReflection.create_vertex_input_state<Vertex>();
 
         {
 
@@ -359,16 +405,23 @@ int main() {
             binding.stride = sizeof(Vertex);
             binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-            std::array<VkVertexInputAttributeDescription, 2> attributes {};
-            attributes[0].binding = 0;
-            attributes[0].location = 0;
-            attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
-            attributes[0].offset = offsetof(Vertex, pos);
+            for (size_t i = 0; i < attrs.size(); i++) {
+                attributes[i].binding = 0;
+                attributes[i].location = attrs[i].location;
+                attributes[i].format = attrs[i].format;
+                attributes[i].offset = attrs[i].offset;
+            }
 
-            attributes[1].binding = 0;
-            attributes[1].location = 1;
-            attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributes[1].offset = offsetof(Vertex, color);
+            // std::array<VkVertexInputAttributeDescription, 2> attributes {};
+            // attributes[0].binding = 0;
+            // attributes[0].location = 0;
+            // attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
+            // attributes[0].offset = offsetof(Vertex, pos);
+
+            // attributes[1].binding = 0;
+            // attributes[1].location = 1;
+            // attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            // attributes[1].offset = offsetof(Vertex, color);
 
             vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
             vertexInputStateCreateInfo.pVertexBindingDescriptions = &binding;
@@ -523,61 +576,69 @@ int main() {
             }
 
             // 10. layout：与 sandbox.vert 一致 — set0=FrameUBO，set1=ObjectUBO
-            {
-                VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
-                    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-                };
 
-                VkDescriptorSetLayoutBinding frameBinding {};
-                frameBinding.binding = 0;
-                frameBinding.descriptorType =
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-                frameBinding.descriptorCount = 1;
-                frameBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+            /*
+                        {
+                            VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo
+               { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+                            };
 
-                VkDescriptorSetLayoutCreateInfo frameLayoutInfo {
-                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-                };
-                frameLayoutInfo.bindingCount = 1;
-                frameLayoutInfo.pBindings = &frameBinding;
-                vkCreateDescriptorSetLayout(context->device(), &frameLayoutInfo,
-                                            nullptr, &descriptorSetLayoutFrame);
+                            VkDescriptorSetLayoutBinding frameBinding {};
+                            frameBinding.binding = 0;
+                            frameBinding.descriptorType =
+                                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+                            frameBinding.descriptorCount = 1;
+                            frameBinding.stageFlags =
+               VK_SHADER_STAGE_VERTEX_BIT;
 
-                VkDescriptorSetLayoutBinding objectBinding {};
-                objectBinding.binding = 0;
-                objectBinding.descriptorType =
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-                objectBinding.descriptorCount = 1;
-                objectBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+                            VkDescriptorSetLayoutCreateInfo frameLayoutInfo {
+                                .sType =
+               VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                            };
+                            frameLayoutInfo.bindingCount = 1;
+                            frameLayoutInfo.pBindings = &frameBinding;
+                            vkCreateDescriptorSetLayout(context->device(),
+               &frameLayoutInfo, nullptr, &descriptorSetLayoutFrame);
 
-                VkDescriptorSetLayoutCreateInfo objectLayoutInfo {
-                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-                };
-                objectLayoutInfo.bindingCount = 1;
-                objectLayoutInfo.pBindings = &objectBinding;
-                vkCreateDescriptorSetLayout(context->device(),
-                                            &objectLayoutInfo, nullptr,
-                                            &descriptorSetLayoutObject);
+                            VkDescriptorSetLayoutBinding objectBinding {};
+                            objectBinding.binding = 0;
+                            objectBinding.descriptorType =
+                                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+                            objectBinding.descriptorCount = 1;
+                            objectBinding.stageFlags =
+               VK_SHADER_STAGE_VERTEX_BIT;
 
-                const std::array<VkDescriptorSetLayout, 2> pipelineSetLayouts {
-                    descriptorSetLayoutFrame,
-                    descriptorSetLayoutObject,
-                };
+                            VkDescriptorSetLayoutCreateInfo objectLayoutInfo {
+                                .sType =
+               VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                            };
+                            objectLayoutInfo.bindingCount = 1;
+                            objectLayoutInfo.pBindings = &objectBinding;
+                            vkCreateDescriptorSetLayout(context->device(),
+                                                        &objectLayoutInfo,
+               nullptr, &descriptorSetLayoutObject);
 
-                pipelineLayoutCreateInfo.setLayoutCount =
-                    static_cast<std::uint32_t>(pipelineSetLayouts.size());
-                pipelineLayoutCreateInfo.pSetLayouts =
-                    pipelineSetLayouts.data();
+                            const std::array<VkDescriptorSetLayout, 2>
+               pipelineSetLayouts { descriptorSetLayoutFrame,
+                                descriptorSetLayoutObject,
+                            };
 
-                pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
-                pipelineLayoutCreateInfo.pPushConstantRanges = nullptr;
+                            pipelineLayoutCreateInfo.setLayoutCount =
+                                static_cast<std::uint32_t>(pipelineSetLayouts.size());
+                            pipelineLayoutCreateInfo.pSetLayouts =
+                                pipelineSetLayouts.data();
 
-                if (vkCreatePipelineLayout(context->device(),
-                                           &pipelineLayoutCreateInfo, nullptr,
-                                           &pipelineLayout)) {
-                    LUMEN_APP_LOG_ERROR("Failed to create pipeline layout");
-                }
-            }
+                            pipelineLayoutCreateInfo.pushConstantRangeCount = 0;
+                            pipelineLayoutCreateInfo.pPushConstantRanges =
+               nullptr;
+
+                            if (vkCreatePipelineLayout(context->device(),
+                                                       &pipelineLayoutCreateInfo,
+               nullptr, &pipelineLayout)) { LUMEN_APP_LOG_ERROR("Failed to
+               create pipeline layout");
+                            }
+                        }
+            */
 
             // 11. pipeline
             VkGraphicsPipelineCreateInfo graphicsPipelineCreateInfo {
@@ -882,70 +943,86 @@ int main() {
                  &objectUBOMapped);
 
     // 描述符：set0=FrameUBO，set1=ObjectUBO（与 sandbox.vert 一致）
-    VkDescriptorPool descriptorPool {};
-    std::array<VkDescriptorSet, 2> descriptorSets {};
+
+    // VkDescriptorPool descriptorPool {};
+    VkDescriptorPool descriptorPool =
+        mergedReflection.create_descriptor_pool(device);
+    std::vector<VkDescriptorSet> descriptorSets = material->get_all_sets();
     {
-        VkDescriptorPoolSize poolSize {};
-        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        poolSize.descriptorCount = 2;
 
-        VkDescriptorPoolCreateInfo poolCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
-        };
-        poolCreateInfo.maxSets = 2;
-        poolCreateInfo.poolSizeCount = 1;
-        poolCreateInfo.pPoolSizes = &poolSize;
-        vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
-                               &descriptorPool);
+        material->update_dynamic_uniforms(
+            { { .set = 0,
+                .binding = 0,
+                .buffer = frameUniformBuffer.buffer,
+                .offset = 0,
+                .size = frameUBOalignedUboSize },
+              { .set = 1,
+                .binding = 0,
+                .buffer = objectiformBuffer.buffer,
+                .offset = 0,
+                .size = ubjectUBOalignedUboSize } });
 
-        const std::array<VkDescriptorSetLayout, 2> allocSetLayouts {
-            descriptorSetLayoutFrame,
-            descriptorSetLayoutObject,
-        };
+        // VkDescriptorPoolSize poolSize {};
+        // poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        // poolSize.descriptorCount = 2;
 
-        VkDescriptorSetAllocateInfo allocInfo {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
-        };
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount =
-            static_cast<std::uint32_t>(allocSetLayouts.size());
-        allocInfo.pSetLayouts = allocSetLayouts.data();
+        // VkDescriptorPoolCreateInfo poolCreateInfo {
+        //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        // };
+        // poolCreateInfo.maxSets = 2;
+        // poolCreateInfo.poolSizeCount = 1;
+        // poolCreateInfo.pPoolSizes = &poolSize;
+        // vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
+        //                        &descriptorPool);
 
-        vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data());
+        // const std::array<VkDescriptorSetLayout, 2> allocSetLayouts {
+        //     descriptorSetLayoutFrame,
+        //     descriptorSetLayoutObject,
+        // };
 
-        VkDescriptorBufferInfo bufferInfoFrame {};
-        bufferInfoFrame.buffer = frameUniformBuffer.buffer;
-        bufferInfoFrame.offset = 0;
-        bufferInfoFrame.range = frameUBOalignedUboSize;
+        // VkDescriptorSetAllocateInfo allocInfo {
+        //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+        // };
+        // allocInfo.descriptorPool = descriptorPool;
+        // allocInfo.descriptorSetCount =
+        //     static_cast<std::uint32_t>(allocSetLayouts.size());
+        // allocInfo.pSetLayouts = allocSetLayouts.data();
 
-        VkDescriptorBufferInfo bufferInfoObject {};
-        bufferInfoObject.buffer = objectiformBuffer.buffer;
-        bufferInfoObject.offset = 0;
-        bufferInfoObject.range = ubjectUBOalignedUboSize;
+        // vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data());
 
-        std::array<VkWriteDescriptorSet, 2> writeDescriptorSets {};
+        // VkDescriptorBufferInfo bufferInfoFrame {};
+        // bufferInfoFrame.buffer = frameUniformBuffer.buffer;
+        // bufferInfoFrame.offset = 0;
+        // bufferInfoFrame.range = frameUBOalignedUboSize;
 
-        writeDescriptorSets[0].sType = writeDescriptorSets[1].sType =
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        // VkDescriptorBufferInfo bufferInfoObject {};
+        // bufferInfoObject.buffer = objectiformBuffer.buffer;
+        // bufferInfoObject.offset = 0;
+        // bufferInfoObject.range = ubjectUBOalignedUboSize;
 
-        writeDescriptorSets[0].dstSet = descriptorSets[0];
-        writeDescriptorSets[0].dstBinding = 0;
-        writeDescriptorSets[0].dstArrayElement = 0;
-        writeDescriptorSets[0].descriptorType =
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        writeDescriptorSets[0].descriptorCount = 1;
-        writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
+        // std::array<VkWriteDescriptorSet, 2> writeDescriptorSets {};
 
-        writeDescriptorSets[1].dstSet = descriptorSets[1];
-        writeDescriptorSets[1].dstBinding = 0;
-        writeDescriptorSets[1].dstArrayElement = 0;
-        writeDescriptorSets[1].descriptorType =
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        writeDescriptorSets[1].descriptorCount = 1;
-        writeDescriptorSets[1].pBufferInfo = &bufferInfoObject;
+        // writeDescriptorSets[0].sType = writeDescriptorSets[1].sType =
+        //     VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
-        vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
-                               writeDescriptorSets.data(), 0, nullptr);
+        // writeDescriptorSets[0].dstSet = descriptorSets[0];
+        // writeDescriptorSets[0].dstBinding = 0;
+        // writeDescriptorSets[0].dstArrayElement = 0;
+        // writeDescriptorSets[0].descriptorType =
+        //     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        // writeDescriptorSets[0].descriptorCount = 1;
+        // writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
+
+        // writeDescriptorSets[1].dstSet = descriptorSets[1];
+        // writeDescriptorSets[1].dstBinding = 0;
+        // writeDescriptorSets[1].dstArrayElement = 0;
+        // writeDescriptorSets[1].descriptorType =
+        //     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        // writeDescriptorSets[1].descriptorCount = 1;
+        // writeDescriptorSets[1].pBufferInfo = &bufferInfoObject;
+
+        // vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
+        //                        writeDescriptorSets.data(), 0, nullptr);
     }
 
     // 渲染循环
@@ -1071,19 +1148,22 @@ int main() {
             vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1,
                                    &vertexBuffer.buffer, &offsets);
 
-            const std::array<uint32_t, 2> dynamicOffsets {
+            const std::vector<uint32_t> dynamicOffsets {
                 static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
                                       frameUBOalignedUboSize),
                 static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
                                       ubjectUBOalignedUboSize),
             };
-            vkCmdBindDescriptorSets(
-                commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipelineLayout, 0,
-                static_cast<std::uint32_t>(descriptorSets.size()),
-                descriptorSets.data(),
-                static_cast<std::uint32_t>(dynamicOffsets.size()),
-                dynamicOffsets.data());
+            material->bind_descriptor_sets(commandBuffers[imageIndex], 0,
+                                           descriptorSets, dynamicOffsets);
+                                           
+            // vkCmdBindDescriptorSets(
+            //     commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+            //     pipelineLayout, 0,
+            //     static_cast<std::uint32_t>(descriptorSets.size()),
+            //     descriptorSets.data(),
+            //     static_cast<std::uint32_t>(dynamicOffsets.size()),
+            //     dynamicOffsets.data());
 
             vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 
@@ -1191,10 +1271,8 @@ int main() {
     }
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutObject, nullptr);
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayoutFrame, nullptr);
+    mergedReflection.destroy_layouts(device);
     vkDestroyRenderPass(device, renderPass, nullptr);
 
     vkDestroyImageView(device, depthImageView, nullptr);

@@ -40,6 +40,7 @@ target_link_libraries(${ENGINE_TARGET} PUBLIC nlohmann_json::nlohmann_json)
 target_link_libraries(${ENGINE_TARGET} PUBLIC volk::volk volk::volk_headers)
 target_link_libraries(${ENGINE_TARGET} PUBLIC unofficial::spirv-reflect)
 target_link_libraries(${ENGINE_TARGET} PUBLIC unofficial::shaderc::shaderc)
+target_link_libraries(${ENGINE_TARGET} PUBLIC Boost::pfr)
 target_link_libraries(
         ${ENGINE_TARGET} PUBLIC 
         absl::base

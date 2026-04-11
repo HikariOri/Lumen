@@ -38,5 +38,8 @@ layout (set = 1, binding = 0) uniform ObjectUBO {
 void main() {
     gl_Position = objectUBO.model * vec4(inPos, 0.0, 1.0);
 
-    fragColor = inColor;
+   if (frameUBO.debugMode == 1) {}
+
+   if (inColor.x > 1.0){}
+  
 }
