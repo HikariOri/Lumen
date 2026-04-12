@@ -10,7 +10,6 @@
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "renderer/mesh.hpp"
-#include "renderer/renderer.hpp"
 #include "renderer/ubo.hpp"
 #include "utils.hpp"
 #include "vulkan/buffer.hpp"
@@ -460,25 +459,25 @@ int main() {
 
     material->set_texture(2, 1, texture);
 
-    vulkan::Swapchain swapchain;
-    swapchain.device = device;
-    swapchain.handle = context->swapchain();
-    swapchain.imageFormat = context->swapchain_format();
-    swapchain.extent = { .width = window.width(), .height = window.height() };
-    swapchain.images = context->swapchain_images();
-    swapchain.views = context->swapchain_image_views();
-    swapchain.framebuffers = framebuffers;
-    swapchain.depthImage = depthImage;
-    swapchain.depthView = depthImageView;
-    swapchain.depthAlloc = depthAllocation;
+    // vulkan::Swapchain swapchain;
+    // swapchain.device = device;
+    // swapchain.handle = context->swapchain();
+    // swapchain.imageFormat = context->swapchain_format();
+    // swapchain.extent = { .width = window.width(), .height = window.height() };
+    // swapchain.images = context->swapchain_images();
+    // swapchain.views = context->swapchain_image_views();
+    // swapchain.framebuffers = framebuffers;
+    // swapchain.depthImage = depthImage;
+    // swapchain.depthView = depthImageView;
+    // swapchain.depthAlloc = depthAllocation;
 
-    renderer::Renderer renderer;
-    renderer.init(device, context->physical_device(), context->graphics_queue(),
-                  context->present_queue(), context->graphics_queue_family(),
-                  context->allocator(), context->surface(), window.sdl_window(),
-                  context->depth_format());
+    // renderer::Renderer renderer;
+    // renderer.init(device, context->physical_device(), context->graphics_queue(),
+    //               context->present_queue(), context->graphics_queue_family(),
+    //               context->allocator(), context->surface(), window.sdl_window(),
+    //               context->depth_format());
 
-    renderer.renderPass = renderPass;
+    // renderer.renderPass = renderPass;
     // vulkan::recreateSwapchain(swapchain, window, device,
     //                           context->surface(), context->allocator(),
     //                           renderPass, context->depth_format());
@@ -578,7 +577,7 @@ int main() {
 
             renderPassBeginInfo.renderPass = renderPass;
             renderPassBeginInfo.framebuffer =
-                swapchain.framebuffers[imageIndex];
+                framebuffers[imageIndex];
 
             renderPassBeginInfo.renderArea.offset = { .x = 0, .y = 0 };
             renderPassBeginInfo.renderArea.extent = { .width = window.width(),
