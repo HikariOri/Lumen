@@ -1,5 +1,7 @@
 #pragma once
 
+#include "upload_context.hpp"
+
 namespace vulkan {
 
 enum class BufferUsage : std::int8_t {
@@ -16,24 +18,6 @@ enum class MemoryMode : std::int8_t {
     CPU_TO_GPU,    // 普通上传，短生命周期
     GPU_ONLY,      // 设备本地，用 staging 写入
     PERSISTENT_MAP // 持久映射，适合高频更新（UBO/动态UBO）
-};
-
-struct UploadContext {
-    VkDevice device {};
-    VkQueue queue {};
-    VkCommandPool commandPool {};
-    VkCommandBuffer commandBuffer {};
-    VkFence fence {};
-    /// 为 true 时本对象 `vkCreateCommandPool` / `vkAllocateCommandBuffers`，销毁时须 `vkDestroyCommandPool`
-    bool ownsCommandPool { true };
-
-    UploadContext() = default;
-    UploadContext(VkDevice device, VkQueue queue, std::uint32_t graphicsQueueFamily);
-    /// 使用外部 command pool（内部 `vkAllocateCommandBuffers` 分配 1 个 primary CB；不拥有 pool）
-    UploadContext(VkDevice device, VkQueue queue, VkCommandPool commandPool);
-
-    /// 释放 fence；若拥有 pool 则 `vkDestroyCommandPool`；否则 `vkFreeCommandBuffers` 释放从外部 pool 分配的 CB
-    void destroy();
 };
 
 class Buffer {

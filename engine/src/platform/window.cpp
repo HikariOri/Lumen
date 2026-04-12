@@ -11,8 +11,7 @@
 
 namespace lumen::platform {
 
-std::expected<Window, std::string>
-Window::create(const WindowConfig &config) {
+std::expected<Window, std::string> Window::create(const WindowConfig &config) {
     Window w;
     if (auto r = w.try_create_(config); !r) {
         return std::unexpected(std::move(r.error()));
@@ -25,8 +24,8 @@ Window::try_create_(const WindowConfig &config) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         const char *err = SDL_GetError();
         LUMEN_LOG_ERROR("SDL_Init 失败: {}", err != nullptr ? err : "");
-        return std::unexpected(
-            std::string("SDL_Init 失败: ") + (err != nullptr ? err : ""));
+        return std::unexpected(std::string("SDL_Init 失败: ") +
+                               (err != nullptr ? err : ""));
     }
 
     auto flags = SDL_WINDOW_VULKAN;
@@ -41,9 +40,8 @@ Window::try_create_(const WindowConfig &config) {
         const char *err = SDL_GetError();
         LUMEN_LOG_ERROR("SDL_CreateWindow 失败: {}", err != nullptr ? err : "");
         SDL_Quit();
-        return std::unexpected(
-            std::string("SDL_CreateWindow 失败: ") +
-            (err != nullptr ? err : ""));
+        return std::unexpected(std::string("SDL_CreateWindow 失败: ") +
+                               (err != nullptr ? err : ""));
     }
 
     width_ = config.width;
@@ -183,6 +181,7 @@ void Window::destroy_() {
     if (window_) {
         LUMEN_LOG_DEBUG("销毁窗口");
         SDL_DestroyWindow(window_);
+        SDL_Quit();
         window_ = nullptr;
     }
 }

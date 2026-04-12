@@ -38,13 +38,6 @@ struct AllocatedBuffer {
     VmaAllocation allocation;
 };
 
-struct UploadContext {
-    VkFence fence;
-
-    VkCommandPool commandPool;
-    VkCommandBuffer commandBuffer;
-};
-
 /// 聚合体，声明顺序须与顶点着色器中 `location` 0..N 一致（Boost.PFR
 /// 自动反射）。
 struct Vertex {
@@ -779,37 +772,9 @@ int main() {
 
     std::uint64_t timelineValue = 0;
 
-    // UploadContext uploadContext {};
-    vulkan::UploadContext uploadContext {};
-    {
-        uploadContext.device = context->device();
-        uploadContext.queue = context->graphics_queue();
-
-        VkFenceCreateInfo fenceCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
-        };
-        fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        vkCreateFence(device, &fenceCreateInfo, nullptr, &uploadContext.fence);
-
-        VkCommandPoolCreateInfo commandPoolCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-        };
-        commandPoolCreateInfo.flags =
-            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        commandPoolCreateInfo.queueFamilyIndex =
-            context->graphics_queue_family();
-        vkCreateCommandPool(device, &commandPoolCreateInfo, nullptr,
-                            &uploadContext.commandPool);
-
-        VkCommandBufferAllocateInfo commandBufferAllocateInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
-        };
-        commandBufferAllocateInfo.commandPool = uploadContext.commandPool;
-        commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        commandBufferAllocateInfo.commandBufferCount = 1;
-        vkAllocateCommandBuffers(device, &commandBufferAllocateInfo,
-                                 &uploadContext.commandBuffer);
-    }
+    vulkan::UploadContext::instance().init(device, context->graphics_queue(),
+                                           commandPool);
+    auto &uploadContext = vulkan::UploadContext::instance();
 
     /*
        // const auto immediate_submit =
@@ -1574,8 +1539,7 @@ vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
         vkResetCommandBuffer(cb, 0);
     }
 
-    vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
-    vkDestroyFence(device, uploadContext.fence, nullptr);
+    uploadContext.destroy();
     vkDestroyCommandPool(device, commandPool, nullptr);
 
     for (VkFramebuffer fb : framebuffers) {

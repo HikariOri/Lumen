@@ -1,8 +1,7 @@
 #pragma once
 
-#include "buffer.hpp"
-#include "pch.hpp"
 #include "vulkan/buffer.hpp"
+#include "vulkan/upload_context.hpp"
 
 namespace vulkan {
 
