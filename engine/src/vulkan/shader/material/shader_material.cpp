@@ -2,8 +2,6 @@
 
 #include "core/log/logger.hpp"
 
-#include <algorithm>
-
 namespace vulkan::shader::material {
 
 namespace {
@@ -122,9 +120,9 @@ void ShaderMaterial::update(const std::vector<Write> &writes) {
     }
 }
 
-void ShaderMaterial::update_uniform(std::uint32_t set,
-                                    std::uint32_t binding, VkBuffer buffer,
-                                    VkDeviceSize offset, VkDeviceSize size) {
+void ShaderMaterial::update_uniform(std::uint32_t set, std::uint32_t binding,
+                                    VkBuffer buffer, VkDeviceSize offset,
+                                    VkDeviceSize size) {
     update({ Write {
         .set = set,
         .binding = binding,
@@ -150,11 +148,9 @@ void ShaderMaterial::update_dynamic_uniform(std::uint32_t set,
     } });
 }
 
-void ShaderMaterial::update_buffer(std::uint32_t set,
-                                   std::uint32_t binding,
-                                   VkDescriptorType type,
-                                   VkBuffer buffer, VkDeviceSize offset,
-                                   VkDeviceSize range) {
+void ShaderMaterial::update_buffer(std::uint32_t set, std::uint32_t binding,
+                                   VkDescriptorType type, VkBuffer buffer,
+                                   VkDeviceSize offset, VkDeviceSize range) {
     update({ Write {
         .set = set,
         .binding = binding,
@@ -165,9 +161,9 @@ void ShaderMaterial::update_buffer(std::uint32_t set,
     } });
 }
 
-void ShaderMaterial::update_image(std::uint32_t set,
-                                  std::uint32_t binding, VkImageView view,
-                                  VkSampler sampler, VkImageLayout layout) {
+void ShaderMaterial::update_image(std::uint32_t set, std::uint32_t binding,
+                                  VkImageView view, VkSampler sampler,
+                                  VkImageLayout layout) {
     update({ Write {
         .set = set,
         .binding = binding,
@@ -178,9 +174,9 @@ void ShaderMaterial::update_image(std::uint32_t set,
     } });
 }
 
-void ShaderMaterial::update_storage(std::uint32_t set,
-                                    std::uint32_t binding, VkBuffer buffer,
-                                    VkDeviceSize offset, VkDeviceSize size) {
+void ShaderMaterial::update_storage(std::uint32_t set, std::uint32_t binding,
+                                    VkBuffer buffer, VkDeviceSize offset,
+                                    VkDeviceSize size) {
     update({ Write {
         .set = set,
         .binding = binding,
@@ -191,9 +187,9 @@ void ShaderMaterial::update_storage(std::uint32_t set,
     } });
 }
 
-void ShaderMaterial::update_combined(std::uint32_t set,
-                                     std::uint32_t binding, VkImageView view,
-                                     VkSampler sampler, VkImageLayout layout) {
+void ShaderMaterial::update_combined(std::uint32_t set, std::uint32_t binding,
+                                     VkImageView view, VkSampler sampler,
+                                     VkImageLayout layout) {
     update({ Write {
         .set = set,
         .binding = binding,
@@ -350,6 +346,26 @@ void ShaderMaterial::bind_descriptor_sets(
         static_cast<std::uint32_t>(sets.size()), sets.data(),
         static_cast<std::uint32_t>(dynamicOffsets.size()),
         dynamicOffsets.data());
+}
+
+// 在你的 Material 类里
+void ShaderMaterial::set_texture(uint32_t set, uint32_t binding,
+                                Texture2D *tex) {
+    VkDescriptorImageInfo info { .sampler = tex->sampler,
+                                 .imageView = tex->view,
+                                 .imageLayout =
+                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+
+    VkWriteDescriptorSet write { .sType =
+                                     VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                 .dstSet = descriptor_set(set),
+                                 .dstBinding = binding,
+                                 .descriptorCount = 1,
+                                 .descriptorType =
+                                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 .pImageInfo = &info };
+
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
 }
 
 } // namespace vulkan::shader::material

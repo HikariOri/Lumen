@@ -1,6 +1,6 @@
 #version 450
 
-layout(location = 0) in vec3 fragColor;
+layout(location = 0) in vec2 fragUV;
 
 layout(location = 0) out vec4 outColor;
 
@@ -47,5 +47,5 @@ layout(set = 3, binding = 2) uniform samplerCube prefilteredMap;
 layout(set = 3, binding = 3) uniform sampler2D brdfLUT;
 
 void main() {
-    outColor = vec4(fragColor, 1.0);
+    outColor = texture(baseColorTex, fragUV);
 }

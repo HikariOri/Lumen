@@ -1,12 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <unordered_map>
-#include <vector>
+/*
+ * @FileName       : shader_material.hpp
+ * @Author         : yaojie
+ * @Date           : 2026/4/12
+ * 
+ * @todo 动态 offsets
+ */
 
-#include <vulkan/vulkan_core.h>
 
 #include "vulkan/shader/reflection/shader_reflection.hpp"
+#include "vulkan/texture.hpp"
 
 namespace vulkan::shader::material {
 
@@ -140,6 +144,9 @@ public:
         VkCommandBuffer cmd, std::uint32_t firstSet,
         const std::vector<VkDescriptorSet> &sets,
         const std::vector<std::uint32_t> &dynamicOffsets) const;
+
+    // 在你的 Material 类里
+    void set_texture(uint32_t set, uint32_t binding, Texture2D* tex);
 
 private:
     VkDevice device_ { VK_NULL_HANDLE };

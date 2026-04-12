@@ -1,12 +1,6 @@
 #include "vulkan/shader/reflection/shader_reflection.hpp"
 
 #include "core/log/logger.hpp"
-#include "shader_reflection.hpp"
-#include <algorithm>
-#include <cstring>
-#include <spirv_reflect.h>
-#include <unordered_map>
-#include <vulkan/vulkan_core.h>
 
 namespace vulkan::shader::reflection {
 
@@ -754,6 +748,30 @@ bool ShaderReflection::validateVertexLayout(
         key.hashData.insert(key.hashData.end(), h, h + sizeof(h));
     }
     return key;
+}
+
+[[nodiscard]] nlohmann::json ShaderReflection::to_json() const {
+    return nlohmann::json { { "schemaVersion", 1 },
+                            { "bindings", bindings_ },
+                            { "pushConstantRanges", pushConstantRanges_ },
+                            { "vertexAttributes", vertexAttributes_ } };
+}
+
+void ShaderReflection::from_json(const nlohmann::json &j) {
+    const int ver = j.value("schemaVersion", 1);
+    if (ver != 1) {
+        LUMEN_LOG_WARN(
+            "ShaderReflection::from_json: schemaVersion {} != 1, loading anyway",
+            ver);
+    }
+    bindings_ = j.at("bindings").get<std::vector<DescriptorBinding>>();
+    pushConstantRanges_ =
+        j.at("pushConstantRanges").get<std::vector<PushConstantRange>>();
+    vertexAttributes_ =
+        j.at("vertexAttributes").get<std::vector<VertexAttribute>>();
+    setLayoutInfos_.clear();
+    setLayouts_.clear();
+    pipelineLayout_ = VK_NULL_HANDLE;
 }
 
 } // namespace vulkan::shader::reflection

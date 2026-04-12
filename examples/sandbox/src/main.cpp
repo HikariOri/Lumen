@@ -9,9 +9,12 @@
 #include "platform/event_dispatcher.hpp"
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
+#include "renderer/ubo.hpp"
+#include "vulkan/buffer.hpp"
 #include "vulkan/context.hpp"
 #include "vulkan/shader/material/shader_material.hpp"
 #include "vulkan/shader/reflection/shader_reflection.hpp"
+#include "vulkan/texture.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -20,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 #include <print>
 #include <string>
 #include <utility>
@@ -41,33 +45,29 @@ struct UploadContext {
     VkCommandBuffer commandBuffer;
 };
 
-/// 聚合体，声明顺序须与顶点着色器中 `location` 0..N 一致（Boost.PFR 自动反射）。
+/// 聚合体，声明顺序须与顶点着色器中 `location` 0..N 一致（Boost.PFR
+/// 自动反射）。
 struct Vertex {
     glm::vec2 pos;
-    glm::vec3 color;
+    glm::vec2 uv; // 加这个
 };
 
-// 建议：每帧一个，用 ring buffer 管理
-struct FrameUBO {
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::mat4 viewProj;
+template <typename PODType>
+VkDeviceSize getMinUniformBufferOffsetAlignment(vulkan::Context *context) {
 
-    glm::vec3 cameraPos;
-    float time {};
+    constexpr VkDeviceSize size = sizeof(PODType);
 
-    glm::vec2 sceenSize;
+    VkPhysicalDeviceProperties physicalDeviceProps {};
 
-    glm::vec4 exposureIblMips;
+    vkGetPhysicalDeviceProperties(context->physical_device(),
+                                  &physicalDeviceProps);
 
-    int debugMode;
-};
+    const VkDeviceSize minUniformBufferOffsetAlignment =
+        physicalDeviceProps.limits.minUniformBufferOffsetAlignment;
 
-// 每 Object 一个，用 ring buffer 管理
-struct ObjectUBO {
-    glm::mat4 model;
-    glm::mat4 normalMatrix;
-};
+    return (size + minUniformBufferOffsetAlignment - 1) &
+           ~(minUniformBufferOffsetAlignment - 1);
+}
 
 int main() {
     // 初始化日志
@@ -79,7 +79,7 @@ int main() {
     // 初始化窗口
     lumen::platform::WindowConfig windowConfig {};
     windowConfig.fullscreen = false;
-    windowConfig.width = 1280;
+    windowConfig.width = 720;
     windowConfig.height = 720;
     windowConfig.title = "Sandbox";
     windowConfig.icon_path = "./assets/textures/ikun2026_happy_new_year.jpg";
@@ -149,6 +149,7 @@ int main() {
     fragmentReflection.reflect(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentSpirv,
                                reflectOpts);
     mergedReflection.merge(fragmentReflection);
+    // std::cout << mergedReflection.to_json().dump(2) << std::endl;
 
     if (!mergedReflection.validateVertexLayout(
             vulkan::shader::reflection::reflect_vertex_members<Vertex>(),
@@ -199,10 +200,19 @@ int main() {
     }
 
     // shader 数据
+    // NDC 四边形 UV：左下(0,1)→右下(1,1)→右上(1,0)→左上(0,0)。左上角误写成
+    // (1,0) 会与右上角 UV 重合，三角形在 UV 空间退化，出现左侧横向涂抹。
     std::vector<Vertex> vertices = {
-        { { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-        { { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-        { { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+        { .pos = { -0.5f, -0.5f }, .uv = { 0.0f, 1.0f } },
+        { .pos = { 0.5f, -0.5f }, .uv = { 1.0f, 1.0f } },
+        { .pos = { 0.5f, 0.5f }, .uv = { 1.0f, 0.0f } },
+        { .pos = { -0.5f, 0.5f }, .uv = { 0.0f, 0.0f } },
+    };
+
+    // 索引（6个，画两个三角形 → 矩形）
+    const std::vector<uint16_t> indices = {
+        0, 1, 2, // 第一个三角
+        2, 3, 0  // 第二个三角
     };
 
     // 创建 Renader Pass
@@ -389,48 +399,52 @@ int main() {
 
         // 2 vertex Input
 
-        VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
-        };
+        // VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo {
+        //     .sType =
+        //     VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+        // };
+        VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo =
+            mergedReflection.create_vertex_input_state<Vertex>();
+
         const auto &attrs = mergedReflection.vertex_input();
         std::vector<VkVertexInputAttributeDescription> attributes(attrs.size());
         // 3. 直接生成完整顶点输入状态
-        auto vertexInputInfo =
-            mergedReflection.create_vertex_input_state<Vertex>();
 
-        {
+        /*
+          {
 
-            VkVertexInputBindingDescription binding {};
-            binding.binding = 0;
-            binding.stride = sizeof(Vertex);
-            binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+              VkVertexInputBindingDescription binding {};
+              binding.binding = 0;
+              binding.stride = sizeof(Vertex);
+              binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-            for (size_t i = 0; i < attrs.size(); i++) {
-                attributes[i].binding = 0;
-                attributes[i].location = attrs[i].location;
-                attributes[i].format = attrs[i].format;
-                attributes[i].offset = attrs[i].offset;
-            }
+              for (size_t i = 0; i < attrs.size(); i++) {
+                  attributes[i].binding = 0;
+                  attributes[i].location = attrs[i].location;
+                  attributes[i].format = attrs[i].format;
+                  attributes[i].offset = attrs[i].offset;
+              }
 
-            // std::array<VkVertexInputAttributeDescription, 2> attributes {};
-            // attributes[0].binding = 0;
-            // attributes[0].location = 0;
-            // attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
-            // attributes[0].offset = offsetof(Vertex, pos);
+              std::array<VkVertexInputAttributeDescription, 2> attributes {};
+              attributes[0].binding = 0;
+              attributes[0].location = 0;
+              attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
+              attributes[0].offset = offsetof(Vertex, pos);
 
-            // attributes[1].binding = 0;
-            // attributes[1].location = 1;
-            // attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-            // attributes[1].offset = offsetof(Vertex, color);
+              attributes[1].binding = 0;
+              attributes[1].location = 1;
+              attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+              attributes[1].offset = offsetof(Vertex, color);
 
-            vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
-            vertexInputStateCreateInfo.pVertexBindingDescriptions = &binding;
+              vertexInputStateCreateInfo.vertexBindingDescriptionCount = 1;
+              vertexInputStateCreateInfo.pVertexBindingDescriptions = &binding;
 
-            vertexInputStateCreateInfo.vertexAttributeDescriptionCount =
-                attributes.size();
-            vertexInputStateCreateInfo.pVertexAttributeDescriptions =
-                attributes.data();
-        }
+              vertexInputStateCreateInfo.vertexAttributeDescriptionCount =
+                  attributes.size();
+              vertexInputStateCreateInfo.pVertexAttributeDescriptions =
+                  attributes.data();
+          }
+        */
 
         // 3. input assembly
 
@@ -765,8 +779,12 @@ int main() {
 
     std::uint64_t timelineValue = 0;
 
-    UploadContext uploadContext {};
+    // UploadContext uploadContext {};
+    vulkan::UploadContext uploadContext {};
     {
+        uploadContext.device = context->device();
+        uploadContext.queue = context->graphics_queue();
+
         VkFenceCreateInfo fenceCreateInfo {
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
         };
@@ -793,237 +811,509 @@ int main() {
                                  &uploadContext.commandBuffer);
     }
 
-    const auto immediate_submit =
-        [&](std::function<void(VkCommandBuffer cmd)> &&function) {
-            // 1. 等 GPU 完成上一次上传
-            vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
-                            UINT64_MAX);
+    /*
+       // const auto immediate_submit =
+       //     [&](std::function<void(VkCommandBuffer cmd)> &&function) {
+       //         // 1. 等 GPU 完成上一次上传
+       //         vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
+       //                         UINT64_MAX);
 
-            // 2. 重置 fence
-            vkResetFences(device, 1, &uploadContext.fence);
+       //         // 2. 重置 fence
+       //         vkResetFences(device, 1, &uploadContext.fence);
 
-            // 3. 重置  command buffer
-            vkResetCommandBuffer(uploadContext.commandBuffer, 0);
+       //         // 3. 重置  command buffer
+       //         vkResetCommandBuffer(uploadContext.commandBuffer, 0);
 
-            // 4. 开始录制
-            VkCommandBufferBeginInfo beginInfo {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-            };
-            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+       //         // 4. 开始录制
+       //         VkCommandBufferBeginInfo beginInfo {
+       //             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+       //         };
+       //         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-            vkBeginCommandBuffer(uploadContext.commandBuffer, &beginInfo);
+       //         vkBeginCommandBuffer(uploadContext.commandBuffer, &beginInfo);
 
-            // 5. 用户录制 copy / barrier 等命令
-            function(uploadContext.commandBuffer);
+       //         // 5. 用户录制 copy / barrier 等命令
+       //         function(uploadContext.commandBuffer);
 
-            vkEndCommandBuffer(uploadContext.commandBuffer);
+       //         vkEndCommandBuffer(uploadContext.commandBuffer);
 
-            // 6.提交
-            VkSubmitInfo2 submitInfo { .sType =
-                                           VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+       //         // 6.提交
+       //         VkSubmitInfo2 submitInfo { .sType =
+       //                                        VK_STRUCTURE_TYPE_SUBMIT_INFO_2
+       };
 
-            VkCommandBufferSubmitInfo commandBufferInfo {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO
-            };
-            commandBufferInfo.commandBuffer = uploadContext.commandBuffer;
-            // commandBufferInfo.deviceMask = 1;
+       //         VkCommandBufferSubmitInfo commandBufferInfo {
+       //             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO
+       //         };
+       //         commandBufferInfo.commandBuffer = uploadContext.commandBuffer;
+       //         // commandBufferInfo.deviceMask = 1;
 
-            submitInfo.commandBufferInfoCount = 1;
-            submitInfo.pCommandBufferInfos = &commandBufferInfo;
+       //         submitInfo.commandBufferInfoCount = 1;
+       //         submitInfo.pCommandBufferInfos = &commandBufferInfo;
 
-            vkQueueSubmit2(context->graphics_queue(), 1, &submitInfo,
-                           uploadContext.fence);
+       //         vkQueueSubmit2(context->graphics_queue(), 1, &submitInfo,
+       //                        uploadContext.fence);
 
-            // 须在本次 submit 之后再等 fence，否则 staging 可能在 copy
-            // 完成前被销毁。
-            vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
-                            UINT64_MAX);
-        };
+       //         // 须在本次 submit 之后再等 fence，否则 staging 可能在 copy
+       //         // 完成前被销毁。
+       //         vkWaitForFences(device, 1, &uploadContext.fence, VK_TRUE,
+       //                         UINT64_MAX);
+       //     };
 
-    const auto create_buffer = [&](std::size_t size, VkBufferUsageFlags usage,
-                                   VmaMemoryUsage memoryUsage,
-                                   VmaAllocationCreateFlags flags) {
-        AllocatedBuffer buffer {};
+       // const auto create_buffer = [&](std::size_t size, VkBufferUsageFlags
+       // usage,
+       //                                VmaMemoryUsage memoryUsage,
+       //                                VmaAllocationCreateFlags flags) {
+       //     AllocatedBuffer buffer {};
 
-        VkBufferCreateInfo bufferCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
-        };
-        bufferCreateInfo.size = size;
-        bufferCreateInfo.usage = usage;
+       //     VkBufferCreateInfo bufferCreateInfo {
+       //         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+       //     };
+       //     bufferCreateInfo.size = size;
+       //     bufferCreateInfo.usage = usage;
 
-        VmaAllocationCreateInfo allocationCreateInfo {};
-        allocationCreateInfo.usage = memoryUsage;
-        allocationCreateInfo.flags = flags;
+       //     VmaAllocationCreateInfo allocationCreateInfo {};
+       //     allocationCreateInfo.usage = memoryUsage;
+       //     allocationCreateInfo.flags = flags;
 
-        vmaCreateBuffer(context->allocator(), &bufferCreateInfo,
-                        &allocationCreateInfo, &buffer.buffer,
-                        &buffer.allocation, nullptr);
+       //     vmaCreateBuffer(context->allocator(), &bufferCreateInfo,
+       //                     &allocationCreateInfo, &buffer.buffer,
+       //                     &buffer.allocation, nullptr);
 
-        return buffer;
-    };
+       //     return buffer;
+       // };
 
-    // vertex buffer
-    AllocatedBuffer vertexBuffer {};
-    {
-        // 创建 staging buffer
-        AllocatedBuffer stagingBuffer = create_buffer(
-            sizeof(Vertex) * vertices.size(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VMA_MEMORY_USAGE_AUTO,
-            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+       // vulkan::UploadContext uc {};
 
-        // 映射内存
-        void *mapped {};
-        vmaMapMemory(context->allocator(), stagingBuffer.allocation, &mapped);
-        // 复制数据
-        memcpy(mapped, vertices.data(), sizeof(Vertex) * vertices.size());
-        // 解映射
-        vmaUnmapMemory(context->allocator(), stagingBuffer.allocation);
+       // uc.cmdPool = commandPool;
+       // uc.fence = uploadContext.fence;
+       // uc.queue = context->graphics_queue();
+       // uc.device = context->device();
+    */
 
-        vertexBuffer =
-            create_buffer(sizeof(Vertex) * vertices.size(),
-                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                              VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                          VMA_MEMORY_USAGE_GPU_ONLY,
-                          VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+    vulkan::Buffer vertexBuffer {};
+    vertexBuffer.init(context->allocator(), sizeof(Vertex) * vertices.size(),
+                      vulkan::BufferUsage::Vertex,
+                      vulkan::MemoryMode::GPU_ONLY);
+    vulkan::uploadToGPU(uploadContext, vertexBuffer, vertices.data(),
+                        sizeof(Vertex) * vertices.size());
 
-        // copy 内存
+    vulkan::Buffer indexBuffer {};
+    indexBuffer.init(context->allocator(), sizeof(uint16_t) * indices.size(),
+                     vulkan::BufferUsage::Index, vulkan::MemoryMode::GPU_ONLY);
+    vulkan::uploadToGPU(uploadContext, indexBuffer, indices.data(),
+                        sizeof(uint16_t) * indices.size());
 
-        immediate_submit([&](VkCommandBuffer cmd) {
-            VkBufferCopy copy {};
-            copy.srcOffset = 0;
-            copy.dstOffset = 0;
-            copy.size = sizeof(Vertex) * vertices.size();
-
-            vkCmdCopyBuffer(cmd, stagingBuffer.buffer, vertexBuffer.buffer, 1,
-                            &copy);
-        });
-
-        vmaDestroyBuffer(context->allocator(), stagingBuffer.buffer,
-                         stagingBuffer.allocation);
-    }
-
-    AllocatedBuffer frameUniformBuffer {};
-    void *frameUBOMapped {};
-
-    VkPhysicalDeviceProperties physicalDeviceProps {};
-    vkGetPhysicalDeviceProperties(context->physical_device(),
-                                  &physicalDeviceProps);
-    const VkDeviceSize minUniformBufferOffsetAlignment =
-        physicalDeviceProps.limits.minUniformBufferOffsetAlignment;
     const VkDeviceSize frameUBOalignedUboSize =
-        (static_cast<VkDeviceSize>(sizeof(FrameUBO)) +
-         minUniformBufferOffsetAlignment - 1) &
-        ~(minUniformBufferOffsetAlignment - 1);
-
-    // 分配 UBO（多帧环形：勿在内层再声明 uniformBuffer，否则会遮蔽外层句柄）
-    frameUniformBuffer = create_buffer(
-        static_cast<std::size_t>(
-            frameUBOalignedUboSize *
-            static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    vmaMapMemory(context->allocator(), frameUniformBuffer.allocation,
-                 &frameUBOMapped);
-
-    AllocatedBuffer objectiformBuffer {};
-    void *objectUBOMapped {};
-
+        getMinUniformBufferOffsetAlignment<renderer::ubo::FrameUBO>(
+            context.get());
     const VkDeviceSize ubjectUBOalignedUboSize =
-        (static_cast<VkDeviceSize>(sizeof(ObjectUBO)) +
-         minUniformBufferOffsetAlignment - 1) &
-        ~(minUniformBufferOffsetAlignment - 1);
+        getMinUniformBufferOffsetAlignment<renderer::ubo::ObjectUBO>(
+            context.get());
+    /*
+     //   vertex buffer
+        AllocatedBuffer vertexBuffer {};
+        {
+            // 创建 staging buffer
+            AllocatedBuffer stagingBuffer = create_buffer(
+                sizeof(Vertex) * vertices.size(),
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO,
+                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
 
-    objectiformBuffer = create_buffer(
-        static_cast<std::size_t>(
-            ubjectUBOalignedUboSize *
-            static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-    vmaMapMemory(context->allocator(), objectiformBuffer.allocation,
-                 &objectUBOMapped);
+            // 映射内存
+            void *mapped {};
+            vmaMapMemory(context->allocator(), stagingBuffer.allocation,
+            &mapped);
+            // 复制数据
+            memcpy(mapped, vertices.data(), sizeof(Vertex) * vertices.size());
+            // 解映射
+            vmaUnmapMemory(context->allocator(), stagingBuffer.allocation);
+
+            vertexBuffer =
+                create_buffer(sizeof(Vertex) * vertices.size(),
+                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                              VMA_MEMORY_USAGE_GPU_ONLY,
+                              VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+            // copy 内存
+
+            immediate_submit([&](VkCommandBuffer cmd) {
+                VkBufferCopy copy {};
+                copy.srcOffset = 0;
+                copy.dstOffset = 0;
+                copy.size = sizeof(Vertex) * vertices.size();
+
+                vkCmdCopyBuffer(cmd, stagingBuffer.buffer, vertexBuffer.buffer,
+                1,
+                                &copy);
+            });
+
+            vmaDestroyBuffer(context->allocator(), stagingBuffer.buffer,
+                             stagingBuffer.allocation);
+        }
+
+        // index buffer
+        AllocatedBuffer indexBuffer {};
+        {
+            // 创建 staging buffer
+            const std::size_t indexDataBytes = sizeof(uint16_t) *
+     indices.size(); AllocatedBuffer stagingBuffer = create_buffer(
+                sizeof(uint16_t) * indices.size(),
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO,
+                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
+            void *mapped {};
+            vmaMapMemory(context->allocator(), stagingBuffer.allocation,
+            &mapped); memcpy(mapped, indices.data(), sizeof(uint16_t) *
+            indices.size()); vmaUnmapMemory(context->allocator(),
+            stagingBuffer.allocation);
+
+            indexBuffer = create_buffer(sizeof(uint16_t) * indices.size(),
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                        VMA_MEMORY_USAGE_GPU_ONLY,
+                                        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
+
+            // copy 内存
+
+            immediate_submit([&](VkCommandBuffer cmd) {
+                VkBufferCopy copy {};
+                copy.srcOffset = 0;
+                copy.dstOffset = 0;
+                copy.size = sizeof(uint16_t) * indices.size();
+
+                vkCmdCopyBuffer(cmd, stagingBuffer.buffer, indexBuffer.buffer,
+     1, &copy);
+            });
+
+            vmaDestroyBuffer(context->allocator(), stagingBuffer.buffer,
+                             stagingBuffer.allocation);
+        }
+
+        AllocatedBuffer frameUniformBuffer {};
+        void *frameUBOMapped {};
+
+        // 分配 UBO（多帧环形：勿在内层再声明
+     uniformBuffer，否则会遮蔽外层句柄） frameUniformBuffer = create_buffer(
+            static_cast<std::size_t>(
+                frameUBOalignedUboSize *
+                static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        vmaMapMemory(context->allocator(), frameUniformBuffer.allocation,
+                     &frameUBOMapped);
+
+        AllocatedBuffer objectiformBuffer {};
+        void *objectUBOMapped {};
+
+        const VkDeviceSize ubjectUBOalignedUboSize =
+            (static_cast<VkDeviceSize>(sizeof(ObjectUBO)) +
+             minUniformBufferOffsetAlignment - 1) &
+            ~(minUniformBufferOffsetAlignment - 1);
+
+        objectiformBuffer = create_buffer(
+            static_cast<std::size_t>(
+                ubjectUBOalignedUboSize *
+                static_cast<VkDeviceSize>(MAX_FRAMES_IN_FLIGHT)),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+        vmaMapMemory(context->allocator(), objectiformBuffer.allocation,
+                     &objectUBOMapped);
+
+        */
 
     // 描述符：set0=FrameUBO，set1=ObjectUBO（与 sandbox.vert 一致）
+
+    vulkan::DynamicRingBuffer frameUniformBuffer {};
+    frameUniformBuffer.init(context->allocator(),
+                            sizeof(renderer::ubo::FrameUBO),
+                            MAX_FRAMES_IN_FLIGHT, frameUBOalignedUboSize);
+
+    vulkan::DynamicRingBuffer objectiformBuffer {};
+    objectiformBuffer.init(context->allocator(),
+                           sizeof(renderer::ubo::ObjectUBO),
+                           MAX_FRAMES_IN_FLIGHT, ubjectUBOalignedUboSize);
 
     // VkDescriptorPool descriptorPool {};
     VkDescriptorPool descriptorPool =
         mergedReflection.create_descriptor_pool(device);
     std::vector<VkDescriptorSet> descriptorSets = material->get_all_sets();
-    {
+    material->update_dynamic_uniforms(
+        { { .set = 0,
+            .binding = 0,
+            .buffer = frameUniformBuffer.buffer.buffer(),
+            .offset = 0,
+            .size = frameUBOalignedUboSize },
+          { .set = 1,
+            .binding = 0,
+            .buffer = objectiformBuffer.buffer.buffer(),
+            .offset = 0,
+            .size = ubjectUBOalignedUboSize } });
+    /*
+{
+VkDescriptorPoolSize poolSize {};
+poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+poolSize.descriptorCount = 2;
 
-        material->update_dynamic_uniforms(
-            { { .set = 0,
-                .binding = 0,
-                .buffer = frameUniformBuffer.buffer,
-                .offset = 0,
-                .size = frameUBOalignedUboSize },
-              { .set = 1,
-                .binding = 0,
-                .buffer = objectiformBuffer.buffer,
-                .offset = 0,
-                .size = ubjectUBOalignedUboSize } });
+VkDescriptorPoolCreateInfo poolCreateInfo {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+};
+poolCreateInfo.maxSets = 2;
+poolCreateInfo.poolSizeCount = 1;
+poolCreateInfo.pPoolSizes = &poolSize;
+vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
+                       &descriptorPool);
 
-        // VkDescriptorPoolSize poolSize {};
-        // poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        // poolSize.descriptorCount = 2;
+const std::array<VkDescriptorSetLayout, 2> allocSetLayouts {
+    descriptorSetLayoutFrame,
+    descriptorSetLayoutObject,
+};
 
-        // VkDescriptorPoolCreateInfo poolCreateInfo {
-        //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
-        // };
-        // poolCreateInfo.maxSets = 2;
-        // poolCreateInfo.poolSizeCount = 1;
-        // poolCreateInfo.pPoolSizes = &poolSize;
-        // vkCreateDescriptorPool(device, &poolCreateInfo, nullptr,
-        //                        &descriptorPool);
+VkDescriptorSetAllocateInfo allocInfo {
+    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+};
+allocInfo.descriptorPool = descriptorPool;
+allocInfo.descriptorSetCount =
+    static_cast<std::uint32_t>(allocSetLayouts.size());
+allocInfo.pSetLayouts = allocSetLayouts.data();
 
-        // const std::array<VkDescriptorSetLayout, 2> allocSetLayouts {
-        //     descriptorSetLayoutFrame,
-        //     descriptorSetLayoutObject,
-        // };
+vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data());
 
-        // VkDescriptorSetAllocateInfo allocInfo {
-        //     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
-        // };
-        // allocInfo.descriptorPool = descriptorPool;
-        // allocInfo.descriptorSetCount =
-        //     static_cast<std::uint32_t>(allocSetLayouts.size());
-        // allocInfo.pSetLayouts = allocSetLayouts.data();
+VkDescriptorBufferInfo bufferInfoFrame {};
+bufferInfoFrame.buffer = frameUniformBuffer.buffer;
+bufferInfoFrame.offset = 0;
+bufferInfoFrame.range = frameUBOalignedUboSize;
 
-        // vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data());
+VkDescriptorBufferInfo bufferInfoObject {};
+bufferInfoObject.buffer = objectiformBuffer.buffer;
+bufferInfoObject.offset = 0;
+bufferInfoObject.range = ubjectUBOalignedUboSize;
 
-        // VkDescriptorBufferInfo bufferInfoFrame {};
-        // bufferInfoFrame.buffer = frameUniformBuffer.buffer;
-        // bufferInfoFrame.offset = 0;
-        // bufferInfoFrame.range = frameUBOalignedUboSize;
+std::array<VkWriteDescriptorSet, 2> writeDescriptorSets {};
 
-        // VkDescriptorBufferInfo bufferInfoObject {};
-        // bufferInfoObject.buffer = objectiformBuffer.buffer;
-        // bufferInfoObject.offset = 0;
-        // bufferInfoObject.range = ubjectUBOalignedUboSize;
+writeDescriptorSets[0].sType = writeDescriptorSets[1].sType =
+    VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
-        // std::array<VkWriteDescriptorSet, 2> writeDescriptorSets {};
+writeDescriptorSets[0].dstSet = descriptorSets[0];
+writeDescriptorSets[0].dstBinding = 0;
+writeDescriptorSets[0].dstArrayElement = 0;
+writeDescriptorSets[0].descriptorType =
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+writeDescriptorSets[0].descriptorCount = 1;
+writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
 
-        // writeDescriptorSets[0].sType = writeDescriptorSets[1].sType =
-        //     VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+writeDescriptorSets[1].dstSet = descriptorSets[1];
+writeDescriptorSets[1].dstBinding = 0;
+writeDescriptorSets[1].dstArrayElement = 0;
+writeDescriptorSets[1].descriptorType =
+    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+writeDescriptorSets[1].descriptorCount = 1;
+writeDescriptorSets[1].pBufferInfo = &bufferInfoObject;
 
-        // writeDescriptorSets[0].dstSet = descriptorSets[0];
-        // writeDescriptorSets[0].dstBinding = 0;
-        // writeDescriptorSets[0].dstArrayElement = 0;
-        // writeDescriptorSets[0].descriptorType =
-        //     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        // writeDescriptorSets[0].descriptorCount = 1;
-        // writeDescriptorSets[0].pBufferInfo = &bufferInfoFrame;
+vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
+                       writeDescriptorSets.data(), 0, nullptr);
+}*/
 
-        // writeDescriptorSets[1].dstSet = descriptorSets[1];
-        // writeDescriptorSets[1].dstBinding = 0;
-        // writeDescriptorSets[1].dstArrayElement = 0;
-        // writeDescriptorSets[1].descriptorType =
-        //     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-        // writeDescriptorSets[1].descriptorCount = 1;
-        // writeDescriptorSets[1].pBufferInfo = &bufferInfoObject;
+    vulkan::TexturePool::instance().init(context->allocator(), device,
+                                         &uploadContext);
 
-        // vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
-        //                        writeDescriptorSets.data(), 0, nullptr);
-    }
+    const auto texture = vulkan::TexturePool::instance().get_or_load(
+        "./assets/textures/ikun2026_happy_new_year.jpg");
+
+    // 加载纹理（句柄须在 shutdown 时释放，否则 VMA 退出会断言）
+    /* VmaAllocation stagingBufferAllocation {};
+     VmaAllocation gpuImageAllocation {};
+     VkImage gpuImage { VK_NULL_HANDLE };
+     VkImageView imageView {};
+     VkSampler sampler {};
+     {
+         int width {};
+         int height {};
+         int channels {};
+
+         stbi_set_flip_vertically_on_load(true);
+
+         uint8_t *data =
+             stbi_load("./assets/textures/ikun2026_happy_new_year.jpg",
+             &width,
+                       &height, &channels, 4);
+         if (!data) {
+             LUMEN_APP_LOG_ERROR("Failed to load texture");
+             return 1;
+         }
+
+         VkDeviceSize imageSize = width * height * 4;
+
+         VkBuffer stagingBuffer {};
+
+         VkBufferCreateInfo stagingBufferCreateInfo {
+             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+             .size = imageSize,
+             .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+         };
+
+         VmaAllocationCreateInfo stagingAllocInfo {
+             .usage = VMA_MEMORY_USAGE_CPU_TO_GPU,
+         };
+
+         vmaCreateBuffer(context->allocator(), &stagingBufferCreateInfo,
+                         &stagingAllocInfo, &stagingBuffer,
+                         &stagingBufferAllocation, nullptr);
+
+         // 把图像拷贝进 staging buffer
+         void *mapped {};
+         vmaMapMemory(context->allocator(), stagingBufferAllocation, &mapped);
+         memcpy(mapped, data, imageSize);
+         vmaUnmapMemory(context->allocator(), stagingBufferAllocation);
+
+         stbi_image_free(data); // 用完CPU数据可以扔了
+
+         // 开始创建 image
+         VkImageCreateInfo imageInfo {
+             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+         };
+
+         imageInfo.imageType = VK_IMAGE_TYPE_2D;
+         imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+         imageInfo.extent = { .width = static_cast<uint32_t>(width),
+                              .height = static_cast<uint32_t>(height),
+                              .depth = 1 };
+         imageInfo.mipLevels = 1;
+         imageInfo.arrayLayers = 1;
+         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+         imageInfo.usage =
+             VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+         VmaAllocationCreateInfo allocationCreateInfo {
+             .usage = VMA_MEMORY_USAGE_GPU_ONLY,
+         };
+
+         vmaCreateImage(context->allocator(), &imageInfo,
+         &allocationCreateInfo,
+                        &gpuImage, &gpuImageAllocation, nullptr);
+
+         {
+             vkResetCommandBuffer(uploadContext.commandBuffer, 0);
+
+             VkCommandBufferBeginInfo begin {
+                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                 .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+             };
+             vkBeginCommandBuffer(uploadContext.commandBuffer, &begin);
+
+             // image barrier
+             VkImageMemoryBarrier imageMemoryBarrier {
+                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+             };
+             imageMemoryBarrier.srcAccessMask = 0;
+             imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+             imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+             imageMemoryBarrier.newLayout =
+             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; imageMemoryBarrier.image =
+             gpuImage; imageMemoryBarrier.subresourceRange.aspectMask =
+                 VK_IMAGE_ASPECT_COLOR_BIT;
+             imageMemoryBarrier.subresourceRange.baseMipLevel = 0;
+             imageMemoryBarrier.subresourceRange.levelCount = 1;
+             imageMemoryBarrier.subresourceRange.baseArrayLayer = 0;
+             imageMemoryBarrier.subresourceRange.layerCount = 1;
+
+             vkCmdPipelineBarrier(uploadContext.commandBuffer,
+                                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                                  nullptr, 0, nullptr, 1,
+                                  &imageMemoryBarrier);
+
+             // 拷贝
+             VkBufferImageCopy copyRegion {};
+             copyRegion.imageExtent = { .width = static_cast<uint32_t>(width),
+                                        .height =
+                                        static_cast<uint32_t>(height), .depth
+                                        = 1 };
+             copyRegion.imageSubresource.aspectMask =
+             VK_IMAGE_ASPECT_COLOR_BIT; copyRegion.imageSubresource.mipLevel =
+             0; copyRegion.imageSubresource.baseArrayLayer = 0;
+             copyRegion.imageSubresource.layerCount = 1;
+             copyRegion.bufferOffset = 0;
+
+             vkCmdCopyBufferToImage(
+                 uploadContext.commandBuffer, stagingBuffer, gpuImage,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+             VkImageMemoryBarrier barrier2 {
+                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                 .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                 .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                 .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                 .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 .image = gpuImage,
+                 .subresourceRange = { .aspectMask =
+                 VK_IMAGE_ASPECT_COLOR_BIT,
+                                       .levelCount = 1,
+                                       .layerCount = 1 }
+             };
+
+             vkCmdPipelineBarrier(uploadContext.commandBuffer,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                                  nullptr, 0, nullptr, 1, &barrier2);
+
+             vkEndCommandBuffer(uploadContext.commandBuffer);
+
+             VkSubmitInfo submit {
+                 .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                 .commandBufferCount = 1,
+                 .pCommandBuffers = &uploadContext.commandBuffer,
+             };
+
+             vkResetFences(device, 1, &uploadContext.fence);
+             vkQueueSubmit(uploadContext.queue, 1, &submit,
+             uploadContext.fence); vkWaitForFences(device, 1,
+             &uploadContext.fence, VK_TRUE,
+                             UINT64_MAX);
+             //
+             -------------------------------------------------------------------------
+             // 清理 staging（安全，因为GPU已经完成拷贝）
+             //
+             -------------------------------------------------------------------------
+             vmaDestroyBuffer(context->allocator(), stagingBuffer,
+                              stagingBufferAllocation);
+
+             // 创建 image view
+             VkImageViewCreateInfo viewInfo {
+                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+             };
+             viewInfo.image = gpuImage;
+             viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+             viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+             viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+             viewInfo.subresourceRange.levelCount = 1;
+             viewInfo.subresourceRange.layerCount = 1;
+
+             vkCreateImageView(device, &viewInfo, nullptr, &imageView);
+
+             VkSamplerCreateInfo samplerInfo {
+                 .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                 .magFilter = VK_FILTER_LINEAR,
+                 .minFilter = VK_FILTER_LINEAR,
+                 .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+                 .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+             };
+
+             vkCreateSampler(device, &samplerInfo, nullptr, &sampler);
+         }
+
+         // VkImage image {};
+         // VkImageView imageView {};
+         // VkSampler sampler {};
+     }
+         */
+
+    material->set_texture(2, 1, texture);
 
     // 渲染循环
     while (running && pump.poll()) {
@@ -1033,24 +1323,28 @@ int main() {
         {
             auto time = static_cast<float>(SDL_GetTicks() / 1000.0F);
             {
-                char *dst = (char *)frameUBOMapped +
-                            frameIndex * frameUBOalignedUboSize;
-                FrameUBO frameUBO {};
+                renderer::ubo::FrameUBO frameUBO {};
                 frameUBO.time = time;
-                memcpy(dst, &frameUBO, sizeof(frameUBO));
+
+                // 每帧获取可写区域
+                VkDeviceSize offset;
+                auto ptr =
+                    frameUniformBuffer.getMappedFrame(frameIndex, offset);
+                memcpy(ptr, &frameUBO, sizeof(renderer::ubo::FrameUBO));
             }
 
             {
-                ObjectUBO objectUBO {};
-                char *dst = (char *)objectUBOMapped +
-                            frameIndex * ubjectUBOalignedUboSize;
-
+                renderer::ubo::ObjectUBO objectUBO {};
                 objectUBO.model =
                     glm::rotate(glm::mat4(1.0F), time, glm::vec3(0, 0, 1));
                 const glm::mat3 normal3 =
                     glm::transpose(glm::inverse(glm::mat3(objectUBO.model)));
                 objectUBO.normalMatrix = glm::mat4(normal3);
-                memcpy(dst, &objectUBO, sizeof(objectUBO));
+
+                // 每帧获取可写区域
+                VkDeviceSize offset;
+                auto ptr = objectiformBuffer.getMappedFrame(frameIndex, offset);
+                memcpy(ptr, &objectUBO, sizeof(renderer::ubo::ObjectUBO));
             }
         }
         // 等上一帧 GPU 完成
@@ -1143,11 +1437,6 @@ int main() {
             };
             vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &dynamicScissor);
 
-            VkDeviceSize offsets {};
-
-            vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1,
-                                   &vertexBuffer.buffer, &offsets);
-
             const std::vector<uint32_t> dynamicOffsets {
                 static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
                                       frameUBOalignedUboSize),
@@ -1156,7 +1445,11 @@ int main() {
             };
             material->bind_descriptor_sets(commandBuffers[imageIndex], 0,
                                            descriptorSets, dynamicOffsets);
-                                           
+
+            // material->bind_descriptor_sets(commandBuffers[imageIndex], 0,
+            // std::vector<std::uint32_t>{ 2 },
+            //    { 0});
+
             // vkCmdBindDescriptorSets(
             //     commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
             //     pipelineLayout, 0,
@@ -1165,7 +1458,26 @@ int main() {
             //     static_cast<std::uint32_t>(dynamicOffsets.size()),
             //     dynamicOffsets.data());
 
-            vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
+            // vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
+
+            // 顶点缓冲已在上方 vkCmdBindVertexBuffers(..., &offsets) 绑定
+
+            // 4. ✅ 绑定索引缓冲
+            // vkCmdBindIndexBuffer(commandBuffers[imageIndex],
+            //                      indexBuffer.buffer(), 0,
+            //                      VK_INDEX_TYPE_UINT16);
+
+            // const auto &vbo = vertexBuffer.buffer();
+
+            // VkDeviceSize offsets {};
+            // vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vbo,
+            //                        &offsets);
+
+            vertexBuffer.bind_vertex(commandBuffers[imageIndex]);
+            indexBuffer.bind_index(commandBuffers[imageIndex]);
+
+            // 5. ✅ 索引绘制（矩形）
+            vkCmdDrawIndexed(commandBuffers[imageIndex], 6, 1, 0, 0, 0);
 
             vkCmdEndRenderPass(commandBuffers[imageIndex]);
         }
@@ -1278,16 +1590,12 @@ int main() {
     vkDestroyImageView(device, depthImageView, nullptr);
     vmaDestroyImage(context->allocator(), depthImage, depthAllocation);
 
-    vmaUnmapMemory(context->allocator(), frameUniformBuffer.allocation);
-    vmaDestroyBuffer(context->allocator(), frameUniformBuffer.buffer,
-                     frameUniformBuffer.allocation);
+    vulkan::TexturePool::instance().clear();
 
-    vmaUnmapMemory(context->allocator(), objectiformBuffer.allocation);
-    vmaDestroyBuffer(context->allocator(), objectiformBuffer.buffer,
-                     objectiformBuffer.allocation);
-
-    vmaDestroyBuffer(context->allocator(), vertexBuffer.buffer,
-                     vertexBuffer.allocation);
+    vertexBuffer.destroy();
+    indexBuffer.destroy();
+    frameUniformBuffer.destroy();
+    objectiformBuffer.destroy();
 
     for (std::size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);

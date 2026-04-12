@@ -1,21 +1,5 @@
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <map>
-#include <optional>
-#include <string>
-#include <type_traits>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
-#include <boost/pfr.hpp>
-#include <glm/glm.hpp>
-#include <vulkan/vulkan_core.h>
-
-#include <spirv_reflect.h>
-
 namespace vulkan::shader::reflection {
 
 /// 反射选项：与宿主对 descriptor set 用法的约定（例如 ring buffer）。
@@ -23,7 +7,7 @@ struct ReflectOptions {
     /// 若设置：对所有 `set` 索引 **小于等于** 该值的 uniform buffer（SPIR-V
     /// 中为 `UNIFORM_BUFFER`）映射为
     /// `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC`。
-    std::optional<std::uint32_t> ringUniformMaxSet {};
+    std::optional<std::uint32_t> ringUniformMaxSet ;
 };
 
 struct VertexAttribute {
@@ -136,6 +120,51 @@ struct PushConstantRange {
     std::uint32_t offset {};
     VkShaderStageFlags stages { VK_SHADER_STAGE_ALL };
 };
+
+inline void to_json(nlohmann::json &j, const DescriptorBinding &b) {
+    j = nlohmann::json { { "set", b.set },
+                         { "binding", b.binding },
+                         { "descriptorType", static_cast<std::uint32_t>(b.type) },
+                         { "count", b.count },
+                         { "stages", static_cast<std::uint32_t>(b.stages) },
+                         { "name", b.name } };
+}
+
+inline void from_json(const nlohmann::json &j, DescriptorBinding &b) {
+    j.at("set").get_to(b.set);
+    j.at("binding").get_to(b.binding);
+    b.type = static_cast<VkDescriptorType>(
+        j.at("descriptorType").get<std::uint32_t>());
+    j.at("count").get_to(b.count);
+    b.stages = static_cast<VkShaderStageFlags>(
+        j.at("stages").get<std::uint32_t>());
+    j.at("name").get_to(b.name);
+}
+
+inline void to_json(nlohmann::json &j, const PushConstantRange &p) {
+    j = nlohmann::json { { "size", p.size },
+                         { "offset", p.offset },
+                         { "stages", static_cast<std::uint32_t>(p.stages) } };
+}
+
+inline void from_json(const nlohmann::json &j, PushConstantRange &p) {
+    j.at("size").get_to(p.size);
+    j.at("offset").get_to(p.offset);
+    p.stages = static_cast<VkShaderStageFlags>(
+        j.at("stages").get<std::uint32_t>());
+}
+
+inline void to_json(nlohmann::json &j, const VertexAttribute &a) {
+    j = nlohmann::json { { "location", a.location },
+                         { "format", static_cast<std::uint32_t>(a.format) },
+                         { "offset", a.offset } };
+}
+
+inline void from_json(const nlohmann::json &j, VertexAttribute &a) {
+    j.at("location").get_to(a.location);
+    a.format = static_cast<VkFormat>(j.at("format").get<std::uint32_t>());
+    j.at("offset").get_to(a.offset);
+}
 
 /// 单个 descriptor set 的布局、pool 统计与已创建的 `VkDescriptorSetLayout`。
 struct DescriptorSetLayoutInfo {
@@ -260,6 +289,15 @@ public:
                  .vertexAttributeDescriptionCount = (uint32_t)attrs.size(),
                  .pVertexAttributeDescriptions = attrs.data() };
     }
+
+    /// 导出 `bindings_` / `pushConstantRanges_` / `vertexAttributes_`（不含 Vk
+    /// 句柄）。`schemaVersion` 为 1。
+    [[nodiscard]] nlohmann::json to_json() const;
+
+    /// 从 `to_json()` 或同结构 JSON 恢复上述三份数据；会清空
+    /// `setLayoutInfos_`、`setLayouts_` 并将 `pipelineLayout_` 置空。
+    /// 若此前已 `create_layouts`，请先对 device 调用 `destroy_layouts`。
+    void from_json(const nlohmann::json &j);
 
 private:
     std::vector<DescriptorBinding> bindings_;
