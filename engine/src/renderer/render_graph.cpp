@@ -1,6 +1,9 @@
 #include "renderer/render_graph.hpp"
 
+#include "core/log/logger.hpp"
+
 #include <algorithm>
+#include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
 #include <vulkan/vulkan_core.h>
@@ -114,30 +117,8 @@ TextureHandle RenderGraph::createDepth(const TextureDesc &desc) {
     return static_cast<TextureHandle>(textures.size() - 1);
 }
 
-void RenderGraph::add_pass(const std::string &name,
-                           const std::vector<TextureHandle> &inputs,
-                           const std::vector<TextureHandle> &colors,
-                           TextureHandle depth,
-                           std::function<void(VkCommandBuffer)> exec) {
-    UserPass up;
-    up.name = name;
-    up.inputs = inputs;
-    up.colors = colors;
-    up.depth = depth;
-    up.exec = std::move(exec);
-    if (!colors.empty() && colors[0] < textures.size()) {
-        const auto &t = textures[colors[0]];
-        up.extent = { t.desc.width, t.desc.height };
-    } else if (!inputs.empty() && inputs[0] < textures.size()) {
-        const auto &t = textures[inputs[0]];
-        up.extent = { t.desc.width, t.desc.height };
-    }
-    user_passes_.push_back(std::move(up));
-}
-
-void RenderGraph::addGraphicsPass(
-    const std::string &name, const PassInfo &info,
-    std::function<void(VkCommandBuffer)> record_draws) {
+void RenderGraph::add_pass(const std::string &name, const PassInfo &info,
+                           std::function<void(VkCommandBuffer)> record_draws) {
     UserPass up;
     up.name = name;
     up.inputs = info.reads;
@@ -150,6 +131,39 @@ void RenderGraph::addGraphicsPass(
     up.enable_clear_depth = info.enableClearDepth;
     up.exec = std::move(record_draws);
     user_passes_.push_back(std::move(up));
+}
+
+bool RenderGraph::set_pass_clear_color(const std::string &name,
+                                       VkClearColorValue color) {
+    auto it = std::find_if(user_passes_.begin(), user_passes_.end(),
+                           [&](const UserPass &p) { return p.name == name; });
+    if (it == user_passes_.end()) {
+        return false;
+    }
+
+    it->clear_color = color;
+    const auto &target_colors = it->colors;
+    if (target_colors.empty()) {
+        return true;
+    }
+
+    for (auto &batch : compiled_batches_) {
+        const std::size_t n =
+            std::min(batch.clear_values.size(), batch.clear_value_handles.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            const TextureHandle h = batch.clear_value_handles[i];
+            if (h == UINT32_MAX || h >= textures.size() ||
+                textures[h].type == TextureType::Depth) {
+                continue;
+            }
+            if (std::find(target_colors.begin(), target_colors.end(), h) !=
+                target_colors.end()) {
+                batch.clear_values[i].color = color;
+            }
+        }
+    }
+
+    return true;
 }
 
 TextureResource &RenderGraph::getTexture(TextureHandle h) {
@@ -341,16 +355,19 @@ void RenderGraph::build_batch_single_subpass(CompiledBatch &batch,
     vkCreateRenderPass(device, &rpc, nullptr, &batch.render_pass);
 
     batch.clear_values.clear();
+    batch.clear_value_handles.clear();
     for (std::size_t i = 0; i < up.colors.size(); ++i) {
         VkClearValue cv {};
         cv.color = up.clear_color;
         batch.clear_values.push_back(cv);
+        batch.clear_value_handles.push_back(up.colors[i]);
     }
     if (batch.has_depth) {
         VkClearValue cv {};
         cv.depthStencil.depth = up.clear_depth;
         cv.depthStencil.stencil = up.clear_stencil;
         batch.clear_values.push_back(cv);
+        batch.clear_value_handles.push_back(up.depth);
     }
 
     bool uses_swapchain = false;
@@ -436,8 +453,10 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
 
     std::vector<VkAttachmentDescription> attachments;
     std::vector<VkImageLayout> attachment_final_layouts;
+    std::vector<VkClearColorValue> attachment_clear_colors;
     attachments.reserve(attachment_order.size());
     attachment_final_layouts.reserve(attachment_order.size());
+    attachment_clear_colors.reserve(attachment_order.size());
     for (TextureHandle h : attachment_order) {
         auto &tex = textures[h];
         const UserPass *producer = nullptr;
@@ -466,6 +485,8 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
             fin = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
         attachment_final_layouts.push_back(fin);
+        attachment_clear_colors.push_back(
+            producer ? producer->clear_color : VkClearColorValue {});
 
         VkAttachmentDescription ad {};
         ad.format = tex.desc.format;
@@ -567,6 +588,7 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
     vkCreateRenderPass(device, &rpc, nullptr, &batch.render_pass);
 
     batch.clear_values.clear();
+    batch.clear_value_handles = attachment_order;
     for (std::size_t ai = 0; ai < attachment_order.size(); ++ai) {
         const TextureHandle h = attachment_order[ai];
         VkClearValue cv {};
@@ -574,7 +596,7 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
             cv.depthStencil.depth = subs.back().clear_depth;
             cv.depthStencil.stencil = subs.back().clear_stencil;
         } else {
-            cv.color = subs[0].clear_color;
+            cv.color = attachment_clear_colors[ai];
         }
         batch.clear_values.push_back(cv);
     }
@@ -835,6 +857,21 @@ void RenderGraph::compile() {
     destroy_compiled();
     create_all_resources();
     merge_into_batches();
+
+    std::fprintf(stdout, "[RenderGraph] compile: logical_passes=%u, batches=%u\n",
+                 static_cast<unsigned>(user_passes_.size()),
+                 static_cast<unsigned>(compiled_batches_.size()));
+    for (std::size_t bi = 0; bi < compiled_batches_.size(); ++bi) {
+        const auto &batch = compiled_batches_[bi];
+        std::fprintf(stdout, "[RenderGraph]   batch[%u]: subpasses=%u\n",
+                     static_cast<unsigned>(bi),
+                     static_cast<unsigned>(batch.subpasses.size()));
+        for (std::size_t si = 0; si < batch.subpasses.size(); ++si) {
+            const auto &sp = batch.subpasses[si];
+            std::fprintf(stdout, "[RenderGraph]     subpass[%u]: %s\n",
+                         static_cast<unsigned>(si), sp.name.c_str());
+        }
+    }
 }
 
 void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchain_image_index) {

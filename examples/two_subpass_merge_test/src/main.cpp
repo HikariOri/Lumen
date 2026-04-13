@@ -46,6 +46,7 @@ int main() {
     auto window = *lumen::platform::Window::create(windowConfig);
 
     bool running { true };
+    bool framebufferResized { false };
 
     lumen::platform::EventPump pump;
     pump.set_on_application_event([&](lumen::platform::DispatchableEvent &de) {
@@ -57,6 +58,11 @@ int main() {
                     running = false;
                     return true;
                 }
+                return false;
+            });
+        d.dispatch<lumen::platform::EventWindowResize>(
+            [&](lumen::platform::EventWindowResize &) {
+                framebufferResized = true;
                 return false;
             });
     });
@@ -136,135 +142,18 @@ int main() {
     std::vector<VkDescriptorSet> pass2DescriptorSets =
         pass2Material->get_all_sets();
 
-    renderer::RenderGraph renderGraph(device, allocator);
-    renderGraph.set_subpass_merging(true);
-
-    auto rt1 =
-        renderGraph.createTexture({ .width = exec.width,
-                                    .height = exec.height,
-                                    .format = VK_FORMAT_R8G8B8A8_UNORM });
-    auto rt2 =
-        renderGraph.createTexture({ .width = exec.width,
-                                    .height = exec.height,
-                                    .format = VK_FORMAT_R8G8B8A8_UNORM });
-    auto depthHandle = renderGraph.createDepth(
-        { .width = exec.width,
-          .height = exec.height,
-          .format = depthFormat,
-          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
-
-    auto swapHandle = renderGraph.importSwapchain(
-        { .width = exec.width,
-          .height = exec.height,
-          .format = context->swapchain_format() },
-        context->swapchain_images()[0], context->swapchain_image_views()[0]);
-
-    renderGraph.set_swapchain_image_views(context->swapchain_image_views());
+    std::unique_ptr<renderer::RenderGraph> renderGraph;
+    renderer::TextureHandle rt1 = UINT32_MAX;
+    renderer::TextureHandle rt2 = UINT32_MAX;
+    renderer::TextureHandle depthHandle = UINT32_MAX;
+    renderer::TextureHandle swapHandle = UINT32_MAX;
 
     constexpr const char *kPass1Name = "MrtPass";
     constexpr const char *kPass2Name = "ComposePass";
 
-    renderGraph.add_pass(
-        kPass1Name, {}, { rt1, rt2 }, depthHandle, [&](VkCommandBuffer cmd) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              exec.pass1_pipeline);
-
-            VkViewport vp { .x = 0.0F,
-                            .y = 0.0F,
-                            .width = static_cast<float>(exec.width),
-                            .height = static_cast<float>(exec.height),
-                            .minDepth = 0.0F,
-                            .maxDepth = 1.0F };
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-
-            VkRect2D sc { .offset = { 0, 0 },
-                          .extent = { exec.width, exec.height } };
-            vkCmdSetScissor(cmd, 0, 1, &sc);
-
-            std::uint32_t tri = 0;
-            vkCmdPushConstants(cmd, pass1Reflection.pipeline_layout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(tri),
-                               &tri);
-            vkCmdDraw(cmd, 3, 1, 0, 0);
-
-            tri = 1;
-            vkCmdPushConstants(cmd, pass1Reflection.pipeline_layout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(tri),
-                               &tri);
-            vkCmdDraw(cmd, 3, 1, 0, 0);
-        });
-
-    renderGraph.add_pass(
-        kPass2Name, { rt1, rt2 }, { swapHandle }, depthHandle,
-        [&](VkCommandBuffer cmd) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              exec.pass2_pipeline);
-            pass2Material->bind_descriptor_sets(cmd, 0, pass2DescriptorSets,
-                                                {});
-
-            VkViewport vp { .x = 0.0F,
-                            .y = 0.0F,
-                            .width = static_cast<float>(exec.width),
-                            .height = static_cast<float>(exec.height),
-                            .minDepth = 0.0F,
-                            .maxDepth = 1.0F };
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-
-            VkRect2D sc { .offset = { 0, 0 },
-                          .extent = { exec.width, exec.height } };
-            vkCmdSetScissor(cmd, 0, 1, &sc);
-
-            vkCmdDraw(cmd, 3, 1, 0, 0);
-        });
-
-    renderGraph.compile();
-
-    pass2Material->update_input_attachments(
-        { { .set = 0,
-            .binding = 0,
-            .view = renderGraph.getTexture(rt1).view,
-            .sampler = VK_NULL_HANDLE,
-            .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-          { .set = 0,
-            .binding = 1,
-            .view = renderGraph.getTexture(rt2).view,
-            .sampler = VK_NULL_HANDLE,
-            .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } });
-
     VkPipelineVertexInputStateCreateInfo empty_vi {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
     };
-
-    VkRenderPass merged_rp = renderGraph.render_pass_named(kPass1Name);
-
-    {
-        vulkan::PipelineBuilder b;
-        b.device = device;
-        b.vertShader = pass1_vert;
-        b.fragShader = pass1_frag;
-        b.renderPass = merged_rp;
-        b.subpass = renderGraph.subpass_index_for(kPass1Name);
-        b.layout = pass1Reflection.pipeline_layout();
-        b.vertexInputState = &empty_vi;
-        b.color_attachment_count = 2;
-        b.depthTest = true;
-        b.depthWrite = true;
-        exec.pass1_pipeline = b.build();
-    }
-
-    {
-        vulkan::PipelineBuilder b;
-        b.device = device;
-        b.vertShader = pass2_vert;
-        b.fragShader = pass2_frag;
-        b.renderPass = merged_rp;
-        b.subpass = renderGraph.subpass_index_for(kPass2Name);
-        b.layout = pass2Reflection.pipeline_layout();
-        b.vertexInputState = &empty_vi;
-        b.depthTest = false;
-        b.depthWrite = false;
-        exec.pass2_pipeline = b.build();
-    }
 
     constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -324,7 +213,217 @@ int main() {
     std::uint64_t timelineValue = 0;
     std::uint32_t imageIndex = 0;
 
+    auto recreate_swapchain_dependent_objects = [&]() -> bool {
+        int width = 0;
+        int height = 0;
+        window.get_framebuffer_size(&width, &height);
+        if (width <= 0 || height <= 0) {
+            return false;
+        }
+
+        auto rc =
+            context->recreate_swapchain(static_cast<std::uint32_t>(width),
+                                        static_cast<std::uint32_t>(height));
+        if (!rc.has_value()) {
+            const std::string err = rc.error();
+            LUMEN_APP_LOG_ERROR("recreate_swapchain 失败: {}", err.c_str());
+            return false;
+        }
+
+        exec.width = context->swapchain_width();
+        exec.height = context->swapchain_height();
+
+        if (!commandBuffers.empty()) {
+            vkFreeCommandBuffers(
+                device, commandPool,
+                static_cast<std::uint32_t>(commandBuffers.size()),
+                commandBuffers.data());
+        }
+        commandBuffers.assign(context->swapchain_image_views().size(),
+                              VK_NULL_HANDLE);
+        {
+            VkCommandBufferAllocateInfo cbai {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .commandPool = commandPool,
+                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount =
+                    static_cast<std::uint32_t>(commandBuffers.size()),
+            };
+            vkAllocateCommandBuffers(device, &cbai, commandBuffers.data());
+        }
+
+        for (VkSemaphore s : presentSemaphores) {
+            vkDestroySemaphore(device, s, nullptr);
+        }
+        presentSemaphores.assign(context->swapchain_image_views().size(),
+                                 VK_NULL_HANDLE);
+        {
+            VkSemaphoreCreateInfo sci {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            };
+            for (std::size_t i = 0; i < presentSemaphores.size(); ++i) {
+                vkCreateSemaphore(device, &sci, nullptr, &presentSemaphores[i]);
+            }
+        }
+
+        if (exec.pass1_pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, exec.pass1_pipeline, nullptr);
+            exec.pass1_pipeline = VK_NULL_HANDLE;
+        }
+        if (exec.pass2_pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, exec.pass2_pipeline, nullptr);
+            exec.pass2_pipeline = VK_NULL_HANDLE;
+        }
+
+        renderGraph =
+            std::make_unique<renderer::RenderGraph>(device, allocator);
+        renderGraph->set_subpass_merging(true);
+
+        rt1 =
+            renderGraph->createTexture({ .width = exec.width,
+                                         .height = exec.height,
+                                         .format = VK_FORMAT_R8G8B8A8_UNORM });
+        rt2 =
+            renderGraph->createTexture({ .width = exec.width,
+                                         .height = exec.height,
+                                         .format = VK_FORMAT_R8G8B8A8_UNORM });
+        depthHandle = renderGraph->createDepth(
+            { .width = exec.width,
+              .height = exec.height,
+              .format = depthFormat,
+              .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
+        swapHandle = renderGraph->importSwapchain(
+            { .width = exec.width,
+              .height = exec.height,
+              .format = context->swapchain_format() },
+            context->swapchain_images()[0],
+            context->swapchain_image_views()[0]);
+        renderGraph->set_swapchain_image_views(
+            context->swapchain_image_views());
+
+        renderGraph->add_pass(
+            kPass1Name,
+            { .reads = {},
+              .writes = { rt1, rt2 },
+              .depth = depthHandle,
+              .extent = { exec.width, exec.height } },
+            [&](VkCommandBuffer cmd) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  exec.pass1_pipeline);
+
+                VkViewport vp { .x = 0.0F,
+                                .y = 0.0F,
+                                .width = static_cast<float>(exec.width),
+                                .height = static_cast<float>(exec.height),
+                                .minDepth = 0.0F,
+                                .maxDepth = 1.0F };
+                vkCmdSetViewport(cmd, 0, 1, &vp);
+
+                VkRect2D sc { .offset = { 0, 0 },
+                              .extent = { exec.width, exec.height } };
+                vkCmdSetScissor(cmd, 0, 1, &sc);
+
+                std::uint32_t tri = 0;
+                vkCmdPushConstants(cmd, pass1Reflection.pipeline_layout(),
+                                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(tri),
+                                   &tri);
+                vkCmdDraw(cmd, 3, 1, 0, 0);
+
+                tri = 1;
+                vkCmdPushConstants(cmd, pass1Reflection.pipeline_layout(),
+                                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(tri),
+                                   &tri);
+                vkCmdDraw(cmd, 3, 1, 0, 0);
+            });
+
+        renderGraph->add_pass(
+            kPass2Name,
+            { .reads = { rt1, rt2 },
+              .writes = { swapHandle },
+              .depth = depthHandle,
+              .extent = { exec.width, exec.height } },
+            [&](VkCommandBuffer cmd) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  exec.pass2_pipeline);
+                pass2Material->bind_descriptor_sets(cmd, 0, pass2DescriptorSets,
+                                                    {});
+
+                VkViewport vp { .x = 0.0F,
+                                .y = 0.0F,
+                                .width = static_cast<float>(exec.width),
+                                .height = static_cast<float>(exec.height),
+                                .minDepth = 0.0F,
+                                .maxDepth = 1.0F };
+                vkCmdSetViewport(cmd, 0, 1, &vp);
+
+                VkRect2D sc { .offset = { 0, 0 },
+                              .extent = { exec.width, exec.height } };
+                vkCmdSetScissor(cmd, 0, 1, &sc);
+
+                vkCmdDraw(cmd, 3, 1, 0, 0);
+            });
+
+        renderGraph->compile();
+
+        pass2Material->update_input_attachments(
+            { { .set = 0,
+                .binding = 0,
+                .view = renderGraph->getTexture(rt1).view,
+                .sampler = VK_NULL_HANDLE,
+                .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+              { .set = 0,
+                .binding = 1,
+                .view = renderGraph->getTexture(rt2).view,
+                .sampler = VK_NULL_HANDLE,
+                .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } });
+
+        VkRenderPass merged_rp = renderGraph->render_pass_named(kPass1Name);
+
+        {
+            vulkan::PipelineBuilder b;
+            b.device = device;
+            b.vertShader = pass1_vert;
+            b.fragShader = pass1_frag;
+            b.renderPass = merged_rp;
+            b.subpass = renderGraph->subpass_index_for(kPass1Name);
+            b.layout = pass1Reflection.pipeline_layout();
+            b.vertexInputState = &empty_vi;
+            b.color_attachment_count = 2;
+            b.depthTest = true;
+            b.depthWrite = true;
+            exec.pass1_pipeline = b.build();
+        }
+
+        {
+            vulkan::PipelineBuilder b;
+            b.device = device;
+            b.vertShader = pass2_vert;
+            b.fragShader = pass2_frag;
+            b.renderPass = merged_rp;
+            b.subpass = renderGraph->subpass_index_for(kPass2Name);
+            b.layout = pass2Reflection.pipeline_layout();
+            b.vertexInputState = &empty_vi;
+            b.depthTest = false;
+            b.depthWrite = false;
+            exec.pass2_pipeline = b.build();
+        }
+
+        return exec.pass1_pipeline != VK_NULL_HANDLE &&
+               exec.pass2_pipeline != VK_NULL_HANDLE;
+    };
+
+    // if (!recreate_swapchain_dependent_objects()) {
+    //     LUMEN_APP_LOG_CRITICAL("初始交换链依赖资源构建失败");
+    //     return 1;
+    // }
+
     while (running && pump.poll()) {
+        if (framebufferResized) {
+            framebufferResized = false;
+            if (!recreate_swapchain_dependent_objects()) {
+                continue;
+            }
+        }
         {
             uint64_t waitValue = timelineValue;
             VkSemaphoreWaitInfo wi {
@@ -344,10 +443,15 @@ int main() {
                 .semaphore = imageAvailableSemaphores[currentFrame],
                 .deviceMask = 1,
             };
-            vkAcquireNextImage2KHR(device, &ai, &imageIndex);
+            const VkResult acq =
+                vkAcquireNextImage2KHR(device, &ai, &imageIndex);
+            if (acq == VK_ERROR_OUT_OF_DATE_KHR || acq == VK_SUBOPTIMAL_KHR) {
+                framebufferResized = true;
+                continue;
+            }
         }
 
-        renderGraph.updateSwapchainImage(
+        renderGraph->updateSwapchainImage(
             swapHandle, context->swapchain_images()[imageIndex],
             context->swapchain_image_views()[imageIndex]);
 
@@ -357,7 +461,7 @@ int main() {
         };
         vkBeginCommandBuffer(commandBuffers[imageIndex], &bi);
 
-        renderGraph.execute(commandBuffers[imageIndex], imageIndex);
+        renderGraph->execute(commandBuffers[imageIndex], imageIndex);
 
         vkEndCommandBuffer(commandBuffers[imageIndex]);
 
@@ -410,7 +514,12 @@ int main() {
             pi.swapchainCount = 1;
             pi.pSwapchains = &swapchain;
             pi.pImageIndices = &imageIndex;
-            vkQueuePresentKHR(context->present_queue(), &pi);
+            const VkResult present =
+                vkQueuePresentKHR(context->present_queue(), &pi);
+            if (present == VK_ERROR_OUT_OF_DATE_KHR ||
+                present == VK_SUBOPTIMAL_KHR) {
+                framebufferResized = true;
+            }
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;

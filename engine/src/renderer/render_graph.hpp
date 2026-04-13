@@ -68,16 +68,11 @@ public:
 
     void set_swapchain_image_views(std::vector<VkImageView> views);
 
-    /// 与 PassInfo 等价，声明式添加逻辑 Pass（可合并为 Subpass）。
-    void addGraphicsPass(const std::string &name, const PassInfo &info,
-                         std::function<void(VkCommandBuffer)> record_draws);
-
-    /// 直接声明 inputs / colors / depth（与合并算法一致）。
-    void add_pass(const std::string &name,
-                  const std::vector<TextureHandle> &inputs,
-                  const std::vector<TextureHandle> &colors,
-                  TextureHandle depth,
-                  std::function<void(VkCommandBuffer)> exec);
+    /// 声明式添加逻辑 Pass（可合并为 Subpass）。
+    void add_pass(const std::string &name, const PassInfo &info,
+                  std::function<void(VkCommandBuffer)> record_draws);
+    /// 运行时更新某个逻辑 Pass 的颜色清屏值（无需重新 compile）。
+    bool set_pass_clear_color(const std::string &name, VkClearColorValue color);
 
     /// false：每个逻辑 Pass 单独 VkRenderPass（默认，兼容现有示例）。
     /// true：在满足依赖与 extent 时合并为同一 RenderPass 的多个 Subpass。
@@ -125,6 +120,7 @@ private:
         VkExtent2D extent{};
 
         std::vector<VkClearValue> clear_values;
+        std::vector<TextureHandle> clear_value_handles;
         std::vector<VkImageMemoryBarrier2> barriers_before_batch;
 
         std::vector<TextureHandle> color_outputs;

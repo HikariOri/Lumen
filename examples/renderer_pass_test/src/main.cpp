@@ -409,7 +409,7 @@ int main() {
 
     {
 
-        renderGraph.addGraphicsPass(
+        renderGraph.add_pass(
             "ShaderToy",
             { .writes = { offscreenHandle },
               .extent = { static_cast<std::uint32_t>(width),
@@ -451,7 +451,7 @@ int main() {
     }
 
     {
-        renderGraph.addGraphicsPass(
+        renderGraph.add_pass(
             "CubeToScreen",
             { .reads = { offscreenHandle },
               .writes = { swapHandle },

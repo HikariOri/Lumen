@@ -10,6 +10,7 @@
 #include "platform/event_pump.hpp"
 #include "platform/window.hpp"
 #include "renderer/mesh.hpp"
+#include "renderer/render_graph.hpp"
 #include "renderer/ubo.hpp"
 #include "utils.hpp"
 #include "vulkan/buffer.hpp"
@@ -18,6 +19,7 @@
 #include "vulkan/shader/material/shader_material.hpp"
 #include "vulkan/shader/reflection/shader_reflection.hpp"
 
+#include <cmath>
 #include <print>
 
 int main() {
@@ -38,6 +40,7 @@ int main() {
     auto window = *lumen::platform::Window::create(windowConfig);
 
     bool running { true };
+    bool framebufferResized { false };
 
     // 初始化事件调度
     lumen::platform::EventPump pump;
@@ -52,6 +55,7 @@ int main() {
         d.dispatch<lumen::platform::EventWindowResize>(
             [&](lumen::platform::EventWindowResize &r) {
                 LUMEN_APP_LOG_INFO("窗口尺寸变化: {} x {}", r.width, r.height);
+                framebufferResized = true;
             });
 
         d.dispatch<lumen::platform::EventKeyDown>(
@@ -84,6 +88,17 @@ int main() {
         true);
 
     auto device = context->device();
+    VmaAllocator allocator = context->allocator();
+    // VkExtent2D swapchainExtent = context->swapchain_extent();
+    VkFormat swapchainFormat = context->swapchain_format();
+    VkFormat depthFormat = context->depth_format();
+    VkFormat offscreenFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat swapchainImageFormat = swapchainFormat;
+    VkFormat depthImageFormat = depthFormat;
+    VkFormat offscreenImageFormat = offscreenFormat;
+    VkFormat swapchainImageViewFormat = swapchainFormat;
+    VkFormat depthImageViewFormat = depthFormat;
+    VkFormat offscreenImageViewFormat = offscreenFormat;
 
     const auto vertexSpirv = load_spirv("./shaders/two_pass_test.vert.spv");
     const auto fragmentSpirv = load_spirv("./shaders/two_pass_test.frag.spv");
@@ -171,119 +186,6 @@ int main() {
     int height = 0;
     window.get_framebuffer_size(&width, &height);
 
-    // Pass 1：离屏 ShaderToy → R8G8B8A8，结束时 layout 为 SHADER_READ_ONLY
-    VkRenderPass pass1_render_pass {};
-    {
-        VkAttachmentDescription color_attachment {};
-        color_attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
-        color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        color_attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkAttachmentReference color_ref {};
-        color_ref.attachment = 0;
-        color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass {};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &color_ref;
-
-        VkRenderPassCreateInfo rp_ci {
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-        };
-        rp_ci.attachmentCount = 1;
-        rp_ci.pAttachments = &color_attachment;
-        rp_ci.subpassCount = 1;
-        rp_ci.pSubpasses = &subpass;
-
-        if (vkCreateRenderPass(device, &rp_ci, nullptr, &pass1_render_pass) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create pass1 render pass");
-        }
-    }
-
-    VkImage offscreen_image {};
-    VkImageView offscreen_view {};
-    VmaAllocation offscreen_allocation {};
-    VkSampler offscreen_sampler {};
-    VkFramebuffer pass1_framebuffer {};
-
-    {
-        VkImageCreateInfo ici { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-        ici.imageType = VK_IMAGE_TYPE_2D;
-        ici.format = VK_FORMAT_R8G8B8A8_UNORM;
-        ici.extent = { .width = static_cast<std::uint32_t>(width),
-                       .height = static_cast<std::uint32_t>(height),
-                       .depth = 1 };
-        ici.mipLevels = 1;
-        ici.arrayLayers = 1;
-        ici.samples = VK_SAMPLE_COUNT_1_BIT;
-        ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ici.usage =
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        VmaAllocationCreateInfo aci {};
-        aci.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(context->allocator(), &ici, &aci, &offscreen_image,
-                           &offscreen_allocation, nullptr) != VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create offscreen image");
-        }
-
-        VkImageViewCreateInfo vci {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-        };
-        vci.image = offscreen_image;
-        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vci.format = VK_FORMAT_R8G8B8A8_UNORM;
-        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        vci.subresourceRange.baseMipLevel = 0;
-        vci.subresourceRange.levelCount = 1;
-        vci.subresourceRange.baseArrayLayer = 0;
-        vci.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(device, &vci, nullptr, &offscreen_view) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create offscreen image view");
-        }
-
-        VkSamplerCreateInfo sci { .sType =
-                                      VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-        sci.magFilter = VK_FILTER_LINEAR;
-        sci.minFilter = VK_FILTER_LINEAR;
-        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-
-        if (vkCreateSampler(device, &sci, nullptr, &offscreen_sampler) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
-        }
-
-        VkImageView pass1_atts[] = { offscreen_view };
-        VkFramebufferCreateInfo fb_ci {
-            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-        };
-        fb_ci.renderPass = pass1_render_pass;
-        fb_ci.attachmentCount = 1;
-        fb_ci.pAttachments = pass1_atts;
-        fb_ci.width = static_cast<std::uint32_t>(width);
-        fb_ci.height = static_cast<std::uint32_t>(height);
-        fb_ci.layers = 1;
-
-        if (vkCreateFramebuffer(device, &fb_ci, nullptr, &pass1_framebuffer) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create pass1 framebuffer");
-        }
-    }
-
     VkShaderModule pass1_vert_shader {};
     VkShaderModule pass1_frag_shader {};
     {
@@ -338,195 +240,11 @@ int main() {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
     };
 
-    VkPipeline pass1_pipeline {};
-    {
-        vulkan::PipelineBuilder pass1_builder;
-        pass1_builder.device = device;
-        pass1_builder.vertShader = pass1_vert_shader;
-        pass1_builder.fragShader = pass1_frag_shader;
-        pass1_builder.renderPass = pass1_render_pass;
-        pass1_builder.subpass = 0;
-        pass1_builder.layout = pass1_pipeline_layout;
-        pass1_builder.vertexInputState = &pass1_vertex_input;
-        pass1_builder.depthTest = false;
-        pass1_builder.depthWrite = false;
-        pass1_pipeline = pass1_builder.build();
-    }
-
-    // Pass 2：Swapchain 颜色 + 深度 → 屏幕
-    VkRenderPass pass2_render_pass {};
-
-    {
-        VkAttachmentDescription colorAttachment {};
-        colorAttachment.format = context->swapchain_format();
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        // colorAttachment.stencilLoadOp;
-        // colorAttachment.stencilStoreOp;
-        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout =
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 用于呈现，在交换链中
-
-        VkAttachmentDescription depthAttachment {};
-        depthAttachment.format = context->depth_format();
-        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        // depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        // depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depthAttachment.finalLayout =
-            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentReference colorAttachmentReference {};
-        colorAttachmentReference.attachment = 0;
-        colorAttachmentReference.layout =
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-        VkAttachmentReference depthRef {};
-        depthRef.attachment = 1;
-        depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        VkSubpassDescription subpass {};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &colorAttachmentReference;
-        subpass.pDepthStencilAttachment = &depthRef;
-
-        std::array<VkAttachmentDescription, 2> attachments { colorAttachment,
-                                                             depthAttachment };
-
-        VkRenderPassCreateInfo renderPassCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-        };
-
-        renderPassCreateInfo.attachmentCount = attachments.size();
-        renderPassCreateInfo.pAttachments = attachments.data();
-        renderPassCreateInfo.subpassCount = 1;
-        renderPassCreateInfo.pSubpasses = &subpass;
-        //   renderPassCreateInfo.dependencyCount;
-        //   renderPassCreateInfo.pDependencies;
-
-        if (vkCreateRenderPass(context->device(), &renderPassCreateInfo,
-                               nullptr, &pass2_render_pass)) {
-            LUMEN_APP_LOG_ERROR("Failed to create pass2 render pass");
-        }
-    }
-
-    // 深度附件
-    VkImage depthImage {};
-    VkImageView depthImageView {};
-    VmaAllocation depthAllocation {};
-    {
-
-        const VkFormat depthFormat = context->depth_format();
-
-        VkImageCreateInfo imageCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-        };
-
-        imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageCreateInfo.format = depthFormat;
-        imageCreateInfo.extent = { .width = window.width(),
-                                   .height = window.height(),
-                                   .depth = 1 };
-        imageCreateInfo.mipLevels = 1;
-        imageCreateInfo.arrayLayers = 1;
-        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageCreateInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        // imageCreateInfo.queueFamilyIndexCount = 0;
-        // imageCreateInfo.pQueueFamilyIndices = nullptr;
-        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        VmaAllocationCreateInfo allocationCreateInfo {};
-        //  depth 必须 GPU_ONLY
-        allocationCreateInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        // allocationCreateInfo.requiredFlags =
-        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        // allocationCreateInfo.preferredFlags =
-        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        // allocationCreateInfo.memoryTypeBits =
-        // VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        auto allocator = context->allocator();
-
-        if (vmaCreateImage(allocator, &imageCreateInfo, &allocationCreateInfo,
-                           &depthImage, &depthAllocation,
-                           nullptr) != VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create depth image");
-        }
-
-        VkImageViewCreateInfo imageViewCreateInfo {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-        };
-
-        imageViewCreateInfo.image = depthImage;
-        imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        imageViewCreateInfo.format = depthFormat;
-        // imageViewCreateInfo.components;
-        imageViewCreateInfo.subresourceRange.aspectMask =
-            VK_IMAGE_ASPECT_DEPTH_BIT;
-        imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-        imageViewCreateInfo.subresourceRange.levelCount = 1;
-        imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-        imageViewCreateInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(context->device(), &imageViewCreateInfo, nullptr,
-                              &depthImageView)) {
-            LUMEN_APP_LOG_ERROR("Failed to create depth image view");
-        }
-    }
-
-    // VkFramebuffer framebuffer {};
-    std::vector<VkFramebuffer> framebuffers(
-        context->swapchain_image_views().size());
-    {
-        auto swapchainImageViews = context->swapchain_image_views();
-        auto swapchainWidth = window.width();
-        auto swapchainHeight = window.height();
-
-        for (size_t i = 0; i < swapchainImageViews.size(); i++) {
-            // attachment index 和 renderpass 里的顺序一致！
-            std::array<VkImageView, 2> attachments {
-                context->swapchain_image_views()[i],
-                depthImageView,
-            };
-
-            VkFramebufferCreateInfo framebufferCreateInfo {
-                .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-            };
-
-            framebufferCreateInfo.renderPass = pass2_render_pass;
-            framebufferCreateInfo.attachmentCount = attachments.size();
-            framebufferCreateInfo.pAttachments = attachments.data();
-            framebufferCreateInfo.width = swapchainWidth;
-            framebufferCreateInfo.height = swapchainHeight;
-            framebufferCreateInfo.layers = 1;
-
-            if (vkCreateFramebuffer(context->device(), &framebufferCreateInfo,
-                                    nullptr, &framebuffers[i])) {
-                LUMEN_APP_LOG_ERROR("Failed to create framebuffer");
-            }
-        }
-    }
-
     VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo =
         mergedReflection.create_vertex_input_state<renderer::Vertex>();
-    // 创建图形管线（VkPipelineLayout / set layouts 已由着色器反射创建）
-    VkPipeline graphicsPipeline {};
 
-    vulkan::PipelineBuilder builder;
-    builder.device = device;
-    builder.vertShader = vertexShader;
-    builder.fragShader = fragmentShader;
-    builder.renderPass = pass2_render_pass;
-    builder.subpass = 0;
-    builder.layout = pipelineLayout;
-    builder.vertexInputState = &vertexInputStateCreateInfo;
-    graphicsPipeline = builder.build();
+    VkPipeline pass1_pipeline {};
+    VkPipeline graphicsPipeline {};
 
     constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 
@@ -656,9 +374,6 @@ int main() {
             .offset = 0,
             .size = ubjectUBOalignedUboSize } });
 
-    material->update_combined(2, 1, offscreen_view, offscreen_sampler,
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
     pass1Material->update_dynamic_uniforms(
         { { .set = 0,
             .binding = 0,
@@ -671,8 +386,224 @@ int main() {
             .offset = 0,
             .size = ubjectUBOalignedUboSize } });
 
+    std::unique_ptr<renderer::RenderGraph> renderGraph;
+    renderer::TextureHandle swapHandle = UINT32_MAX;
+    renderer::TextureHandle offscreenHandle = UINT32_MAX;
+    renderer::TextureHandle depthHandle = UINT32_MAX;
+    std::uint32_t imageIndex {};
+
+    VkSampler offscreen_sampler {};
+    {
+        VkSamplerCreateInfo sci { .sType =
+                                      VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        sci.magFilter = VK_FILTER_LINEAR;
+        sci.minFilter = VK_FILTER_LINEAR;
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
+        if (vkCreateSampler(device, &sci, nullptr, &offscreen_sampler) !=
+            VK_SUCCESS) {
+            LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
+        }
+    }
+
+    auto rebuild_swapchain_dependent = [&]() -> bool {
+        int w = 0;
+        int h = 0;
+        window.get_framebuffer_size(&w, &h);
+        if (w <= 0 || h <= 0) {
+            return false;
+        }
+
+        auto rc = context->recreate_swapchain(static_cast<std::uint32_t>(w),
+                                              static_cast<std::uint32_t>(h));
+        if (!rc.has_value()) {
+            LUMEN_APP_LOG_ERROR("recreate_swapchain 失败");
+            return false;
+        }
+
+        width = static_cast<int>(context->swapchain_width());
+        height = static_cast<int>(context->swapchain_height());
+
+        if (!commandBuffers.empty()) {
+            vkFreeCommandBuffers(
+                device, commandPool,
+                static_cast<std::uint32_t>(commandBuffers.size()),
+                commandBuffers.data());
+        }
+        commandBuffers.assign(context->swapchain_image_views().size(),
+                              VK_NULL_HANDLE);
+        VkCommandBufferAllocateInfo commandBufferAllocateInfo {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        };
+        commandBufferAllocateInfo.commandPool = commandPool;
+        commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        commandBufferAllocateInfo.commandBufferCount =
+            static_cast<std::uint32_t>(commandBuffers.size());
+        vkAllocateCommandBuffers(context->device(), &commandBufferAllocateInfo,
+                                 commandBuffers.data());
+
+        for (VkSemaphore semaphore : presentSemaphores) {
+            vkDestroySemaphore(device, semaphore, nullptr);
+        }
+        presentSemaphores.assign(context->swapchain_image_views().size(),
+                                 VK_NULL_HANDLE);
+        VkSemaphoreCreateInfo semaphoreCreateInfo {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+        };
+        for (std::size_t i = 0; i < presentSemaphores.size(); i++) {
+            vkCreateSemaphore(context->device(), &semaphoreCreateInfo, nullptr,
+                              &presentSemaphores[i]);
+        }
+
+        if (pass1_pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, pass1_pipeline, nullptr);
+            pass1_pipeline = VK_NULL_HANDLE;
+        }
+        if (graphicsPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, graphicsPipeline, nullptr);
+            graphicsPipeline = VK_NULL_HANDLE;
+        }
+
+        renderGraph =
+            std::make_unique<renderer::RenderGraph>(device, allocator);
+        swapHandle = renderGraph->importSwapchain(
+            { .width = static_cast<std::uint32_t>(width),
+              .height = static_cast<std::uint32_t>(height),
+              .format = context->swapchain_format() },
+            context->swapchain_images()[0],
+            context->swapchain_image_views()[0]);
+        offscreenHandle = renderGraph->createTexture(
+            { .width = static_cast<std::uint32_t>(width),
+              .height = static_cast<std::uint32_t>(height) });
+        depthHandle = renderGraph->createDepth(
+            { .width = static_cast<std::uint32_t>(width),
+              .height = static_cast<std::uint32_t>(height),
+              .format = depthFormat,
+              .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
+        renderGraph->set_swapchain_image_views(
+            context->swapchain_image_views());
+
+        renderGraph->add_pass(
+            "ShaderToy",
+            { .writes = { offscreenHandle },
+              .extent = { static_cast<std::uint32_t>(width),
+                          static_cast<std::uint32_t>(height) } },
+            [&](VkCommandBuffer cmd) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  pass1_pipeline);
+                VkViewport pass1_viewport {};
+                pass1_viewport.x = 0.0F;
+                pass1_viewport.y = 0.0F;
+                pass1_viewport.width = static_cast<float>(width);
+                pass1_viewport.height = static_cast<float>(height);
+                pass1_viewport.minDepth = 0.0F;
+                pass1_viewport.maxDepth = 1.0F;
+                vkCmdSetViewport(cmd, 0, 1, &pass1_viewport);
+                VkRect2D pass1_scissor {};
+                pass1_scissor.offset = { .x = 0, .y = 0 };
+                pass1_scissor.extent = {
+                    .width = static_cast<std::uint32_t>(width),
+                    .height = static_cast<std::uint32_t>(height)
+                };
+                vkCmdSetScissor(cmd, 0, 1, &pass1_scissor);
+                const std::vector<uint32_t> dynamicOffsets {
+                    static_cast<uint32_t>(
+                        static_cast<VkDeviceSize>(currentFrame) *
+                        frameUBOalignedUboSize),
+                    static_cast<uint32_t>(
+                        static_cast<VkDeviceSize>(currentFrame) *
+                        ubjectUBOalignedUboSize),
+                };
+                pass1Material->bind_descriptor_sets(cmd, 0, pass1DescriptorSets,
+                                                    dynamicOffsets);
+                vkCmdDraw(cmd, 3, 1, 0, 0);
+            });
+
+        renderGraph->add_pass(
+            "CubeToScreen",
+            { .reads = { offscreenHandle },
+              .writes = { swapHandle },
+              .depth = depthHandle,
+              .extent = { static_cast<std::uint32_t>(width),
+                          static_cast<std::uint32_t>(height) },
+              .clearColor = { { 1, 1, 1, 1 } } },
+            [&](VkCommandBuffer cmd) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  graphicsPipeline);
+                VkViewport vp { .x = 0,
+                                .y = 0,
+                                .width = static_cast<float>(window.width()),
+                                .height = static_cast<float>(window.height()),
+                                .minDepth = 0,
+                                .maxDepth = 1 };
+                VkRect2D scissor { .offset = { .x = 0, .y = 0 },
+                                   .extent = { .width = window.width(),
+                                               .height = window.height() } };
+                vkCmdSetViewport(cmd, 0, 1, &vp);
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
+                const std::vector<uint32_t> dynamicOffsets {
+                    static_cast<uint32_t>(
+                        static_cast<VkDeviceSize>(currentFrame) *
+                        frameUBOalignedUboSize),
+                    static_cast<uint32_t>(
+                        static_cast<VkDeviceSize>(currentFrame) *
+                        ubjectUBOalignedUboSize),
+                };
+                material->bind_descriptor_sets(cmd, 0, descriptorSets,
+                                               dynamicOffsets);
+                cube.bind(cmd);
+                cube.draw(cmd);
+            });
+        renderGraph->compile();
+
+        material->update_combined(
+            2, 1, renderGraph->getTexture(offscreenHandle).view,
+            offscreen_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        {
+            vulkan::PipelineBuilder pass1_builder;
+            pass1_builder.device = device;
+            pass1_builder.vertShader = pass1_vert_shader;
+            pass1_builder.fragShader = pass1_frag_shader;
+            pass1_builder.renderPass =
+                renderGraph->render_pass_named("ShaderToy");
+            pass1_builder.subpass = renderGraph->subpass_index_for("ShaderToy");
+            pass1_builder.layout = pass1_pipeline_layout;
+            pass1_builder.vertexInputState = &pass1_vertex_input;
+            pass1_builder.depthTest = false;
+            pass1_builder.depthWrite = false;
+            pass1_pipeline = pass1_builder.build();
+        }
+        {
+            vulkan::PipelineBuilder builder;
+            builder.device = device;
+            builder.vertShader = vertexShader;
+            builder.fragShader = fragmentShader;
+            builder.renderPass = renderGraph->render_pass_named("CubeToScreen");
+            builder.subpass = renderGraph->subpass_index_for("CubeToScreen");
+            builder.layout = pipelineLayout;
+            builder.vertexInputState = &vertexInputStateCreateInfo;
+            graphicsPipeline = builder.build();
+        }
+        return pass1_pipeline != VK_NULL_HANDLE &&
+               graphicsPipeline != VK_NULL_HANDLE;
+    };
+
+    if (!rebuild_swapchain_dependent()) {
+        LUMEN_APP_LOG_CRITICAL("初始交换链依赖资源构建失败");
+        return 1;
+    }
+
     // 渲染循环
     while (running && pump.poll()) {
+        if (framebufferResized) {
+            framebufferResized = false;
+            if (!rebuild_swapchain_dependent()) {
+                continue;
+            }
+        }
 
         // 更新 UBO
         int frameIndex = currentFrame;
@@ -716,11 +647,22 @@ int main() {
                 objectUBO.normalMatrix = glm::mat4(normal3);
 
                 // 每帧获取可写区域
-                VkDeviceSize offset;
+                VkDeviceSize offset {};
                 auto ptr = objectiformBuffer.getMappedFrame(frameIndex, offset);
                 memcpy(ptr, &objectUBO, sizeof(renderer::ubo::ObjectUBO));
             }
         }
+
+        {
+            const float t = static_cast<float>(SDL_GetTicks()) * 0.001F;
+            VkClearColorValue dynamicClear {};
+            dynamicClear.float32[0] = 0.5F + 0.5F * std::sin(t);
+            dynamicClear.float32[1] = 0.5F + 0.5F * std::sin(t + 2.0944F);
+            dynamicClear.float32[2] = 0.5F + 0.5F * std::sin(t + 4.1888F);
+            dynamicClear.float32[3] = 1.0F;
+            renderGraph->set_pass_clear_color("ShaderToy", dynamicClear);
+        }
+
         // 等上一帧 GPU 完成
         {
             uint64_t waitValue = timelineValue;
@@ -736,11 +678,7 @@ int main() {
         }
 
         // 获取 swapchiain image index
-        std::uint32_t imageIndex {};
         {
-            // VkDevice                                    device,
-            // const VkAcquireNextImageInfoKHR*            pAcquireInfo,
-            // uint32_t*                                   pImageIndex;
 
             VkAcquireNextImageInfoKHR acquireNextImageInfo {
                 .sType = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR
@@ -753,137 +691,31 @@ int main() {
                 imageAvailableSemaphores[currentFrame];
             acquireNextImageInfo.fence = VK_NULL_HANDLE;
 
-            vkAcquireNextImage2KHR(device, &acquireNextImageInfo, &imageIndex);
-        }
-
-        // 重置并录制 command buffer
-        vkResetCommandBuffer(commandBuffers[imageIndex], 0);
-
-        VkCommandBufferBeginInfo beginInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-        };
-        vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo);
-
-        {
-            // Pass 1：ShaderToy → 离屏纹理
-            VkClearValue pass1_clear {};
-            pass1_clear.color.float32[0] = 0.0F;
-            pass1_clear.color.float32[1] = 0.0F;
-            pass1_clear.color.float32[2] = 0.0F;
-            pass1_clear.color.float32[3] = 1.0F;
-
-            VkRenderPassBeginInfo pass1_begin {
-                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-            };
-            pass1_begin.renderPass = pass1_render_pass;
-            pass1_begin.framebuffer = pass1_framebuffer;
-            pass1_begin.renderArea.offset = { .x = 0, .y = 0 };
-            pass1_begin.renderArea.extent = { .width = static_cast<std::uint32_t>(width),
-                                              .height = static_cast<std::uint32_t>(height) };
-            pass1_begin.clearValueCount = 1;
-            pass1_begin.pClearValues = &pass1_clear;
-
-            vkCmdBeginRenderPass(commandBuffers[imageIndex], &pass1_begin,
-                                 VK_SUBPASS_CONTENTS_INLINE);
-
-            vkCmdBindPipeline(commandBuffers[imageIndex],
-                              VK_PIPELINE_BIND_POINT_GRAPHICS, pass1_pipeline);
-
-            VkViewport pass1_viewport {};
-            pass1_viewport.x = 0.0F;
-            pass1_viewport.y = 0.0F;
-            pass1_viewport.width = static_cast<float>(width);
-            pass1_viewport.height = static_cast<float>(height);
-            pass1_viewport.minDepth = 0.0F;
-            pass1_viewport.maxDepth = 1.0F;
-            vkCmdSetViewport(commandBuffers[imageIndex], 0, 1, &pass1_viewport);
-
-            VkRect2D pass1_scissor {};
-            pass1_scissor.offset = { .x = 0, .y = 0 };
-            pass1_scissor.extent = { .width = static_cast<std::uint32_t>(width),
-                                     .height = static_cast<std::uint32_t>(height) };
-            vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &pass1_scissor);
-
-            const std::vector<uint32_t> dynamicOffsets {
-                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
-                                      frameUBOalignedUboSize),
-                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
-                                      ubjectUBOalignedUboSize),
-            };
-            pass1Material->bind_descriptor_sets(commandBuffers[imageIndex], 0,
-                                                pass1DescriptorSets,
-                                                dynamicOffsets);
-
-            vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
-
-            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+            const VkResult acquireResult = vkAcquireNextImage2KHR(
+                device, &acquireNextImageInfo, &imageIndex);
+            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR ||
+                acquireResult == VK_SUBOPTIMAL_KHR) {
+                framebufferResized = true;
+                continue;
+            }
         }
 
         {
-            // Pass 2：立方体 → Swapchain
-            VkRenderPassBeginInfo renderPassBeginInfo {
-                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+            renderGraph->updateSwapchainImage(
+                swapHandle, context->swapchain_images()[imageIndex],
+                context->swapchain_image_views()[imageIndex]);
+
+            vkResetCommandBuffer(commandBuffers[imageIndex], 0);
+
+            VkCommandBufferBeginInfo beginInfo {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
             };
+            vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo);
 
-            renderPassBeginInfo.renderPass = pass2_render_pass;
-            renderPassBeginInfo.framebuffer = framebuffers[imageIndex];
+            renderGraph->execute(commandBuffers[imageIndex], imageIndex);
 
-            renderPassBeginInfo.renderArea.offset = { .x = 0, .y = 0 };
-            renderPassBeginInfo.renderArea.extent = { .width = window.width(),
-                                                      .height =
-                                                          window.height() };
-
-            VkClearValue clearValues[2];
-            clearValues[0].color = { { 0.1, 0.1, 0.1, 1.0 } };
-            clearValues[1].depthStencil = { .depth = 1.0, .stencil = 0 };
-
-            renderPassBeginInfo.clearValueCount = 2;
-            renderPassBeginInfo.pClearValues = clearValues;
-
-            vkCmdBeginRenderPass(commandBuffers[imageIndex],
-                                 &renderPassBeginInfo,
-                                 VK_SUBPASS_CONTENTS_INLINE);
-
-            vkCmdBindPipeline(commandBuffers[imageIndex],
-                              VK_PIPELINE_BIND_POINT_GRAPHICS,
-                              graphicsPipeline);
-
-            VkViewport dynamicViewport {};
-            dynamicViewport.x = 0.0F;
-            dynamicViewport.y = 0.0F;
-            dynamicViewport.width = static_cast<float>(window.width());
-            dynamicViewport.height = static_cast<float>(window.height());
-            dynamicViewport.minDepth = 0.0F;
-            dynamicViewport.maxDepth = 1.0F;
-            vkCmdSetViewport(commandBuffers[imageIndex], 0, 1,
-                             &dynamicViewport);
-
-            VkRect2D dynamicScissor {};
-            dynamicScissor.offset = { .x = 0, .y = 0 };
-            dynamicScissor.extent = {
-                .width = static_cast<std::uint32_t>(window.width()),
-                .height = static_cast<std::uint32_t>(window.height())
-            };
-            vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &dynamicScissor);
-
-            const std::vector<uint32_t> dynamicOffsets {
-                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
-                                      frameUBOalignedUboSize),
-                static_cast<uint32_t>(static_cast<VkDeviceSize>(frameIndex) *
-                                      ubjectUBOalignedUboSize),
-            };
-            material->bind_descriptor_sets(commandBuffers[imageIndex], 0,
-                                           descriptorSets, dynamicOffsets);
-
-            // vertexBuffer.bind_vertex(commandBuffers[imageIndex]);
-            // indexBuffer.bind_index(commandBuffers[imageIndex]);
-            cube.bind(commandBuffers[imageIndex]);
-            cube.draw(commandBuffers[imageIndex]);
-
-            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+            vkEndCommandBuffer(commandBuffers[imageIndex]);
         }
-
-        vkEndCommandBuffer(commandBuffers[imageIndex]);
 
         // 提交 GPU（混用 binary + timeline 时，Timeline 扩展里 value
         // 数组长度须与 wait/signal 数量一致；binary 对应项的值会被忽略）
@@ -958,7 +790,12 @@ int main() {
             presentInfo.pImageIndices = &imageIndex;
             // presentInfo.pResults;
 
-            vkQueuePresentKHR(context->present_queue(), &presentInfo);
+            const VkResult presentResult =
+                vkQueuePresentKHR(context->present_queue(), &presentInfo);
+            if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
+                presentResult == VK_SUBOPTIMAL_KHR) {
+                framebufferResized = true;
+            }
         }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -975,10 +812,6 @@ int main() {
     uploadContext.destroy();
     vkDestroyCommandPool(device, commandPool, nullptr);
 
-    for (VkFramebuffer fb : framebuffers) {
-        vkDestroyFramebuffer(device, fb, nullptr);
-    }
-
     vkDestroyPipeline(device, pass1_pipeline, nullptr);
     vkDestroyShaderModule(device, pass1_vert_shader, nullptr);
     vkDestroyShaderModule(device, pass1_frag_shader, nullptr);
@@ -988,19 +821,9 @@ int main() {
     vkDestroyShaderModule(device, fragmentShader, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorPool(device, pass1DescriptorPool, nullptr);
-    pass1Reflection.destroy_layouts(device); 
+    pass1Reflection.destroy_layouts(device);
     mergedReflection.destroy_layouts(device);
-    vkDestroyRenderPass(device, pass1_render_pass, nullptr);
-    vkDestroyFramebuffer(device, pass1_framebuffer, nullptr);
     vkDestroySampler(device, offscreen_sampler, nullptr);
-    vkDestroyImageView(device, offscreen_view, nullptr);
-    vmaDestroyImage(context->allocator(), offscreen_image,
-                    offscreen_allocation);
-
-    vkDestroyRenderPass(device, pass2_render_pass, nullptr);
-
-    vkDestroyImageView(device, depthImageView, nullptr);
-    vmaDestroyImage(context->allocator(), depthImage, depthAllocation);
 
     frameUniformBuffer.destroy();
     objectiformBuffer.destroy();
