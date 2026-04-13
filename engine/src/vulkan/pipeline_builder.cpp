@@ -1,6 +1,8 @@
 #include "vulkan/pipeline_builder.hpp"
 #include "core/log/logger.hpp"
 
+#include <vector>
+
 namespace vulkan {
 
 VkShaderModule createShaderModule(VkDevice device, const uint32_t *code,
@@ -67,10 +69,15 @@ VkPipeline PipelineBuilder::build() {
         att.colorBlendOp = VK_BLEND_OP_ADD;
     }
 
+    const uint32_t color_count =
+        color_attachment_count == 0 ? 1U : color_attachment_count;
+    std::vector<VkPipelineColorBlendAttachmentState> blend_atts(
+        color_count, att);
+
     VkPipelineColorBlendStateCreateInfo cb {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &att,
+        .attachmentCount = color_count,
+        .pAttachments = blend_atts.data(),
     };
 
     // 动态状态（必须，用于resize）

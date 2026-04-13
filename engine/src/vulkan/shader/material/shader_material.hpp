@@ -120,6 +120,8 @@ public:
     void update_buffers(const std::vector<BufferItem> &items);
 
     void update_images(const std::vector<ImageItem> &items);
+    /// 批量写入 input attachment（descriptor type 固定为 INPUT_ATTACHMENT）。
+    void update_input_attachments(const std::vector<ImageItem> &items);
 
     void update_storages(const std::vector<UniformItem> &items);
 

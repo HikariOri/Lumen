@@ -265,6 +265,23 @@ void ShaderMaterial::update_images(const std::vector<ImageItem> &items) {
     update(writes);
 }
 
+void ShaderMaterial::update_input_attachments(
+    const std::vector<ImageItem> &items) {
+    std::vector<Write> writes;
+    writes.reserve(items.size());
+    for (const auto &i : items) {
+        writes.push_back(Write {
+            .set = i.set,
+            .binding = i.binding,
+            .type = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+            .image_view = i.view,
+            .sampler = VK_NULL_HANDLE,
+            .imageLayout = i.layout,
+        });
+    }
+    update(writes);
+}
+
 void ShaderMaterial::update_storages(const std::vector<UniformItem> &items) {
     std::vector<Write> writes;
     writes.reserve(items.size());

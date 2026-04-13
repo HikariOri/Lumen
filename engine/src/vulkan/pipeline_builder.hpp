@@ -33,6 +33,8 @@ struct PipelineBuilder {
     VkRenderPass renderPass;
     VkPipelineLayout layout;
     uint32_t subpass = 0;
+    /// 与 VkRenderPass 中对应 Subpass 的 color attachment 数量一致（MRT 时 >1）。
+    uint32_t color_attachment_count = 1;
 
     // 构建（最终版）
     VkPipeline build();
