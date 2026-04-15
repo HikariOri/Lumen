@@ -100,7 +100,7 @@ void Buffer::copy_to_mapped(const void *data, VkDeviceSize size,
     memcpy((char *)mapped_ + offset, data, size);
 }
 
-void uploadToGPU(const UploadContext &ctx, Buffer &dst, const void *data,
+void upload_to_gpu(const UploadContext &ctx, Buffer &dst, const void *data,
                  VkDeviceSize size) {
      // 1. 创建 staging
      Buffer staging;
@@ -179,7 +179,7 @@ void DynamicRingBuffer::init(VmaAllocator allocator, VkDeviceSize perFrameSize,
 
 void DynamicRingBuffer::destroy() { buffer.destroy(); }
 
-void *DynamicRingBuffer::getMappedFrame(uint32_t frameIndex,
+void *DynamicRingBuffer::get_mapped_frame(uint32_t frameIndex,
                                         VkDeviceSize &outBufferOffset) {
     outBufferOffset = frameSize * frameIndex;
     return (char *)buffer.mapped() + outBufferOffset;

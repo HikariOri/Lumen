@@ -860,13 +860,13 @@ int main() {
     vertexBuffer.init(context->allocator(), sizeof(Vertex) * vertices.size(),
                       vulkan::BufferUsage::Vertex,
                       vulkan::MemoryMode::GPU_ONLY);
-    vulkan::uploadToGPU(uploadContext, vertexBuffer, vertices.data(),
+    vulkan::upload_to_gpu(uploadContext, vertexBuffer, vertices.data(),
                         sizeof(Vertex) * vertices.size());
 
     vulkan::Buffer indexBuffer {};
     indexBuffer.init(context->allocator(), sizeof(uint16_t) * indices.size(),
                      vulkan::BufferUsage::Index, vulkan::MemoryMode::GPU_ONLY);
-    vulkan::uploadToGPU(uploadContext, indexBuffer, indices.data(),
+    vulkan::upload_to_gpu(uploadContext, indexBuffer, indices.data(),
                         sizeof(uint16_t) * indices.size());
 
     const VkDeviceSize frameUBOalignedUboSize =
@@ -1294,7 +1294,7 @@ vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
                 // 每帧获取可写区域
                 VkDeviceSize offset;
                 auto ptr =
-                    frameUniformBuffer.getMappedFrame(frameIndex, offset);
+                    frameUniformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &frameUBO, sizeof(renderer::ubo::FrameUBO));
             }
 
@@ -1308,7 +1308,7 @@ vkUpdateDescriptorSets(device, writeDescriptorSets.size(),
 
                 // 每帧获取可写区域
                 VkDeviceSize offset;
-                auto ptr = objectiformBuffer.getMappedFrame(frameIndex, offset);
+                auto ptr = objectiformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &objectUBO, sizeof(renderer::ubo::ObjectUBO));
             }
         }

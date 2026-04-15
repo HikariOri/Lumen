@@ -5,7 +5,6 @@
  * @Author         : yaojie
  * @Date           : 2026/4/12
  * 
- * @todo 动态 offsets
  */
 
 
@@ -73,7 +72,7 @@ public:
     ~ShaderMaterial();
 
     [[nodiscard]] VkPipelineLayout pipeline_layout() const noexcept {
-        return pipeline_layout_;
+        return pipelineLayout_;
     }
 
     [[nodiscard]] VkDescriptorSet descriptor_set(std::uint32_t setIndex) const;
@@ -152,7 +151,7 @@ public:
 
 private:
     VkDevice device_ { VK_NULL_HANDLE };
-    VkPipelineLayout pipeline_layout_ { VK_NULL_HANDLE };
+    VkPipelineLayout pipelineLayout_ { VK_NULL_HANDLE };
     std::unordered_map<std::uint32_t, VkDescriptorSet> sets_;
     std::unordered_map<std::uint32_t, VkDescriptorPool> pools_;
 };

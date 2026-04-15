@@ -71,13 +71,8 @@ private:
 };
 
 // 自动 staging 上传
-void uploadToGPU(
-    const UploadContext& ctx,
-    Buffer& dst,
-    const void* data,
-    VkDeviceSize size
-);
-
+void upload_to_gpu(const UploadContext &ctx, Buffer &dst, const void *data,
+                   VkDeviceSize size);
 
 // 环形动态 UBO 管理器
 struct DynamicRingBuffer {
@@ -93,7 +88,7 @@ struct DynamicRingBuffer {
     void destroy();
 
     // 获取当前帧可写指针 & 设备偏移
-    void *getMappedFrame(uint32_t frameIndex, VkDeviceSize &outBufferOffset);
+    void *get_mapped_frame(uint32_t frameIndex, VkDeviceSize &outBufferOffset);
 };
 
 // 简单 Buffer 池（按大小&用途复用）

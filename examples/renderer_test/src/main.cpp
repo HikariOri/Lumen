@@ -508,7 +508,7 @@ int main() {
                 // 每帧获取可写区域
                 VkDeviceSize offset;
                 auto ptr =
-                    frameUniformBuffer.getMappedFrame(frameIndex, offset);
+                    frameUniformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &frameUBO, sizeof(renderer::ubo::FrameUBO));
             }
 
@@ -522,7 +522,7 @@ int main() {
 
                 // 每帧获取可写区域
                 VkDeviceSize offset;
-                auto ptr = objectiformBuffer.getMappedFrame(frameIndex, offset);
+                auto ptr = objectiformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &objectUBO, sizeof(renderer::ubo::ObjectUBO));
             }
         }

@@ -385,7 +385,7 @@ int main() {
             b.subpass = renderGraph->subpass_index_for(kPass1Name);
             b.layout = pass1Reflection.pipeline_layout();
             b.vertexInputState = &empty_vi;
-            b.color_attachment_count = 2;
+            b.colorAttachmentCount = 2;
             b.depthTest = true;
             b.depthWrite = true;
             exec.pass1_pipeline = b.build();

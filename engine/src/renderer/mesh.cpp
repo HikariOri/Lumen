@@ -14,13 +14,13 @@ void Mesh::upload(VmaAllocator allocator,
                       vulkan::BufferUsage::Vertex,
                       vulkan::MemoryMode::GPU_ONLY);
 
-    uploadToGPU(uploadCtx, vertexBuffer, vertices.data(),
+    upload_to_gpu(uploadCtx, vertexBuffer, vertices.data(),
                 vertices.size() * sizeof(Vertex));
 
     // 索引缓冲区
     indexBuffer.init(allocator, indices.size() * sizeof(uint16_t),
                      vulkan::BufferUsage::Index, vulkan::MemoryMode::GPU_ONLY);
-    uploadToGPU(uploadCtx, indexBuffer, indices.data(),
+    upload_to_gpu(uploadCtx, indexBuffer, indices.data(),
                 indices.size() * sizeof(uint16_t));
 }
 

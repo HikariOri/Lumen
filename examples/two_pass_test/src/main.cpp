@@ -367,14 +367,14 @@ int main() {
     std::uint32_t imageIndex {};
 
     VkSampler offscreen_sampler = vulkan::create_sampler(
-        device, { .mag_filter = VK_FILTER_LINEAR,
-                  .min_filter = VK_FILTER_LINEAR,
-                  .mipmap_mode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-                  .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                  .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                  .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                  .min_lod = 0.0F,
-                  .max_lod = 0.0F });
+        device, { .magFilter = VK_FILTER_LINEAR,
+                  .minFilter = VK_FILTER_LINEAR,
+                  .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                  .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .minLod = 0.0F,
+                  .maxLod = 0.0F });
     if (offscreen_sampler == VK_NULL_HANDLE) {
         LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
     }
@@ -602,7 +602,7 @@ int main() {
                 // 每帧获取可写区域
                 VkDeviceSize offset;
                 auto ptr =
-                    frameUniformBuffer.getMappedFrame(frameIndex, offset);
+                    frameUniformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &frameUBO, sizeof(renderer::ubo::FrameUBO));
             }
 
@@ -616,7 +616,7 @@ int main() {
 
                 // 每帧获取可写区域
                 VkDeviceSize offset {};
-                auto ptr = objectiformBuffer.getMappedFrame(frameIndex, offset);
+                auto ptr = objectiformBuffer.get_mapped_frame(frameIndex, offset);
                 memcpy(ptr, &objectUBO, sizeof(renderer::ubo::ObjectUBO));
             }
         }

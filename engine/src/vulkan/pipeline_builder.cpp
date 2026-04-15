@@ -70,7 +70,7 @@ VkPipeline PipelineBuilder::build() {
     }
 
     const uint32_t color_count =
-        color_attachment_count == 0 ? 1U : color_attachment_count;
+        colorAttachmentCount == 0 ? 1U : colorAttachmentCount;
     std::vector<VkPipelineColorBlendAttachmentState> blend_atts(
         color_count, att);
 

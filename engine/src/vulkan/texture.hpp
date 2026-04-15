@@ -21,9 +21,9 @@ struct Texture2D {
     std::uint32_t array_layers {};
     VkImageLayout layout { VK_IMAGE_LAYOUT_UNDEFINED };
     VkImageUsageFlags usage {};
-    VkImageAspectFlags aspect_mask {};
+    VkImageAspectFlags aspectMask {};
 
-    void loadFromFile(const std::string_view &path, VmaAllocator allocator,
+    void load_from_file(const std::string_view &path, VmaAllocator allocator,
                       VkDevice device, const UploadContext &uploadCtx);
 
     void destroy(VkDevice device);

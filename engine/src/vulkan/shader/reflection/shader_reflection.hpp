@@ -320,7 +320,7 @@ private:
     static void
     consolidate_pool_sizes_(std::vector<VkDescriptorPoolSize> &poolSizes);
 
-    [[nodiscard]] LayoutKey makeLayoutKey(
+    [[nodiscard]] LayoutKey make_layout_key(
         uint32_t set,
         const std::vector<VkDescriptorSetLayoutBinding> &bindings) const;
 };

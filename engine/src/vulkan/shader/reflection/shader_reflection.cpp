@@ -734,7 +734,7 @@ bool ShaderReflection::validateVertexLayout(
     return true;
 }
 
-[[nodiscard]] LayoutKey ShaderReflection::makeLayoutKey(
+[[nodiscard]] LayoutKey ShaderReflection::make_layout_key(
     uint32_t set,
     const std::vector<VkDescriptorSetLayoutBinding> &bindings) const {
     LayoutKey key {};

@@ -6,8 +6,8 @@ namespace vulkan::shader::material {
 
 namespace {
 
-[[nodiscard]] bool is_buffer_descriptor_type(VkDescriptorType t) noexcept {
-    switch (t) {
+[[nodiscard]] bool is_buffer_descriptor_type(const VkDescriptorType type) noexcept {
+    switch (type) {
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
@@ -18,8 +18,8 @@ namespace {
     }
 }
 
-[[nodiscard]] bool is_image_descriptor_type(VkDescriptorType t) noexcept {
-    switch (t) {
+[[nodiscard]] bool is_image_descriptor_type(const VkDescriptorType type) noexcept {
+    switch (type) {
     case VK_DESCRIPTOR_TYPE_SAMPLER:
     case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
     case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
@@ -33,7 +33,7 @@ namespace {
 
 ShaderMaterial::ShaderMaterial(VkDevice device,
                                const reflection::ShaderReflection &reflection)
-    : device_(device), pipeline_layout_(reflection.pipeline_layout()) {
+    : device_(device), pipelineLayout_(reflection.pipeline_layout()) {
     pools_ = reflection.create_pools(device, 16);
     sets_ = reflection.allocateSets(device, pools_);
 }
@@ -311,7 +311,7 @@ void ShaderMaterial::bind_dynamic(
         return;
     }
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipeline_layout_, firstSet, 1, &ds,
+                            pipelineLayout_, firstSet, 1, &ds,
                             static_cast<std::uint32_t>(dynamicOffsets.size()),
                             dynamicOffsets.data());
 }
@@ -337,7 +337,7 @@ void ShaderMaterial::bind_descriptor_sets(
     }
 
     vkCmdBindDescriptorSets(
-        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, firstSet,
+        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, firstSet,
         static_cast<std::uint32_t>(handles.size()), handles.data(),
         static_cast<std::uint32_t>(dynamicOffsets.size()),
         dynamicOffsets.data());
@@ -359,7 +359,7 @@ void ShaderMaterial::bind_descriptor_sets(
         }
     }
     vkCmdBindDescriptorSets(
-        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, firstSet,
+        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, firstSet,
         static_cast<std::uint32_t>(sets.size()), sets.data(),
         static_cast<std::uint32_t>(dynamicOffsets.size()),
         dynamicOffsets.data());

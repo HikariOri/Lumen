@@ -8,7 +8,7 @@
 
 namespace vulkan {
 
-void Texture2D::loadFromFile(const std::string_view &path,
+void Texture2D::load_from_file(const std::string_view &path,
                              VmaAllocator allocator, VkDevice device,
                              const UploadContext &uploadCtx) {
     this->allocator = allocator;
@@ -225,14 +225,14 @@ void Texture2D::loadFromFile(const std::string_view &path,
     sampler = create_sampler(
         device,
         {
-            .mag_filter = VK_FILTER_LINEAR,
-            .min_filter = VK_FILTER_LINEAR,
-            .mipmap_mode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-            .address_mode_u = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .address_mode_v = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .address_mode_w = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-            .min_lod = 0.0F,
-            .max_lod = static_cast<float>(mipLevels > 0 ? mipLevels - 1 : 0),
+            .magFilter = VK_FILTER_LINEAR,
+            .minFilter = VK_FILTER_LINEAR,
+            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .minLod = 0.0F,
+            .maxLod = static_cast<float>(mipLevels > 0 ? mipLevels - 1 : 0),
         });
 }
 
@@ -269,7 +269,7 @@ Texture2D *TexturePool::get_or_load(const std::string &path) {
     }
 
     Texture2D tex;
-    tex.loadFromFile(path, allocator_, device_, *uploadContext_);
+    tex.load_from_file(path, allocator_, device_, *uploadContext_);
     textures_[path] = std::move(tex);
     return &textures_[path];
 }
