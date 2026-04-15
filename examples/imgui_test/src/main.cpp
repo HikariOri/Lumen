@@ -36,7 +36,7 @@ int main() {
     windowConfig.fullscreen = false;
     windowConfig.width = 720;
     windowConfig.height = 720;
-    windowConfig.title = "two_pass_test";
+    windowConfig.title = "imgui_test";
     windowConfig.icon_path = "./assets/textures/ikun2026_happy_new_year.jpg";
 
     auto window = *lumen::platform::Window::create(windowConfig);
@@ -80,7 +80,7 @@ int main() {
     });
 
     auto context = *vulkan::Context::create(
-        "two_pass_test", VK_MAKE_API_VERSION(0, 1, 0, 0),
+        "imgui_test", VK_MAKE_API_VERSION(0, 1, 0, 0),
         window.get_vulkan_instance_extensions(),
         static_cast<std::uint32_t>(window.width()),
         static_cast<std::uint32_t>(window.height()),
@@ -102,8 +102,8 @@ int main() {
     VkFormat depthImageViewFormat = depthFormat;
     VkFormat offscreenImageViewFormat = offscreenFormat;
 
-    const auto vertexSpirv = load_spirv("./shaders/two_pass_test.vert.spv");
-    const auto fragmentSpirv = load_spirv("./shaders/two_pass_test.frag.spv");
+    const auto vertexSpirv = load_spirv("./shaders/imgui_test.vert.spv");
+    const auto fragmentSpirv = load_spirv("./shaders/imgui_test.frag.spv");
     const auto pass1VertSpirv =
         load_spirv("./shaders/pass1_shadertoy.vert.spv");
     const auto pass1FragSpirv =
@@ -175,6 +175,8 @@ int main() {
     int width = 0;
     int height = 0;
     window.get_framebuffer_size(&width, &height);
+    std::uint32_t scene_target_width = static_cast<std::uint32_t>(width);
+    std::uint32_t scene_target_height = static_cast<std::uint32_t>(height);
 
     VkShaderModule pass1_vert_shader {};
     VkShaderModule pass1_frag_shader {};
@@ -315,7 +317,7 @@ int main() {
         getMinUniformBufferOffsetAlignment<renderer::ubo::ObjectUBO>(
             context.get());
 
-    // 描述符：set0=FrameUBO，set1=ObjectUBO（与 two_pass_test.vert 一致）
+    // 描述符：set0=FrameUBO，set1=ObjectUBO（与 imgui_test.vert 一致）
 
     vulkan::DynamicRingBuffer frameUniformBuffer {};
     frameUniformBuffer.init(context->allocator(),
@@ -363,6 +365,7 @@ int main() {
         std::make_unique<renderer::RenderGraph>(device, allocator);
     renderer::TextureHandle swapHandle = UINT32_MAX;
     renderer::TextureHandle offscreenHandle = UINT32_MAX;
+    renderer::TextureHandle sceneHandle = UINT32_MAX;
     renderer::TextureHandle depthHandle = UINT32_MAX;
     std::uint32_t imageIndex {};
 
@@ -378,6 +381,9 @@ int main() {
     if (offscreen_sampler == VK_NULL_HANDLE) {
         LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
     }
+    VkDescriptorPool imgui_descriptor_pool = VK_NULL_HANDLE;
+    VkDescriptorSet offscreen_imgui_set = VK_NULL_HANDLE;
+    bool show_demo_window = true;
 
     swapHandle = renderGraph->importSwapchain(
         { .width = static_cast<std::uint32_t>(width),
@@ -387,9 +393,11 @@ int main() {
     offscreenHandle = renderGraph->createTexture(
         { .width = static_cast<std::uint32_t>(width),
           .height = static_cast<std::uint32_t>(height) });
+    sceneHandle = renderGraph->createTexture(
+        { .width = scene_target_width, .height = scene_target_height });
     depthHandle = renderGraph->createDepth(
-        { .width = static_cast<std::uint32_t>(width),
-          .height = static_cast<std::uint32_t>(height),
+        { .width = scene_target_width,
+          .height = scene_target_height,
           .format = depthFormat,
           .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
     renderGraph->add_pass(
@@ -426,25 +434,24 @@ int main() {
         });
 
     renderGraph->add_pass(
-        "CubeToScreen",
+        "CubeToViewport",
         { .reads = { offscreenHandle },
-          .writes = { swapHandle },
+          .writes = { sceneHandle },
           .depth = depthHandle,
-          .extent = { static_cast<std::uint32_t>(width),
-                      static_cast<std::uint32_t>(height) },
+          .extent = { scene_target_width, scene_target_height },
           .clearColor = { { 1, 1, 1, 1 } } },
         [&](VkCommandBuffer cmd) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               graphicsPipeline);
             VkViewport vp { .x = 0,
                             .y = 0,
-                            .width = static_cast<float>(window.width()),
-                            .height = static_cast<float>(window.height()),
+                            .width = static_cast<float>(scene_target_width),
+                            .height = static_cast<float>(scene_target_height),
                             .minDepth = 0,
                             .maxDepth = 1 };
             VkRect2D scissor { .offset = { .x = 0, .y = 0 },
-                               .extent = { .width = window.width(),
-                                           .height = window.height() } };
+                               .extent = { .width = scene_target_width,
+                                           .height = scene_target_height } };
             vkCmdSetViewport(cmd, 0, 1, &vp);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
             const std::vector<uint32_t> dynamicOffsets {
@@ -458,11 +465,96 @@ int main() {
             cube.bind(cmd);
             cube.draw(cmd);
         });
+
+    renderGraph->add_pass("ImGuiToSwapchain",
+                          { .reads = { sceneHandle },
+                            .writes = { swapHandle },
+                            .extent = { static_cast<std::uint32_t>(width),
+                                        static_cast<std::uint32_t>(height) },
+                            .clearColor = { { 0, 0, 0, 1 } } },
+                          [&](VkCommandBuffer cmd) {
+                              ImGui_ImplVulkan_RenderDrawData(
+                                  ImGui::GetDrawData(), cmd);
+                          });
     renderGraph->compile();
 
     material->update_combined(
         2, 1, renderGraph->getTexture(offscreenHandle).view, offscreen_sampler,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+        ImGui::StyleColorsDark();
+        if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+            ImGuiStyle &style = ImGui::GetStyle();
+            style.WindowRounding = 0.0F;
+            style.Colors[ImGuiCol_WindowBg].w = 1.0F;
+        }
+        ImGui_ImplSDL3_InitForVulkan(window.sdl_window());
+
+        std::array<VkDescriptorPoolSize, 11> imgui_pool_sizes {
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                   1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+                                   1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+                                   1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                                   1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+                                   1000 },
+            VkDescriptorPoolSize { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+        VkDescriptorPoolCreateInfo imgui_pool_info {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        };
+        imgui_pool_info.flags =
+            VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        imgui_pool_info.maxSets =
+            1000 * static_cast<uint32_t>(imgui_pool_sizes.size());
+        imgui_pool_info.poolSizeCount =
+            static_cast<uint32_t>(imgui_pool_sizes.size());
+        imgui_pool_info.pPoolSizes = imgui_pool_sizes.data();
+        vkCreateDescriptorPool(device, &imgui_pool_info, nullptr,
+                               &imgui_descriptor_pool);
+
+        ImGui_ImplVulkan_InitInfo init_info {};
+        init_info.ApiVersion = VK_API_VERSION_1_4;
+        init_info.Instance = context->instance();
+        init_info.PhysicalDevice = context->physical_device();
+        init_info.Device = device;
+        init_info.QueueFamily = context->graphics_queue_family();
+        init_info.Queue = context->graphics_queue();
+        init_info.DescriptorPool = imgui_descriptor_pool;
+        init_info.RenderPass =
+            renderGraph->render_pass_named("ImGuiToSwapchain");
+        init_info.Subpass = renderGraph->subpass_index_for("ImGuiToSwapchain");
+        init_info.MinImageCount =
+            static_cast<std::uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        init_info.ImageCount =
+            static_cast<std::uint32_t>(context->swapchain_image_views().size());
+        init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        ImGui_ImplVulkan_Init(&init_info);
+        ImGui_ImplVulkan_CreateFontsTexture();
+        ImGui_ImplVulkan_DestroyFontsTexture();
+
+        offscreen_imgui_set = ImGui_ImplVulkan_AddTexture(
+            offscreen_sampler, renderGraph->getTexture(sceneHandle).view,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+    pump.add_sdl_event_handler([&](const void *sdl_event) {
+        ImGui_ImplSDL3_ProcessEvent(
+            reinterpret_cast<const SDL_Event *>(sdl_event));
+    });
 
     {
         vulkan::PipelineBuilder pass1_builder;
@@ -482,8 +574,8 @@ int main() {
         builder.device = device;
         builder.vertShader = vertexShader;
         builder.fragShader = fragmentShader;
-        builder.renderPass = renderGraph->render_pass_named("CubeToScreen");
-        builder.subpass = renderGraph->subpass_index_for("CubeToScreen");
+        builder.renderPass = renderGraph->render_pass_named("CubeToViewport");
+        builder.subpass = renderGraph->subpass_index_for("CubeToViewport");
         builder.layout = pipelineLayout;
         builder.vertexInputState = &vertexInputStateCreateInfo;
         graphicsPipeline = builder.build();
@@ -550,19 +642,48 @@ int main() {
         renderGraph->resize_renderpass(offscreenHandle,
                                        static_cast<std::uint32_t>(width),
                                        static_cast<std::uint32_t>(height));
-        renderGraph->resize_renderpass(depthHandle,
-                                       static_cast<std::uint32_t>(width),
-                                       static_cast<std::uint32_t>(height));
+        renderGraph->resize_renderpass(sceneHandle, scene_target_width,
+                                       scene_target_height);
+        renderGraph->resize_renderpass(depthHandle, scene_target_width,
+                                       scene_target_height);
         material->update_combined(
             2, 1, renderGraph->getTexture(offscreenHandle).view,
             offscreen_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (offscreen_imgui_set != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(offscreen_imgui_set);
+        }
+        offscreen_imgui_set = ImGui_ImplVulkan_AddTexture(
+            offscreen_sampler, renderGraph->getTexture(sceneHandle).view,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         return true;
     };
 
-    // if (!rebuild_swapchain_dependent()) {
-    //     LUMEN_APP_LOG_CRITICAL("初始交换链依赖资源构建失败");
-    //     return 1;
-    // }
+    auto rebuild_scene_viewport_target = [&](std::uint32_t new_width,
+                                             std::uint32_t new_height) -> bool {
+        if (new_width == 0 || new_height == 0) {
+            return false;
+        }
+        if (new_width == scene_target_width &&
+            new_height == scene_target_height) {
+            return true;
+        }
+        vkQueueWaitIdle(context->graphics_queue());
+        vkQueueWaitIdle(context->present_queue());
+        vkDeviceWaitIdle(device);
+        scene_target_width = new_width;
+        scene_target_height = new_height;
+        renderGraph->resize_renderpass(sceneHandle, scene_target_width,
+                                       scene_target_height);
+        renderGraph->resize_renderpass(depthHandle, scene_target_width,
+                                       scene_target_height);
+        if (offscreen_imgui_set != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(offscreen_imgui_set);
+        }
+        offscreen_imgui_set = ImGui_ImplVulkan_AddTexture(
+            offscreen_sampler, renderGraph->getTexture(sceneHandle).view,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        return true;
+    };
 
     // 渲染循环
     while (running && pump.poll()) {
@@ -584,8 +705,8 @@ int main() {
                 frameUBO.view = glm::lookAt(
                     glm::vec3(3, 3, 3), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
                 const float aspect =
-                    static_cast<float>(window.width()) /
-                    std::max(1.0f, static_cast<float>(window.height()));
+                    static_cast<float>(scene_target_width) /
+                    std::max(1.0f, static_cast<float>(scene_target_height));
                 frameUBO.proj =
                     glm::perspective(glm::radians(60.0f), aspect, 0.1f, 100.0f);
 
@@ -630,6 +751,42 @@ int main() {
             dynamicClear.float32[3] = 1.0F;
             renderGraph->set_pass_clear_color("ShaderToy", dynamicClear);
         }
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
+                                     ImGuiDockNodeFlags_PassthruCentralNode);
+        {
+            ImGui::Begin("Scene");
+            ImVec2 avail = ImGui::GetContentRegionAvail();
+            if (avail.x < 1.0F) {
+                avail.x = 1.0F;
+            }
+            if (avail.y < 1.0F) {
+                avail.y = 1.0F;
+            }
+            if (offscreen_imgui_set != VK_NULL_HANDLE) {
+                const std::uint32_t desired_width =
+                    static_cast<std::uint32_t>(std::max(1.0F, avail.x));
+                const std::uint32_t desired_height =
+                    static_cast<std::uint32_t>(std::max(1.0F, avail.y));
+                rebuild_scene_viewport_target(desired_width, desired_height);
+                ImGui::Image(reinterpret_cast<ImTextureID>(offscreen_imgui_set),
+                             avail);
+                const bool image_hovered = ImGui::IsItemHovered();
+                if (image_hovered && !ImGui::IsWindowDocked() &&
+                    ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                    ImVec2 pos = ImGui::GetWindowPos();
+                    const ImVec2 delta = ImGui::GetIO().MouseDelta;
+                    pos.x += delta.x;
+                    pos.y += delta.y;
+                    ImGui::SetWindowPos(pos);
+                }
+            }
+            ImGui::End();
+        }
+        ImGui::ShowDemoWindow(&show_demo_window);
+        ImGui::Render();
 
         // 等上一帧 GPU 完成
         {
@@ -761,6 +918,11 @@ int main() {
                 framebufferResized = true;
             }
         }
+        if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) !=
+            0) {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
         timelineValue++;
@@ -783,6 +945,13 @@ int main() {
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyShaderModule(device, vertexShader, nullptr);
     vkDestroyShaderModule(device, fragmentShader, nullptr);
+    if (offscreen_imgui_set != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(offscreen_imgui_set);
+    }
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+    vkDestroyDescriptorPool(device, imgui_descriptor_pool, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     vkDestroyDescriptorPool(device, pass1DescriptorPool, nullptr);
     pass1Reflection.destroy_layouts(device);
