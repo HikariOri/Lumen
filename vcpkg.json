@@ -141,6 +141,11 @@
     {
       "name": "boost-pfr",
       "version>=": "1.90.0#1"
+    },
+    {
+      "name": "ktx",
+      "version>=": "4.4.2",
+      "features": ["vulkan","tools"]
     }
   ]
 }

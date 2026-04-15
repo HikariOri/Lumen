@@ -26,6 +26,7 @@ find_package(absl CONFIG REQUIRED)
 find_package(unofficial-shaderc CONFIG REQUIRED)
 find_package(vk-bootstrap CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS pfr)
+find_package(Ktx CONFIG REQUIRED)
 
 if (EXISTS "${CMAKE_SOURCE_DIR}/third_party/spirv-cross/CMakeLists.txt")
     message(STATUS "Using spirv-cross git submodule from ${CMAKE_SOURCE_DIR}/third_party/spirv-cross")
