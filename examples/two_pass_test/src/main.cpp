@@ -16,8 +16,10 @@
 #include "vulkan/buffer.hpp"
 #include "vulkan/context.hpp"
 #include "vulkan/pipeline_builder.hpp"
+#include "vulkan/sampler.hpp"
 #include "vulkan/shader/material/shader_material.hpp"
 #include "vulkan/shader/reflection/shader_reflection.hpp"
+#include "vulkan/texture.hpp"
 
 #include <cmath>
 #include <print>
@@ -146,18 +148,6 @@ int main() {
         std::make_unique<vulkan::shader::material::ShaderMaterial>(
             device, pass1Reflection);
 
-    // VkDescriptorSetLayout descriptorSetLayoutFrame {};
-    // VkDescriptorSetLayout descriptorSetLayoutObject {};
-    // {
-    //     const auto &ord = mergedReflection.set_layouts();
-    //     if (ord.size() > 0U) {
-    //         descriptorSetLayoutFrame = ord[0];
-    //     }
-    //     if (ord.size() > 1U) {
-    //         descriptorSetLayoutObject = ord[1];
-    //     }
-    // }
-
     VkShaderModule vertexShader {};
     VkShaderModule fragmentShader {};
     {
@@ -217,23 +207,6 @@ int main() {
     };
 
     VkPipelineLayout pass1_pipeline_layout = pass1Reflection.pipeline_layout();
-    // {
-    //     VkPushConstantRange pcr {};
-    //     pcr.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    //     pcr.offset = 0;
-    //     pcr.size = sizeof(Pass1PushConstants);
-
-    //     VkPipelineLayoutCreateInfo pl_ci {
-    //         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-    //     };
-    //     pl_ci.pushConstantRangeCount = 1;
-    //     pl_ci.pPushConstantRanges = &pcr;
-
-    //     if (vkCreatePipelineLayout(device, &pl_ci, nullptr,
-    //                                &pass1_pipeline_layout) != VK_SUCCESS) {
-    //         LUMEN_APP_LOG_ERROR("Failed to create pass1 pipeline layout");
-    //     }
-    // }
 
     // Pass1 全屏三角形无顶点属性（仅用 gl_VertexIndex），勿用 renderer::Vertex
     VkPipelineVertexInputStateCreateInfo pass1_vertex_input {
@@ -386,29 +359,140 @@ int main() {
             .offset = 0,
             .size = ubjectUBOalignedUboSize } });
 
-    std::unique_ptr<renderer::RenderGraph> renderGraph;
+    auto renderGraph =
+        std::make_unique<renderer::RenderGraph>(device, allocator);
     renderer::TextureHandle swapHandle = UINT32_MAX;
     renderer::TextureHandle offscreenHandle = UINT32_MAX;
     renderer::TextureHandle depthHandle = UINT32_MAX;
     std::uint32_t imageIndex {};
 
-    VkSampler offscreen_sampler {};
-    {
-        VkSamplerCreateInfo sci { .sType =
-                                      VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-        sci.magFilter = VK_FILTER_LINEAR;
-        sci.minFilter = VK_FILTER_LINEAR;
-        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    VkSampler offscreen_sampler = vulkan::create_sampler(
+        device, { .mag_filter = VK_FILTER_LINEAR,
+                  .min_filter = VK_FILTER_LINEAR,
+                  .mipmap_mode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+                  .address_mode_u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .address_mode_v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .address_mode_w = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                  .min_lod = 0.0F,
+                  .max_lod = 0.0F });
+    if (offscreen_sampler == VK_NULL_HANDLE) {
+        LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
+    }
 
-        if (vkCreateSampler(device, &sci, nullptr, &offscreen_sampler) !=
-            VK_SUCCESS) {
-            LUMEN_APP_LOG_ERROR("Failed to create offscreen sampler");
-        }
+    swapHandle = renderGraph->importSwapchain(
+        { .width = static_cast<std::uint32_t>(width),
+          .height = static_cast<std::uint32_t>(height),
+          .format = context->swapchain_format() },
+        context->swapchain_images(), context->swapchain_image_views());
+    offscreenHandle = renderGraph->createTexture(
+        { .width = static_cast<std::uint32_t>(width),
+          .height = static_cast<std::uint32_t>(height) });
+    depthHandle = renderGraph->createDepth(
+        { .width = static_cast<std::uint32_t>(width),
+          .height = static_cast<std::uint32_t>(height),
+          .format = depthFormat,
+          .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
+    renderGraph->add_pass(
+        "ShaderToy",
+        { .writes = { offscreenHandle },
+          .extent = { static_cast<std::uint32_t>(width),
+                      static_cast<std::uint32_t>(height) } },
+        [&](VkCommandBuffer cmd) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              pass1_pipeline);
+            VkViewport pass1_viewport {};
+            pass1_viewport.x = 0.0F;
+            pass1_viewport.y = 0.0F;
+            pass1_viewport.width = static_cast<float>(width);
+            pass1_viewport.height = static_cast<float>(height);
+            pass1_viewport.minDepth = 0.0F;
+            pass1_viewport.maxDepth = 1.0F;
+            vkCmdSetViewport(cmd, 0, 1, &pass1_viewport);
+            VkRect2D pass1_scissor {};
+            pass1_scissor.offset = { .x = 0, .y = 0 };
+            pass1_scissor.extent = { .width = static_cast<std::uint32_t>(width),
+                                     .height =
+                                         static_cast<std::uint32_t>(height) };
+            vkCmdSetScissor(cmd, 0, 1, &pass1_scissor);
+            const std::vector<uint32_t> dynamicOffsets {
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(currentFrame) *
+                                      frameUBOalignedUboSize),
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(currentFrame) *
+                                      ubjectUBOalignedUboSize),
+            };
+            pass1Material->bind_descriptor_sets(cmd, 0, pass1DescriptorSets,
+                                                dynamicOffsets);
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+        });
+
+    renderGraph->add_pass(
+        "CubeToScreen",
+        { .reads = { offscreenHandle },
+          .writes = { swapHandle },
+          .depth = depthHandle,
+          .extent = { static_cast<std::uint32_t>(width),
+                      static_cast<std::uint32_t>(height) },
+          .clearColor = { { 1, 1, 1, 1 } } },
+        [&](VkCommandBuffer cmd) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              graphicsPipeline);
+            VkViewport vp { .x = 0,
+                            .y = 0,
+                            .width = static_cast<float>(window.width()),
+                            .height = static_cast<float>(window.height()),
+                            .minDepth = 0,
+                            .maxDepth = 1 };
+            VkRect2D scissor { .offset = { .x = 0, .y = 0 },
+                               .extent = { .width = window.width(),
+                                           .height = window.height() } };
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+            const std::vector<uint32_t> dynamicOffsets {
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(currentFrame) *
+                                      frameUBOalignedUboSize),
+                static_cast<uint32_t>(static_cast<VkDeviceSize>(currentFrame) *
+                                      ubjectUBOalignedUboSize),
+            };
+            material->bind_descriptor_sets(cmd, 0, descriptorSets,
+                                           dynamicOffsets);
+            cube.bind(cmd);
+            cube.draw(cmd);
+        });
+    renderGraph->compile();
+
+    material->update_combined(
+        2, 1, renderGraph->getTexture(offscreenHandle).view, offscreen_sampler,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    {
+        vulkan::PipelineBuilder pass1_builder;
+        pass1_builder.device = device;
+        pass1_builder.vertShader = pass1_vert_shader;
+        pass1_builder.fragShader = pass1_frag_shader;
+        pass1_builder.renderPass = renderGraph->render_pass_named("ShaderToy");
+        pass1_builder.subpass = renderGraph->subpass_index_for("ShaderToy");
+        pass1_builder.layout = pass1_pipeline_layout;
+        pass1_builder.vertexInputState = &pass1_vertex_input;
+        pass1_builder.depthTest = false;
+        pass1_builder.depthWrite = false;
+        pass1_pipeline = pass1_builder.build();
+    }
+    {
+        vulkan::PipelineBuilder builder;
+        builder.device = device;
+        builder.vertShader = vertexShader;
+        builder.fragShader = fragmentShader;
+        builder.renderPass = renderGraph->render_pass_named("CubeToScreen");
+        builder.subpass = renderGraph->subpass_index_for("CubeToScreen");
+        builder.layout = pipelineLayout;
+        builder.vertexInputState = &vertexInputStateCreateInfo;
+        graphicsPipeline = builder.build();
     }
 
     auto rebuild_swapchain_dependent = [&]() -> bool {
+        vkQueueWaitIdle(context->graphics_queue());
+        vkQueueWaitIdle(context->present_queue());
+        vkDeviceWaitIdle(device);
         int w = 0;
         int h = 0;
         window.get_framebuffer_size(&w, &h);
@@ -457,138 +541,22 @@ int main() {
                               &presentSemaphores[i]);
         }
 
-        if (pass1_pipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device, pass1_pipeline, nullptr);
-            pass1_pipeline = VK_NULL_HANDLE;
-        }
-        if (graphicsPipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device, graphicsPipeline, nullptr);
-            graphicsPipeline = VK_NULL_HANDLE;
-        }
-
-        renderGraph =
-            std::make_unique<renderer::RenderGraph>(device, allocator);
-        swapHandle = renderGraph->importSwapchain(
+        renderGraph->resize_swapchain(
+            swapHandle,
             { .width = static_cast<std::uint32_t>(width),
               .height = static_cast<std::uint32_t>(height),
               .format = context->swapchain_format() },
-            context->swapchain_images()[0],
-            context->swapchain_image_views()[0]);
-        offscreenHandle = renderGraph->createTexture(
-            { .width = static_cast<std::uint32_t>(width),
-              .height = static_cast<std::uint32_t>(height) });
-        depthHandle = renderGraph->createDepth(
-            { .width = static_cast<std::uint32_t>(width),
-              .height = static_cast<std::uint32_t>(height),
-              .format = depthFormat,
-              .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
-        renderGraph->set_swapchain_image_views(
-            context->swapchain_image_views());
-
-        renderGraph->add_pass(
-            "ShaderToy",
-            { .writes = { offscreenHandle },
-              .extent = { static_cast<std::uint32_t>(width),
-                          static_cast<std::uint32_t>(height) } },
-            [&](VkCommandBuffer cmd) {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  pass1_pipeline);
-                VkViewport pass1_viewport {};
-                pass1_viewport.x = 0.0F;
-                pass1_viewport.y = 0.0F;
-                pass1_viewport.width = static_cast<float>(width);
-                pass1_viewport.height = static_cast<float>(height);
-                pass1_viewport.minDepth = 0.0F;
-                pass1_viewport.maxDepth = 1.0F;
-                vkCmdSetViewport(cmd, 0, 1, &pass1_viewport);
-                VkRect2D pass1_scissor {};
-                pass1_scissor.offset = { .x = 0, .y = 0 };
-                pass1_scissor.extent = {
-                    .width = static_cast<std::uint32_t>(width),
-                    .height = static_cast<std::uint32_t>(height)
-                };
-                vkCmdSetScissor(cmd, 0, 1, &pass1_scissor);
-                const std::vector<uint32_t> dynamicOffsets {
-                    static_cast<uint32_t>(
-                        static_cast<VkDeviceSize>(currentFrame) *
-                        frameUBOalignedUboSize),
-                    static_cast<uint32_t>(
-                        static_cast<VkDeviceSize>(currentFrame) *
-                        ubjectUBOalignedUboSize),
-                };
-                pass1Material->bind_descriptor_sets(cmd, 0, pass1DescriptorSets,
-                                                    dynamicOffsets);
-                vkCmdDraw(cmd, 3, 1, 0, 0);
-            });
-
-        renderGraph->add_pass(
-            "CubeToScreen",
-            { .reads = { offscreenHandle },
-              .writes = { swapHandle },
-              .depth = depthHandle,
-              .extent = { static_cast<std::uint32_t>(width),
-                          static_cast<std::uint32_t>(height) },
-              .clearColor = { { 1, 1, 1, 1 } } },
-            [&](VkCommandBuffer cmd) {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  graphicsPipeline);
-                VkViewport vp { .x = 0,
-                                .y = 0,
-                                .width = static_cast<float>(window.width()),
-                                .height = static_cast<float>(window.height()),
-                                .minDepth = 0,
-                                .maxDepth = 1 };
-                VkRect2D scissor { .offset = { .x = 0, .y = 0 },
-                                   .extent = { .width = window.width(),
-                                               .height = window.height() } };
-                vkCmdSetViewport(cmd, 0, 1, &vp);
-                vkCmdSetScissor(cmd, 0, 1, &scissor);
-                const std::vector<uint32_t> dynamicOffsets {
-                    static_cast<uint32_t>(
-                        static_cast<VkDeviceSize>(currentFrame) *
-                        frameUBOalignedUboSize),
-                    static_cast<uint32_t>(
-                        static_cast<VkDeviceSize>(currentFrame) *
-                        ubjectUBOalignedUboSize),
-                };
-                material->bind_descriptor_sets(cmd, 0, descriptorSets,
-                                               dynamicOffsets);
-                cube.bind(cmd);
-                cube.draw(cmd);
-            });
-        renderGraph->compile();
-
+            context->swapchain_images(), context->swapchain_image_views());
+        renderGraph->resize_renderpass(offscreenHandle,
+                                       static_cast<std::uint32_t>(width),
+                                       static_cast<std::uint32_t>(height));
+        renderGraph->resize_renderpass(depthHandle,
+                                       static_cast<std::uint32_t>(width),
+                                       static_cast<std::uint32_t>(height));
         material->update_combined(
             2, 1, renderGraph->getTexture(offscreenHandle).view,
             offscreen_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        {
-            vulkan::PipelineBuilder pass1_builder;
-            pass1_builder.device = device;
-            pass1_builder.vertShader = pass1_vert_shader;
-            pass1_builder.fragShader = pass1_frag_shader;
-            pass1_builder.renderPass =
-                renderGraph->render_pass_named("ShaderToy");
-            pass1_builder.subpass = renderGraph->subpass_index_for("ShaderToy");
-            pass1_builder.layout = pass1_pipeline_layout;
-            pass1_builder.vertexInputState = &pass1_vertex_input;
-            pass1_builder.depthTest = false;
-            pass1_builder.depthWrite = false;
-            pass1_pipeline = pass1_builder.build();
-        }
-        {
-            vulkan::PipelineBuilder builder;
-            builder.device = device;
-            builder.vertShader = vertexShader;
-            builder.fragShader = fragmentShader;
-            builder.renderPass = renderGraph->render_pass_named("CubeToScreen");
-            builder.subpass = renderGraph->subpass_index_for("CubeToScreen");
-            builder.layout = pipelineLayout;
-            builder.vertexInputState = &vertexInputStateCreateInfo;
-            graphicsPipeline = builder.build();
-        }
-        return pass1_pipeline != VK_NULL_HANDLE &&
-               graphicsPipeline != VK_NULL_HANDLE;
+        return true;
     };
 
     if (!rebuild_swapchain_dependent()) {
@@ -701,10 +669,6 @@ int main() {
         }
 
         {
-            renderGraph->updateSwapchainImage(
-                swapHandle, context->swapchain_images()[imageIndex],
-                context->swapchain_image_views()[imageIndex]);
-
             vkResetCommandBuffer(commandBuffers[imageIndex], 0);
 
             VkCommandBufferBeginInfo beginInfo {

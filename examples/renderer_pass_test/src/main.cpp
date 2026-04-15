@@ -391,7 +391,7 @@ int main() {
         { .width = static_cast<std::uint32_t>(width),
           .height = static_cast<std::uint32_t>(height),
           .format = context->swapchain_format() },
-        context->swapchain_images()[0], context->swapchain_image_views()[0]);
+        context->swapchain_images(), context->swapchain_image_views());
 
     auto offscreenHandle = renderGraph.createTexture(
         { .width = static_cast<std::uint32_t>(width),
@@ -402,8 +402,6 @@ int main() {
           .height = static_cast<std::uint32_t>(height),
           .format = depthFormat,
           .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT });
-
-    renderGraph.set_swapchain_image_views(context->swapchain_image_views());
 
     std::uint32_t imageIndex {};
 
@@ -621,10 +619,6 @@ int main() {
         }
 
         {
-            renderGraph.updateSwapchainImage(
-                swapHandle, context->swapchain_images()[imageIndex],
-                context->swapchain_image_views()[imageIndex]);
-
             vkResetCommandBuffer(commandBuffers[imageIndex], 0);
 
             VkCommandBufferBeginInfo beginInfo {

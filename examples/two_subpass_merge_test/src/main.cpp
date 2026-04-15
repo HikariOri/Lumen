@@ -296,10 +296,7 @@ int main() {
             { .width = exec.width,
               .height = exec.height,
               .format = context->swapchain_format() },
-            context->swapchain_images()[0],
-            context->swapchain_image_views()[0]);
-        renderGraph->set_swapchain_image_views(
-            context->swapchain_image_views());
+            context->swapchain_images(), context->swapchain_image_views());
 
         renderGraph->add_pass(
             kPass1Name,
@@ -450,10 +447,6 @@ int main() {
                 continue;
             }
         }
-
-        renderGraph->updateSwapchainImage(
-            swapHandle, context->swapchain_images()[imageIndex],
-            context->swapchain_image_views()[imageIndex]);
 
         vkResetCommandBuffer(commandBuffers[imageIndex], 0);
         VkCommandBufferBeginInfo bi {

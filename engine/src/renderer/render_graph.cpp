@@ -79,10 +79,6 @@ RenderGraph::~RenderGraph() {
     }
 }
 
-void RenderGraph::set_swapchain_image_views(std::vector<VkImageView> views) {
-    swapchain_image_views_ = std::move(views);
-}
-
 void RenderGraph::set_subpass_merging(bool enable) {
     subpass_merging_enabled_ = enable;
 }
@@ -95,13 +91,20 @@ TextureHandle RenderGraph::createTexture(const TextureDesc &desc) {
     return static_cast<TextureHandle>(textures.size() - 1);
 }
 
-TextureHandle RenderGraph::importSwapchain(const TextureDesc &desc, VkImage img,
-                                           VkImageView view) {
+TextureHandle RenderGraph::importSwapchain(const TextureDesc &desc,
+                                           std::vector<VkImage> images,
+                                           std::vector<VkImageView> views) {
     TextureResource r;
     r.desc = desc;
     r.type = TextureType::Swapchain;
-    r.image = img;
-    r.view = view;
+    swapchain_images_ = std::move(images);
+    swapchain_views_ = std::move(views);
+    if (!swapchain_images_.empty()) {
+        r.image = swapchain_images_[0];
+    }
+    if (!swapchain_views_.empty()) {
+        r.view = swapchain_views_[0];
+    }
     textures.push_back(r);
     return static_cast<TextureHandle>(textures.size() - 1);
 }
@@ -170,14 +173,72 @@ TextureResource &RenderGraph::getTexture(TextureHandle h) {
     return textures[h];
 }
 
-void RenderGraph::updateSwapchainImage(TextureHandle handle, VkImage newImage,
-                                       VkImageView newView) {
+void RenderGraph::resize_swapchain(TextureHandle handle,
+                                   const TextureDesc &desc,
+                                   std::vector<VkImage> images,
+                                   std::vector<VkImageView> views) {
+    if (handle >= textures.size()) {
+        return;
+    }
     auto &t = textures[handle];
-    t.image = newImage;
-    t.view = newView;
+    if (t.type != TextureType::Swapchain) {
+        return;
+    }
+
+    swapchain_images_ = std::move(images);
+    swapchain_views_ = std::move(views);
+    if (!swapchain_images_.empty()) {
+        t.image = swapchain_images_[0];
+    }
+    if (!swapchain_views_.empty()) {
+        t.view = swapchain_views_[0];
+    }
+    t.desc = desc;
     t.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     t.lastStage = 0;
     t.lastAccess = 0;
+    if (!swapchain_views_.empty()) {
+        const std::uint32_t count =
+            static_cast<std::uint32_t>(swapchain_views_.size());
+        for (auto &batch : compiled_batches_) {
+            if (!batch.framebuffers.empty() &&
+                batch.framebuffers.size() == count) {
+                // noop, rebuild below
+            }
+        }
+    }
+    rebuild_framebuffers_referencing(handle);
+}
+
+void RenderGraph::resize_renderpass(TextureHandle handle, std::uint32_t width,
+                                    std::uint32_t height) {
+    if (handle >= textures.size()) {
+        return;
+    }
+    auto &t = textures[handle];
+    if (t.type == TextureType::Swapchain) {
+        return;
+    }
+    if (width == 0 || height == 0) {
+        return;
+    }
+
+    t.desc.width = width;
+    t.desc.height = height;
+    if (t.image != VK_NULL_HANDLE && t.allocation != nullptr) {
+        if (t.view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, t.view, nullptr);
+            t.view = VK_NULL_HANDLE;
+        }
+        vmaDestroyImage(allocator, t.image, t.allocation);
+        t.image = VK_NULL_HANDLE;
+        t.allocation = nullptr;
+    }
+    create_all_resources();
+    t.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    t.lastStage = 0;
+    t.lastAccess = 0;
+    rebuild_framebuffers_referencing(handle);
 }
 
 void RenderGraph::resetLayouts() {
@@ -267,6 +328,86 @@ void RenderGraph::destroy_compiled() {
         }
     }
     compiled_batches_.clear();
+}
+
+void RenderGraph::rebuild_batch_framebuffers(std::size_t batch_index) {
+    auto &batch = compiled_batches_[batch_index];
+    for (VkFramebuffer fb : batch.framebuffers) {
+        if (fb != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, fb, nullptr);
+        }
+    }
+    batch.framebuffers.clear();
+    if (batch.render_pass == VK_NULL_HANDLE || batch.attachment_handles.empty()) {
+        return;
+    }
+
+    std::uint32_t rebuiltWidth = UINT32_MAX;
+    std::uint32_t rebuiltHeight = UINT32_MAX;
+    for (const TextureHandle h : batch.attachment_handles) {
+        if (h >= textures.size()) {
+            continue;
+        }
+        const auto &t = textures[h];
+        rebuiltWidth = std::min(rebuiltWidth, t.desc.width);
+        rebuiltHeight = std::min(rebuiltHeight, t.desc.height);
+    }
+    if (rebuiltWidth != UINT32_MAX && rebuiltHeight != UINT32_MAX) {
+        batch.extent.width = rebuiltWidth;
+        batch.extent.height = rebuiltHeight;
+    }
+
+    bool uses_swapchain = false;
+    for (const TextureHandle h : batch.attachment_handles) {
+        if (h < textures.size() && textures[h].type == TextureType::Swapchain) {
+            uses_swapchain = true;
+            break;
+        }
+    }
+    const uint32_t fbCount =
+        uses_swapchain
+            ? static_cast<uint32_t>(std::max(std::size_t { 1 }, swapchain_views_.size()))
+            : 1u;
+    batch.framebuffers.assign(fbCount, VK_NULL_HANDLE);
+    for (uint32_t fi = 0; fi < fbCount; ++fi) {
+        std::vector<VkImageView> views;
+        views.reserve(batch.attachment_handles.size());
+        for (const TextureHandle h : batch.attachment_handles) {
+            if (h >= textures.size()) {
+                continue;
+            }
+            const auto &tex = textures[h];
+            if (tex.type == TextureType::Swapchain) {
+                if (fi < swapchain_views_.size()) {
+                    views.push_back(swapchain_views_[fi]);
+                } else {
+                    views.push_back(tex.view);
+                }
+            } else {
+                views.push_back(tex.view);
+            }
+        }
+        VkFramebufferCreateInfo fbci {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = batch.render_pass,
+            .attachmentCount = static_cast<uint32_t>(views.size()),
+            .pAttachments = views.data(),
+            .width = batch.extent.width,
+            .height = batch.extent.height,
+            .layers = 1
+        };
+        vkCreateFramebuffer(device, &fbci, nullptr, &batch.framebuffers[fi]);
+    }
+}
+
+void RenderGraph::rebuild_framebuffers_referencing(TextureHandle handle) {
+    for (std::size_t i = 0; i < compiled_batches_.size(); ++i) {
+        const auto &attachments = compiled_batches_[i].attachment_handles;
+        if (std::find(attachments.begin(), attachments.end(), handle) !=
+            attachments.end()) {
+            rebuild_batch_framebuffers(i);
+        }
+    }
 }
 
 void RenderGraph::build_batch_single_subpass(CompiledBatch &batch,
@@ -369,6 +510,10 @@ void RenderGraph::build_batch_single_subpass(CompiledBatch &batch,
         batch.clear_values.push_back(cv);
         batch.clear_value_handles.push_back(up.depth);
     }
+    batch.attachment_handles = up.colors;
+    if (batch.has_depth) {
+        batch.attachment_handles.push_back(up.depth);
+    }
 
     bool uses_swapchain = false;
     for (auto h : up.colors) {
@@ -378,11 +523,18 @@ void RenderGraph::build_batch_single_subpass(CompiledBatch &batch,
             break;
         }
     }
-    const uint32_t fb_count =
-        uses_swapchain
-            ? static_cast<uint32_t>(
-                  std::max(swapchain_image_views_.size(), std::size_t{1}))
-            : 1u;
+    uint32_t fb_count = 1u;
+    if (uses_swapchain) {
+        for (auto h : up.colors) {
+            if (h < textures.size() &&
+                textures[h].type == TextureType::Swapchain) {
+                fb_count = std::max(
+                    fb_count,
+                    static_cast<uint32_t>(
+                        std::max(std::size_t{1}, swapchain_views_.size())));
+            }
+        }
+    }
 
     batch.framebuffers.assign(fb_count, VK_NULL_HANDLE);
     for (uint32_t fi = 0; fi < fb_count; ++fi) {
@@ -393,8 +545,8 @@ void RenderGraph::build_batch_single_subpass(CompiledBatch &batch,
             }
             auto &tex = textures[h];
             if (tex.type == TextureType::Swapchain) {
-                if (fi < swapchain_image_views_.size()) {
-                    views.push_back(swapchain_image_views_[fi]);
+                if (fi < swapchain_views_.size()) {
+                    views.push_back(swapchain_views_[fi]);
                 } else {
                     views.push_back(tex.view);
                 }
@@ -608,11 +760,17 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
             break;
         }
     }
-    const uint32_t fb_count =
-        uses_swapchain
-            ? static_cast<uint32_t>(
-                  std::max(swapchain_image_views_.size(), std::size_t{1}))
-            : 1u;
+    uint32_t fb_count = 1u;
+    if (uses_swapchain) {
+        for (auto h : attachment_order) {
+            if (textures[h].type == TextureType::Swapchain) {
+                fb_count = std::max(
+                    fb_count,
+                    static_cast<uint32_t>(
+                        std::max(std::size_t{1}, swapchain_views_.size())));
+            }
+        }
+    }
 
     batch.framebuffers.assign(fb_count, VK_NULL_HANDLE);
     for (uint32_t fi = 0; fi < fb_count; ++fi) {
@@ -621,8 +779,8 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
         for (auto h : attachment_order) {
             auto &tex = textures[h];
             if (tex.type == TextureType::Swapchain) {
-                if (fi < swapchain_image_views_.size()) {
-                    views.push_back(swapchain_image_views_[fi]);
+                if (fi < swapchain_views_.size()) {
+                    views.push_back(swapchain_views_[fi]);
                 } else {
                     views.push_back(tex.view);
                 }
@@ -657,6 +815,7 @@ void RenderGraph::build_batch_multi_subpass(CompiledBatch &batch,
             batch.color_final_layouts.push_back(attachment_final_layouts[ai]);
         }
     }
+    batch.attachment_handles = attachment_order;
 }
 
 void RenderGraph::merge_into_batches() {
@@ -875,6 +1034,30 @@ void RenderGraph::compile() {
 }
 
 void RenderGraph::execute(VkCommandBuffer cmd, uint32_t swapchain_image_index) {
+    // 关键：在每帧执行前，把 Swapchain 纹理句柄对齐到当前 acquire 的 image/view。
+    // 否则 barrier/layout 跟踪可能仍落在旧 image 上，触发验证层布局错配报错。
+    if (!swapchain_images_.empty() && !swapchain_views_.empty()) {
+        const std::size_t idx = std::min<std::size_t>(
+            swapchain_image_index, swapchain_images_.size() - 1);
+        const VkImage currentSwapImage = swapchain_images_[idx];
+        const VkImageView currentSwapView = swapchain_views_[std::min<std::size_t>(
+            idx, swapchain_views_.size() - 1)];
+
+        for (auto &tex : textures) {
+            if (tex.type != TextureType::Swapchain) {
+                continue;
+            }
+            if (tex.image != currentSwapImage) {
+                // 不同 swapchain image 间布局状态互不共享；切图时重置跟踪状态。
+                tex.currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                tex.lastStage = 0;
+                tex.lastAccess = 0;
+            }
+            tex.image = currentSwapImage;
+            tex.view = currentSwapView;
+        }
+    }
+
     for (std::size_t bi = 0; bi < compiled_batches_.size(); ++bi) {
         auto &b = compiled_batches_[bi];
         rebuild_barriers_for_batch(bi);

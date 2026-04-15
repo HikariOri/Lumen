@@ -62,11 +62,10 @@ public:
     ~RenderGraph();
 
     TextureHandle createTexture(const TextureDesc &desc);
-    TextureHandle importSwapchain(const TextureDesc &desc, VkImage img,
-                                  VkImageView view);
+    TextureHandle importSwapchain(const TextureDesc &desc,
+                                  std::vector<VkImage> images,
+                                  std::vector<VkImageView> views);
     TextureHandle createDepth(const TextureDesc &desc);
-
-    void set_swapchain_image_views(std::vector<VkImageView> views);
 
     /// 声明式添加逻辑 Pass（可合并为 Subpass）。
     void add_pass(const std::string &name, const PassInfo &info,
@@ -83,8 +82,11 @@ public:
 
     TextureResource &getTexture(TextureHandle h);
 
-    void updateSwapchainImage(TextureHandle handle, VkImage newImage,
-                              VkImageView newView);
+    void resize_swapchain(TextureHandle handle, const TextureDesc &desc,
+                          std::vector<VkImage> images,
+                          std::vector<VkImageView> views);
+    void resize_renderpass(TextureHandle handle, std::uint32_t width,
+                           std::uint32_t height);
     void resetLayouts();
 
     VkRenderPass render_pass_named(const std::string &name) const;
@@ -128,6 +130,7 @@ private:
         bool has_depth = false;
         VkImageLayout depth_final_layout = VK_IMAGE_LAYOUT_UNDEFINED;
         std::vector<TextureHandle> depth_handles;
+        std::vector<TextureHandle> attachment_handles;
     };
 
     bool texture_read_later(TextureHandle h,
@@ -145,14 +148,17 @@ private:
                                       std::size_t user_pass_index);
     void rebuild_barriers_for_batch(std::size_t batch_index);
     void sync_batch_output_layouts(std::size_t batch_index);
+    void rebuild_batch_framebuffers(std::size_t batch_index);
+    void rebuild_framebuffers_referencing(TextureHandle handle);
     void destroy_compiled();
     VkExtent2D extent_for_user_pass(const UserPass &up) const;
 
     VkDevice device;
     VmaAllocator allocator;
     bool subpass_merging_enabled_ = false;
+    std::vector<VkImage> swapchain_images_;
+    std::vector<VkImageView> swapchain_views_;
 
-    std::vector<VkImageView> swapchain_image_views_;
     std::vector<TextureResource> textures;
     std::vector<UserPass> user_passes_;
 

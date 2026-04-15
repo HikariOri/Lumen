@@ -21,10 +21,11 @@ namespace vulkan {
 
 /**
  * @brief 管理 `VkInstance`、`VkDevice`、交换链与
- * `VmaAllocator`（表面在实例创建后由回调创建）；含 graphics / present / compute 队列。
+ * `VmaAllocator`（表面在实例创建后由回调创建）；含 graphics / present / compute
+ * 队列。
  *
- * @note 通过 `create()` 或 `ContextBuilder::build()` 取得 `std::unique_ptr<Context>`；移动 /
- * 复制已禁用。
+ * @note 通过 `create()` 或 `ContextBuilder::build()` 取得
+ * `std::unique_ptr<Context>`；移动 / 复制已禁用。
  * @note 实例扩展（含平台 surface）须由调用方传入，例如 SDL 的
  * `SDL_Vulkan_GetInstanceExtensions`。
  * @note `surfaceFromInstance` 在 `vkCreateInstance` 成功之后调用；返回的
@@ -108,8 +109,8 @@ public:
     swapchain_image_views() const noexcept {
         return swapchainImageViews_;
     }
-    /// 与 `swapchain_image_views()` 一一对应；供 `RenderGraph` 等在每帧 `acquire`
-    /// 后做 layout 屏障或调试。
+    /// 与 `swapchain_image_views()` 一一对应；供 `RenderGraph` 等在每帧
+    /// `acquire` 后做 layout 屏障或调试。
     [[nodiscard]] const std::vector<VkImage> &
     swapchain_images() const noexcept {
         return swapchainImages_;
@@ -142,7 +143,8 @@ private:
     [[nodiscard]] static std::optional<std::uint32_t>
     find_present_queue_family(VkPhysicalDevice physicalDevice,
                               VkSurfaceKHR surface);
-    /// 优先与 @p graphicsFamily 相同且带 `VK_QUEUE_COMPUTE_BIT`，否则任选一计算族。
+    /// 优先与 @p graphicsFamily 相同且带
+    /// `VK_QUEUE_COMPUTE_BIT`，否则任选一计算族。
     [[nodiscard]] static std::optional<std::uint32_t>
     find_compute_queue_family(VkPhysicalDevice physicalDevice,
                               std::uint32_t graphicsFamily);
@@ -182,8 +184,8 @@ private:
 };
 
 /**
- * @brief 流式配置并创建 `Context`；扩展名在内部以 `std::string` 持有，调用 `build()`
- * 前无需保持外部指针有效。
+ * @brief 流式配置并创建 `Context`；扩展名在内部以 `std::string` 持有，调用
+ * `build()` 前无需保持外部指针有效。
  */
 class ContextBuilder final {
 public:
@@ -223,7 +225,8 @@ public:
         return *this;
     }
 
-    ContextBuilder &set_initial_size(std::uint32_t width, std::uint32_t height) {
+    ContextBuilder &set_initial_size(std::uint32_t width,
+                                     std::uint32_t height) {
         initialWidth_ = width;
         initialHeight_ = height;
         return *this;
@@ -244,12 +247,12 @@ public:
 
     [[nodiscard]] std::expected<std::unique_ptr<Context>, std::string> build() {
         if (!surfaceFromInstance_.has_value()) {
-            return std::unexpected(
-                std::string("ContextBuilder: set_surface_from_instance not called"));
+            return std::unexpected(std::string(
+                "ContextBuilder: set_surface_from_instance not called"));
         }
         if (initialWidth_ == 0U || initialHeight_ == 0U) {
-            return std::unexpected(
-                std::string("ContextBuilder: initial width/height must be non-zero"));
+            return std::unexpected(std::string(
+                "ContextBuilder: initial width/height must be non-zero"));
         }
         std::vector<const char *> extPtrs;
         extPtrs.reserve(extensionNames_.size());
