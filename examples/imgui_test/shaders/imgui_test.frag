@@ -10,13 +10,13 @@ layout(set = 0, binding = 0) uniform FrameUBO {
     mat4 viewProj;
 
     vec3 cameraPos;
+    float time;
+
+    vec2 sceenSize;
 
     vec4 exposureIblMips;
 
     int debugMode;
-    int _framePad0;
-    int _framePad1;
-    int _framePad2;
 } frame;
 
 layout(set = 2, binding = 0) uniform MaterialUBO {

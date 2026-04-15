@@ -34,7 +34,7 @@ vec3 palette( float t ) {
 
 //https://www.shadertoy.com/view/mtyGWy
 void mainImage( out vec4 fragColor, in vec2 fragCoord ) {
-    vec2 uv = (fragCoord * 2.0 - frameUBO.sceenSize.xy) / frameUBO.sceenSize.y;
+    vec2 uv = (fragCoord * 2.0 - vec2(1024.0, 1024.0)) / 1024.0;
     vec2 uv0 = uv;
     vec3 finalColor = vec3(0.0);
     
